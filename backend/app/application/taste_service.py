@@ -12,7 +12,6 @@ from app.infrastructure.db.models.interaction import InteractionEvent, UserTitle
 from app.infrastructure.db.models.taste import TasteProfile
 from app.recommendation.embeddings import blend_vectors
 
-
 # Signal weights for taste learning
 SIGNAL_WEIGHTS = {
     "like": 1.0,

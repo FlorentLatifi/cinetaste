@@ -138,7 +138,7 @@ def mmr_select(
     while remaining and len(selected) < k:
         best_idx = 0
         best_score = float("-inf")
-        for i, (tid, rel, vec) in enumerate(remaining):
+        for i, (_tid, rel, vec) in enumerate(remaining):
             if not selected:
                 mmr = rel
             else:

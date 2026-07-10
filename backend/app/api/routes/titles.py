@@ -7,9 +7,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import CurrentUser, get_settings_dep
 from app.api.schemas.titles import (
     InteractionRequest,
+    ReasonOut,
     RecommendationItemOut,
     RecommendationSlateOut,
-    ReasonOut,
     TitleSummaryOut,
 )
 from app.application.recommendation_service import RecommendationService

@@ -31,6 +31,8 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+    # Local dev: root + bind mount + reload (prod image still non-root via entrypoint)
+    user: "0:0"
     env_file:
       - .env
     environment:

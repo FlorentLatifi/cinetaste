@@ -60,8 +60,10 @@ movie-rec-platform/
 - [x] Swipe onboarding + taste profile builder
 - [x] Recommendation pipeline (score + MMR diversity + explanations)
 - [x] For You feed, watchlist, interactions
-- [ ] CI/CD + hosted deploy (Railway/Render + Vercel)
-- [ ] Auth cookie hardening, rate limits, monitoring
+- [x] CI (GitHub Actions) + rate limits + security headers
+- [x] Deploy blueprints (Render + Vercel) — see `docs/DEPLOY.md`
+- [ ] Live hosted deploy (you click connect on Render/Vercel)
+- [ ] httpOnly cookie auth + Sentry/monitoring polish
 
 ---
 
