@@ -62,9 +62,15 @@ class Settings(BaseSettings):
         if not isinstance(value, str):
             return value
         if value.startswith("postgres://"):
-            return value.replace("postgres://", "postgresql+asyncpg://", 1)
-        if value.startswith("postgresql://"):
-            return value.replace("postgresql://", "postgresql+asyncpg://", 1)
+            value = value.replace("postgres://", "postgresql+asyncpg://", 1)
+        elif value.startswith("postgresql://"):
+            value = value.replace("postgresql://", "postgresql+asyncpg://", 1)
+
+        # Managed Postgres (Render/Railway) usually requires TLS.
+        local = any(h in value for h in ("localhost", "127.0.0.1", "@db:", "@db/"))
+        if not local and "ssl=" not in value and "sslmode=" not in value:
+            sep = "&" if "?" in value else "?"
+            value = f"{value}{sep}ssl=require"
         return value
 
     @property

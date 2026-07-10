@@ -16,8 +16,10 @@ services:
         value: "false"
       - key: API_PREFIX
         value: /api/v1
+      # Set this BEFORE first deploy to your real Vercel URL (required in production).
+      # Temporary placeholder is OK; update after Vercel is live, then redeploy.
       - key: CORS_ORIGINS
-        sync: false
+        value: https://cinetaste.vercel.app
       - key: JWT_SECRET
         generateValue: true
       - key: DATABASE_URL
@@ -34,7 +36,9 @@ services:
       - key: RATE_LIMIT_ENABLED
         value: "true"
       - key: WEB_CONCURRENCY
-        value: "2"
+        value: "1"
+      - key: APP_NAME
+        value: CineTaste
 
   - type: redis
     name: cinetaste-redis
