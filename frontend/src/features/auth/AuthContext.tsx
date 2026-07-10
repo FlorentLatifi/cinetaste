@@ -20,6 +20,7 @@ type AuthState = {
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, password: string, displayName?: string) => Promise<void>;
   logout: () => Promise<void>;
+  refreshUser: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthState | null>(null);
@@ -43,6 +44,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     persistTokens(tokens.access_token, tokens.refresh_token);
     setAccessToken(tokens.access_token);
     setUser(tokens.user);
+  }, []);
+
+  const refreshUser = useCallback(async () => {
+    const access = localStorage.getItem(ACCESS_KEY);
+    if (!access) return;
+    const me = await authApi.getMe(access);
+    setUser(me);
   }, []);
 
   useEffect(() => {
@@ -120,8 +128,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo(
-    () => ({ user, accessToken, loading, login, register, logout }),
-    [user, accessToken, loading, login, register, logout],
+    () => ({ user, accessToken, loading, login, register, logout, refreshUser }),
+    [user, accessToken, loading, login, register, logout, refreshUser],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

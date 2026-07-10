@@ -3,7 +3,9 @@ import { useAuth } from "./features/auth/AuthContext";
 import { AppShell } from "./components/AppShell";
 import { HomePage } from "./pages/HomePage";
 import { LoginPage } from "./pages/LoginPage";
+import { OnboardingPage } from "./pages/OnboardingPage";
 import { RegisterPage } from "./pages/RegisterPage";
+import { WatchlistPage } from "./pages/WatchlistPage";
 
 function Protected({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -48,6 +50,26 @@ export default function App() {
           <GuestOnly>
             <RegisterPage />
           </GuestOnly>
+        }
+      />
+      <Route
+        path="/onboarding"
+        element={
+          <Protected>
+            <AppShell>
+              <OnboardingPage />
+            </AppShell>
+          </Protected>
+        }
+      />
+      <Route
+        path="/watchlist"
+        element={
+          <Protected>
+            <AppShell>
+              <WatchlistPage />
+            </AppShell>
+          </Protected>
         }
       />
       <Route

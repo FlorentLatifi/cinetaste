@@ -49,16 +49,19 @@ movie-rec-platform/
 
 ## Current status
 
-**Phase 1 — Scaffold (in progress → runnable)**
+**Phase 2 — Core product loop (local MVP)**
 
 - [x] Constitution, product, architecture docs
 - [x] Docker Compose: API, Postgres+pgvector, Redis
 - [x] Alembic initial schema (users, catalog, signals, taste vectors)
 - [x] Auth: register / login / refresh / logout + `/me`
 - [x] Frontend: auth shell, protected home, design system baseline
-- [ ] TMDb catalog ingest
-- [ ] Swipe onboarding + taste builder
-- [ ] Recommendation pipeline + “For you” feed
+- [x] Catalog ingest (TMDb) + offline demo seed
+- [x] Swipe onboarding + taste profile builder
+- [x] Recommendation pipeline (score + MMR diversity + explanations)
+- [x] For You feed, watchlist, interactions
+- [ ] CI/CD + hosted deploy (Railway/Render + Vercel)
+- [ ] Auth cookie hardening, rate limits, monitoring
 
 ---
 
@@ -91,7 +94,25 @@ docker compose up --build
 
 Migrations run automatically on API container start.
 
-### 3. Start frontend
+### 3. Seed catalog
+
+**Option A — demo data (no API key):**
+
+```powershell
+docker compose exec api python -m app.scripts.seed_demo_catalog
+```
+
+**Option B — real TMDb data:**
+
+1. Get a free key: https://www.themoviedb.org/settings/api  
+2. Set `TMDB_API_KEY=...` in `.env`  
+3. Restart API, then:
+
+```powershell
+docker compose exec api python -m app.scripts.ingest_catalog --pages 3
+```
+
+### 4. Start frontend
 
 ```powershell
 cd frontend
@@ -100,6 +121,8 @@ npm run dev
 ```
 
 App: http://localhost:5173 (proxies `/api` → backend)
+
+Flow: **Register → Onboarding swipe → For You (with reasons) → Like / Save / Pass**
 
 ### 4. Backend unit tests (local venv)
 
