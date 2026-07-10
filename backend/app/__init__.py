@@ -1,0 +1,1 @@
+"""CineTaste API package."""

@@ -1,0 +1,35 @@
+# Web
+fastapi==0.115.12
+uvicorn[standard]==0.34.2
+python-multipart==0.0.20
+
+# Settings & validation
+pydantic==2.11.3
+pydantic-settings==2.9.1
+email-validator==2.2.0
+
+# Database
+SQLAlchemy[asyncio]==2.0.40
+asyncpg==0.30.0
+alembic==1.15.2
+pgvector==0.4.1
+
+# Cache
+redis==5.2.1
+
+# Security
+passlib[bcrypt]==1.7.4
+bcrypt==4.0.1
+PyJWT==2.10.1
+
+# HTTP client (TMDb later)
+httpx==0.28.1
+
+# Utils
+python-dotenv==1.1.0
+
+# Dev / test
+pytest==8.3.5
+pytest-asyncio==0.26.0
+httpx==0.28.1
+ruff==0.11.6

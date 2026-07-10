@@ -1,27 +1,18 @@
 # Frontend (React + TypeScript + Vite)
 
-SPA for onboarding, For You feed, title detail, watchlist, and search.
+SPA for auth, onboarding (next), For You feed, title detail, watchlist, and search.
 
-## Planned structure
+## Scripts
 
-```
-src/
-  app/           # router, providers
-  pages/         # Auth, Onboarding, Home, Title, Search, Watchlist
-  components/    # UI + domain components
-  features/      # hooks & feature modules
-  api/           # typed API client
+```powershell
+npm install
+npm run dev      # http://localhost:5173
+npm run build
 ```
 
-## Stack
-
-* React 18+
-* TypeScript
-* Vite
-* (TBD) TanStack Query for server state, lightweight CSS approach (prefer simple over heavy UI kits unless UX needs it)
+Vite proxies `/api` → `http://localhost:8000`.
 
 ## Status
 
-Scaffold not created yet.
-
-UX priority: onboarding swipe → first explainable slate with minimal friction.
+* Auth (register / login / session restore / logout): done
+* Onboarding swipe + For You UI: next

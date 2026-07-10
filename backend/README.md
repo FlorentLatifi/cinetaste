@@ -2,34 +2,49 @@
 
 Python API for auth, catalog, taste profiles, and recommendations.
 
-## Planned layout
+## Layout
 
 ```
 app/
-  main.py
-  api/                 # HTTP routers & request/response schemas
-  application/         # use cases
-  domain/              # entities, ports
-  infrastructure/      # SQLAlchemy, Redis, TMDb, security
-  recommendation/      # candidates, scoring, diversification, explanations
+  main.py                 # composition root
+  api/                    # HTTP routers & schemas
+  application/            # use cases (AuthService, …)
+  domain/                 # exceptions / pure domain
+  infrastructure/         # SQLAlchemy models, Redis, session
+  recommendation/         # strategies (next phases)
+alembic/                  # migrations
+tests/
 ```
 
-## Stack
+## Run with Docker (recommended)
 
-* FastAPI + Uvicorn
-* SQLAlchemy 2.x + Alembic
-* PostgreSQL + pgvector
-* Redis
-* Pydantic Settings
+From repo root:
+
+```powershell
+docker compose up --build
+```
+
+## Run locally (API only)
+
+Requires Postgres + Redis from Compose:
+
+```powershell
+docker compose up db redis -d
+.\.venv\Scripts\activate
+pip install -r requirements.txt
+alembic upgrade head
+uvicorn app.main:app --reload --port 8000
+```
+
+Load env from repo-root `.env` (`../.env` is supported by settings).
+
+## Tests
+
+```powershell
+pytest
+```
 
 ## Status
 
-Scaffold not created yet — see `docs/ARCHITECTURE.md` for target design.
-
-Implementation order:
-
-1. Project skeleton + Docker Compose (API, Postgres, Redis)
-2. Auth + users
-3. Catalog models + TMDb ingest CLI
-4. Interactions + taste profile
-5. Recommendation pipeline + `/recommendations/for-you`
+* Auth + health/ready: done
+* Full catalog / taste / rec pipeline: next
