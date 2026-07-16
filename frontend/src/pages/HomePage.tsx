@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { ApiError } from "../api/client";
 import * as titlesApi from "../api/titles";
@@ -10,6 +10,24 @@ type LocationState = {
   ratingsCount?: number;
 } | null;
 
+type FeedAction = "like" | "dislike" | "watchlist" | "not_interested";
+
+type UndoToast = {
+  item: RecommendationItem;
+  action: FeedAction;
+  message: string;
+  index: number;
+};
+
+const ACTION_LABELS: Record<FeedAction, string> = {
+  like: "Liked",
+  dislike: "Passed",
+  watchlist: "Saved to watchlist",
+  not_interested: "Marked not interested",
+};
+
+const UNDO_MS = 8_000;
+
 export function HomePage() {
   const { accessToken, user } = useAuth();
   const location = useLocation();
@@ -19,6 +37,9 @@ export function HomePage() {
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [welcome, setWelcome] = useState<LocationState>(null);
+  const [toast, setToast] = useState<UndoToast | null>(null);
+  const [undoBusy, setUndoBusy] = useState(false);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const needsOnboarding = !user?.onboarding_completed_at;
 
@@ -58,19 +79,72 @@ export function HomePage() {
     };
   }, [accessToken, needsOnboarding]);
 
-  async function act(
-    titleId: string,
-    event: "like" | "dislike" | "watchlist" | "not_interested",
-  ) {
+  useEffect(() => {
+    return () => {
+      if (toastTimer.current) clearTimeout(toastTimer.current);
+    };
+  }, []);
+
+  function dismissToast() {
+    if (toastTimer.current) {
+      clearTimeout(toastTimer.current);
+      toastTimer.current = null;
+    }
+    setToast(null);
+  }
+
+  function showUndoToast(next: UndoToast) {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    setToast(next);
+    toastTimer.current = setTimeout(() => {
+      setToast(null);
+      toastTimer.current = null;
+    }, UNDO_MS);
+  }
+
+  async function act(titleId: string, event: FeedAction) {
     if (!accessToken) return;
+    const index = items.findIndex((i) => i.title.id === titleId);
+    if (index < 0) return;
+    const item = items[index];
+
     setBusyId(titleId);
+    setError(null);
     try {
       await titlesApi.interact(accessToken, titleId, event);
       setItems((prev) => prev.filter((i) => i.title.id !== titleId));
+      showUndoToast({
+        item,
+        action: event,
+        message: `${ACTION_LABELS[event]} · ${item.title.name}`,
+        index,
+      });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Action failed");
     } finally {
       setBusyId(null);
+    }
+  }
+
+  async function undoLast() {
+    if (!accessToken || !toast || undoBusy) return;
+    const { item, index } = toast;
+    setUndoBusy(true);
+    setError(null);
+    try {
+      await titlesApi.interact(accessToken, item.title.id, "clear");
+      setItems((prev) => {
+        if (prev.some((i) => i.title.id === item.title.id)) return prev;
+        const next = [...prev];
+        const at = Math.min(Math.max(index, 0), next.length);
+        next.splice(at, 0, item);
+        return next;
+      });
+      dismissToast();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not undo");
+    } finally {
+      setUndoBusy(false);
     }
   }
 
@@ -238,6 +312,15 @@ export function HomePage() {
                     type="button"
                     className="btn ghost"
                     disabled={busy}
+                    aria-label={`Mark ${name} as not interested`}
+                    onClick={() => void act(item.title.id, "not_interested")}
+                  >
+                    Not interested
+                  </button>
+                  <button
+                    type="button"
+                    className="btn ghost"
+                    disabled={busy}
                     aria-label={`Save ${name} to watchlist`}
                     onClick={() => void act(item.title.id, "watchlist")}
                   >
@@ -258,6 +341,28 @@ export function HomePage() {
           );
         })}
       </ul>
+
+      {toast && (
+        <div className="feed-toast" role="status" aria-live="polite">
+          <p className="feed-toast-msg">{toast.message}</p>
+          <button
+            type="button"
+            className="btn ghost feed-toast-undo"
+            disabled={undoBusy}
+            onClick={() => void undoLast()}
+          >
+            {undoBusy ? "Undoing…" : "Undo"}
+          </button>
+          <button
+            type="button"
+            className="btn ghost feed-toast-dismiss"
+            aria-label="Dismiss notification"
+            onClick={dismissToast}
+          >
+            ✕
+          </button>
+        </div>
+      )}
     </section>
   );
 }

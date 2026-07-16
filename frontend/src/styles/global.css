@@ -1080,6 +1080,48 @@ html[data-contrast="high"] .rec-badge.discovery {
   flex-wrap: wrap;
 }
 
+.feed-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 1.25rem;
+  transform: translateX(-50%);
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  max-width: min(32rem, calc(100% - 2rem));
+  padding: 0.7rem 0.75rem 0.7rem 1rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow);
+}
+
+.feed-toast-msg {
+  margin: 0;
+  font-size: 0.92rem;
+  font-weight: 600;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.feed-toast-undo {
+  font-size: 0.88rem;
+  padding: 0.4rem 0.75rem;
+  color: var(--accent-strong);
+  flex-shrink: 0;
+}
+
+.feed-toast-dismiss {
+  font-size: 0.85rem;
+  padding: 0.35rem 0.55rem;
+  flex-shrink: 0;
+  opacity: 0.8;
+}
+
 /* ——— Premium onboarding ——— */
 
 .ob-stage {

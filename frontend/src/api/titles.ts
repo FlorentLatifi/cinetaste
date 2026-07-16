@@ -153,6 +153,7 @@ export function interact(
     | "dislike"
     | "watchlist"
     | "not_interested"
+    | "clear"
     | "skip"
     | "view"
     | "haven't_seen"

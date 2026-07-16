@@ -6,6 +6,9 @@ from app.application.onboarding_service import (
     ONBOARDING_ACTIONS,
     _LEGACY_ACTION_MAP,
 )
+from datetime import datetime, timedelta, timezone
+from uuid import uuid4
+
 from app.domain.taste_signals import (
     ACTIVE_INTERACTION_EVENT_TYPES,
     EXPLAIN_ANCHOR_EVENT_TYPES,
@@ -20,6 +23,8 @@ from app.domain.taste_signals import (
     ZERO_SIGNAL_EPS,
     affects_taste,
     get_policy,
+    is_superseded_by_clear,
+    last_clear_timestamps,
     policy_table_markdown,
     weight_for,
 )
@@ -48,6 +53,61 @@ def test_not_interested_is_mild_negative() -> None:
     assert p.exclude_from_feed is True
     assert STATE_FROM_EVENT["not_interested"] == "not_interested"
     assert "not_interested" in FEED_EXCLUDE_STATES
+
+
+def test_clear_is_zero_signal_and_active_api() -> None:
+    p = get_policy("clear")
+    assert p.weight == 0.0
+    assert p.updates_taste is False
+    assert not affects_taste("clear")
+    assert p.user_title_state == "none"
+    assert p.exclude_from_feed is False
+    assert "none" not in FEED_EXCLUDE_STATES
+    assert "clear" in ACTIVE_INTERACTION_EVENT_TYPES
+    assert STATE_FROM_EVENT["clear"] == "none"
+
+
+def test_clear_supersedes_prior_events_for_title() -> None:
+    t1, t2 = uuid4(), uuid4()
+    t0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    events = [
+        (t1, "like", t0),
+        (t1, "dislike", t0 + timedelta(minutes=1)),
+        (t2, "like", t0 + timedelta(minutes=2)),
+        (t1, "clear", t0 + timedelta(minutes=3)),
+        (t1, "watchlist", t0 + timedelta(minutes=4)),
+    ]
+    last_clear = last_clear_timestamps(events)
+    assert t1 in last_clear
+    assert t2 not in last_clear
+
+    assert is_superseded_by_clear(
+        title_id=t1, event_type="like", created_at=t0, last_clear=last_clear
+    )
+    assert is_superseded_by_clear(
+        title_id=t1,
+        event_type="dislike",
+        created_at=t0 + timedelta(minutes=1),
+        last_clear=last_clear,
+    )
+    assert is_superseded_by_clear(
+        title_id=t1,
+        event_type="clear",
+        created_at=t0 + timedelta(minutes=3),
+        last_clear=last_clear,
+    )
+    assert not is_superseded_by_clear(
+        title_id=t1,
+        event_type="watchlist",
+        created_at=t0 + timedelta(minutes=4),
+        last_clear=last_clear,
+    )
+    assert not is_superseded_by_clear(
+        title_id=t2,
+        event_type="like",
+        created_at=t0 + timedelta(minutes=2),
+        last_clear=last_clear,
+    )
 
 
 def test_rating_scale_monotonic_and_documented() -> None:

@@ -42,6 +42,7 @@ User action
 | **Watchlist / Save** | `watchlist` | **+0.45** | positive | **Yes** — mild | `watchlist` | Yes | Intent, not quality. Weaker than Good. |
 | **Like** (feed shortcut) | `like` | **+1.00** | positive | **Yes** | `like` | Yes | Same strength as Good (`rate_3`). |
 | **Dislike / Pass** (feed) | `dislike` | **−0.85** | negative | **Yes** | `dislike` | Yes | ≈ Bad; prefer `rate_1` when on rating UI. |
+| **Undo / clear** | `clear` | **0.00** | zero | **No** | `none` | **No** | Soft undo: title can reappear; recompute ignores events for that title up to the clear. |
 | **Skip** | `skip` | **−0.15** | negative | **Yes** — tiny | *(no state)* | No | Soft dismiss; barely moves profile. |
 | **View** | `view` | **+0.05** | neutral | **Yes** — near-zero | *(no state)* | No | Impression analytics; never treat as a like. |
 
@@ -68,6 +69,17 @@ Use when the user **has seen** (or knows) the title:
 
 Onboarding requires **≥ 6** real ratings (`rate_1`–`rate_4`) and **≥ 2** positive among `rate_2`–`rate_4` / `like`.  
 `haven't_seen` does **not** count toward either gate.
+
+### Undo / clear (feed toast)
+
+| | |
+|--|--|
+| Taste features | Prior events for that **title** are ignored after `clear` (append-only undo) |
+| Taste vector | Same — recompute skips superseded events |
+| UserTitleState | Set to **`none`** (not excluded from For You) |
+| When to use | SPA “Undo” after Pass / Not interested / Like / Save |
+
+A later rating after `clear` applies normally (only events *after* the latest clear count).
 
 ### Haven't seen it → **zero signal**
 

@@ -22,7 +22,9 @@ Rules of thumb
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from datetime import datetime
+from typing import Iterable, Literal
+from uuid import UUID
 
 Polarity = Literal["positive", "negative", "neutral", "zero"]
 
@@ -210,6 +212,20 @@ SIGNAL_POLICIES: dict[str, SignalPolicy] = {
         special_handling="Prefer rate_1 when the user is on an explicit rating scale.",
     ),
     # --- Implicit / low-confidence ------------------------------------------
+    "clear": _p(
+        "clear",
+        0.0,
+        "zero",
+        updates_taste=False,
+        state="none",
+        exclude_from_feed=False,
+        label="Undo / clear",
+        summary="Revert the user–title relationship so the title can reappear on For You.",
+        special_handling=(
+            "Sets state to none (not excluded). Recompute ignores all prior events "
+            "for that title_id up to and including this clear (append-only undo)."
+        ),
+    ),
     "skip": _p(
         "skip",
         -0.15,
@@ -308,6 +324,7 @@ ACTIVE_INTERACTION_EVENT_TYPES: frozenset[str] = frozenset(
         "dislike",
         "watchlist",
         "not_interested",
+        "clear",
         "skip",
         "view",
         "haven't_seen",
@@ -346,6 +363,35 @@ def affects_taste(event_type: str, weight: float | None = None) -> bool:
 
 def weight_for(event_type: str) -> float:
     return get_policy(event_type).weight
+
+
+def last_clear_timestamps(
+    events: Iterable[tuple[UUID, str, datetime]],
+) -> dict[UUID, datetime]:
+    """Map title_id → created_at of the latest ``clear`` event for that title."""
+    out: dict[UUID, datetime] = {}
+    for title_id, event_type, created_at in events:
+        if event_type == "clear":
+            prev = out.get(title_id)
+            if prev is None or created_at >= prev:
+                out[title_id] = created_at
+    return out
+
+
+def is_superseded_by_clear(
+    *,
+    title_id: UUID,
+    event_type: str,
+    created_at: datetime,
+    last_clear: dict[UUID, datetime],
+) -> bool:
+    """True if this event should not affect taste (cleared or is the clear itself)."""
+    if event_type == "clear":
+        return True
+    cutoff = last_clear.get(title_id)
+    if cutoff is None:
+        return False
+    return created_at <= cutoff
 
 
 def policy_table_markdown() -> str:

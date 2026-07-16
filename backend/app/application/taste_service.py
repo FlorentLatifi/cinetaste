@@ -37,6 +37,8 @@ from app.domain.taste_signals import (
     affects_taste,
     get_policy,
     is_supported_event,
+    is_superseded_by_clear,
+    last_clear_timestamps,
     weight_for,
 )
 from app.infrastructure.db.models.catalog import Title
@@ -147,7 +149,21 @@ class TasteService:
         # Strongest positive ratings become citation anchors for explanations.
         latest_anchor: dict[UUID, Any] = {}
 
+        # Append-only undo: events at or before the latest ``clear`` for a title
+        # no longer contribute to sparse features, embeddings, or anchors.
+        last_clear = last_clear_timestamps(
+            (e.title_id, e.event_type, e.created_at) for e in events
+        )
+
         for event in events:
+            if is_superseded_by_clear(
+                title_id=event.title_id,
+                event_type=event.event_type,
+                created_at=event.created_at,
+                last_clear=last_clear,
+            ):
+                continue
+
             w = float(event.weight)
             # Policy-driven: haven't_seen and near-zero weights never move taste.
             if not affects_taste(event.event_type, w):

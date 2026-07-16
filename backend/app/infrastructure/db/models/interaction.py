@@ -23,7 +23,7 @@ class InteractionEvent(Base):
         UUID(as_uuid=True), ForeignKey("titles.id", ondelete="CASCADE"), index=True, nullable=False
     )
     # Canonical event types: app.domain.taste_signals.SIGNAL_POLICIES
-    # Active: like | dislike | watchlist | not_interested | skip | view |
+    # Active: like | dislike | watchlist | not_interested | clear | skip | view |
     #         haven't_seen | rate_1 | rate_2 | rate_3 | rate_4
     # Future: watched | watched_liked | watched_disliked
     event_type: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
