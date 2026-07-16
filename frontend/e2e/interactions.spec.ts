@@ -115,6 +115,8 @@ test("Account: open snapshot previews export JSON", async ({ page }) => {
   await expect(page.getByText(/Merged 2 signals/i)).toBeVisible();
   await expect(page.getByRole("button", { name: /clear imported snapshot/i })).toBeVisible();
   await page.getByRole("button", { name: /clear imported snapshot/i }).click();
+  await expect(page.getByRole("dialog", { name: /clear imported snapshot/i })).toBeVisible();
+  await page.getByRole("button", { name: "Clear import", exact: true }).click();
   await expect(page.getByText(/Cleared merged snapshot overlay/i)).toBeVisible();
 });
 

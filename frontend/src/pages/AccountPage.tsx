@@ -28,6 +28,7 @@ export function AccountPage() {
   const [importError, setImportError] = useState<string | null>(null);
   const [importBusy, setImportBusy] = useState(false);
   const [confirmMerge, setConfirmMerge] = useState(false);
+  const [confirmClearImport, setConfirmClearImport] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -150,10 +151,12 @@ export function AccountPage() {
       const summary = await authApi.clearTasteImport(accessToken);
       setTaste(summary);
       setExportStatus("Cleared merged snapshot overlay. Profile uses live ratings only.");
+      setConfirmClearImport(false);
     } catch (err) {
       setImportError(
         err instanceof ApiError ? err.message : "Could not clear import overlay",
       );
+      setConfirmClearImport(false);
     } finally {
       setImportBusy(false);
     }
@@ -283,9 +286,9 @@ export function AccountPage() {
                   type="button"
                   className="btn ghost"
                   disabled={importBusy}
-                  onClick={() => void clearImportOverlay()}
+                  onClick={() => setConfirmClearImport(true)}
                 >
-                  {importBusy ? "Working…" : "Clear imported snapshot"}
+                  Clear imported snapshot
                 </button>
               </div>
             )}
@@ -423,6 +426,19 @@ export function AccountPage() {
         onConfirm={() => void mergeSnapshot()}
         onCancel={() => {
           if (!importBusy) setConfirmMerge(false);
+        }}
+      />
+
+      <ConfirmDialog
+        open={confirmClearImport}
+        title="Clear imported snapshot?"
+        description="Removes merged snapshot signals. Your live ratings and history stay; For You will recompute without the import overlay."
+        confirmLabel="Clear import"
+        cancelLabel="Cancel"
+        busy={importBusy}
+        onConfirm={() => void clearImportOverlay()}
+        onCancel={() => {
+          if (!importBusy) setConfirmClearImport(false);
         }}
       />
 
