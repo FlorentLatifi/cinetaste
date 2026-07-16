@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { ApiError } from "../api/client";
 import * as titlesApi from "../api/titles";
@@ -49,11 +49,23 @@ export function HistoryPage() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
 
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+  const nextCursorRef = useRef<string | null>(null);
+  const loadingMoreRef = useRef(false);
+  const loadPageRef = useRef<(opts: { cursor?: string | null; append: boolean }) => Promise<void>>(
+    async () => {},
+  );
+
   const loadPage = useCallback(
     async (opts: { cursor?: string | null; append: boolean }) => {
       if (!accessToken) return;
-      if (opts.append) setLoadingMore(true);
-      else setLoading(true);
+      if (opts.append) {
+        if (loadingMoreRef.current) return;
+        loadingMoreRef.current = true;
+        setLoadingMore(true);
+      } else {
+        setLoading(true);
+      }
       setError(null);
       try {
         const data = await titlesApi.getHistory(accessToken, {
@@ -63,21 +75,48 @@ export function HistoryPage() {
         });
         setItems((prev) => (opts.append ? [...prev, ...data.items] : data.items));
         setNextCursor(data.next_cursor);
+        nextCursorRef.current = data.next_cursor;
       } catch (err) {
         setError(err instanceof ApiError ? err.message : "Could not load history");
-        if (!opts.append) setItems([]);
-        setNextCursor(null);
+        if (!opts.append) {
+          setItems([]);
+          setNextCursor(null);
+          nextCursorRef.current = null;
+        }
       } finally {
         setLoading(false);
         setLoadingMore(false);
+        loadingMoreRef.current = false;
       }
     },
     [accessToken, filter.state],
   );
 
+  loadPageRef.current = loadPage;
+
   useEffect(() => {
+    nextCursorRef.current = null;
     void loadPage({ append: false });
   }, [loadPage]);
+
+  // Infinite scroll: when the sentinel enters the viewport, fetch next page.
+  useEffect(() => {
+    const node = sentinelRef.current;
+    if (!node || !nextCursor) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const hit = entries.some((e) => e.isIntersecting);
+        if (!hit || loadingMoreRef.current) return;
+        const cursor = nextCursorRef.current;
+        if (!cursor) return;
+        void loadPageRef.current({ cursor, append: true });
+      },
+      { root: null, rootMargin: "200px 0px", threshold: 0 },
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [nextCursor, items.length]);
 
   function setFilter(next: (typeof FILTERS)[number]) {
     if (next.id === "all") {
@@ -214,11 +253,22 @@ export function HistoryPage() {
 
           {nextCursor && (
             <div className="history-more">
+              {/* Sentinel for IntersectionObserver infinite scroll */}
+              <div
+                ref={sentinelRef}
+                className="history-scroll-sentinel"
+                aria-hidden="true"
+              />
+              <p className="sr-only" role="status" aria-live="polite">
+                {loadingMore ? "Loading more history…" : "Scroll for more history"}
+              </p>
               <button
                 type="button"
                 className="btn ghost"
                 disabled={loadingMore}
-                onClick={() => void loadPage({ cursor: nextCursor, append: true })}
+                onClick={() =>
+                  void loadPage({ cursor: nextCursor, append: true })
+                }
               >
                 {loadingMore ? "Loading…" : "Load more"}
               </button>

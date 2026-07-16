@@ -61,9 +61,10 @@ User action
 | `state` | Optional filter to one history state |
 | `cursor` | Opaque keyset cursor from previous `next_cursor` |
 
-Response: `{ items, next_cursor, has_more }`. SPA **Load more** appends pages;
-filter chips reset the cursor. **Clear** on a row sends `clear` so the title can
-return to For You and prior events for that title are superseded on recompute.
+Response: `{ items, next_cursor, has_more }`. SPA appends pages via **infinite
+scroll** (IntersectionObserver) with a **Load more** fallback; filter chips
+reset the cursor. **Clear** on a row sends `clear` so the title can return to
+For You and prior events for that title are superseded on recompute.
 
 ### Post-watch UI (title detail)
 

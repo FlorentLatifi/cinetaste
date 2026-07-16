@@ -25,10 +25,16 @@ test("History: Clear removes row after mock interaction", async ({ page }) => {
   await page.goto("/history");
   await page.getByRole("heading", { name: "History" }).waitFor();
 
-  await expect(page.getByRole("heading", { name: mockTitle.name })).toBeVisible();
-  await page.getByRole("button", { name: `Clear status for ${mockTitle.name}` }).click();
-  await expect(page.getByRole("heading", { name: mockTitle.name })).toHaveCount(0);
-  await expect(page.getByText(/No history yet|No titles marked/i)).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: mockTitle.name, exact: true }),
+  ).toBeVisible();
+  // Infinite scroll may already have loaded page 2 — clear only the first title.
+  await page
+    .getByRole("button", { name: `Clear status for ${mockTitle.name}`, exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: mockTitle.name, exact: true }),
+  ).toHaveCount(0);
 });
 
 test("History: filter chips update URL and list", async ({ page }) => {
@@ -50,16 +56,21 @@ test("History: filter chips update URL and list", async ({ page }) => {
   await expect(page.getByRole("heading", { name: mockTitle.name })).toBeVisible();
 });
 
-test("History: Load more appends next page", async ({ page }) => {
+test("History: infinite scroll / Load more appends next page", async ({ page }) => {
   await installApiMock(page, { onboardingComplete: true });
   await page.goto("/history");
   await page.getByRole("heading", { name: "History" }).waitFor();
 
   await expect(page.getByRole("heading", { name: mockTitle.name })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Mock Classic II" })).toHaveCount(0);
 
-  await page.getByRole("button", { name: "Load more" }).click();
-  await expect(page.getByRole("heading", { name: "Mock Classic II" })).toBeVisible();
+  // Sentinel may auto-load when already in view; otherwise click Load more.
+  const second = page.getByRole("heading", { name: "Mock Classic II" });
+  try {
+    await second.waitFor({ state: "visible", timeout: 3_000 });
+  } catch {
+    await page.getByRole("button", { name: "Load more" }).click();
+    await expect(second).toBeVisible();
+  }
   await expect(page.getByRole("button", { name: "Load more" })).toHaveCount(0);
 });
 
