@@ -41,7 +41,14 @@ python -c "import secrets; print(secrets.token_urlsafe(48))"
 CREATE EXTENSION IF NOT EXISTS vector;
 ```
 
-Migrations run automatically via `entrypoint.sh` (`alembic upgrade head`).
+Migrations run automatically via `entrypoint.sh` (`alembic upgrade head`), including the **HNSW** index on `titles.embedding` for ANN candidate generation.
+
+After a large catalog ingest, optional (usually automatic on first queries):
+
+```sql
+-- Verify index exists
+SELECT indexname FROM pg_indexes WHERE tablename = 'titles' AND indexname LIKE '%embedding%';
+```
 
 6. Liveness: `https://<api-host>/api/v1/health` (process up)  
 7. Readiness: `https://<api-host>/api/v1/ready` — returns **503** if DB (or Redis in production) is down; use this for load balancers  

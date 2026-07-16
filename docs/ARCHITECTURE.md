@@ -97,7 +97,11 @@ backend/
 
 ### 5. Recommendations
 * Candidate generation → score → diversify → explain → cache slate
+* **Candidates (warm profile):** pgvector **HNSW** cosine ANN (`ix_titles_embedding_hnsw`) + popular exploration slice
+* **Candidates (cold start):** popularity-ordered pool
 * Output: ordered items + reason codes + debug scores (debug only in non-prod)
+
+See migration `20260717_0002_titles_embedding_hnsw` and settings `REC_ANN_CANDIDATES` / `REC_POPULAR_CANDIDATES` / `REC_USE_ANN`.
 
 ---
 

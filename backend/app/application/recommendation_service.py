@@ -42,6 +42,73 @@ class RecommendationService:
         except Exception:
             logger.warning("redis_cache_set_failed key=%s", key, exc_info=True)
 
+    async def _load_candidates(
+        self,
+        *,
+        user_vector: list[float] | None,
+        exclude_ids: set[UUID],
+    ) -> list[Title]:
+        """Build a candidate pool for ranking.
+
+        Warm profiles: pgvector ANN (cosine) via HNSW index + a small popular
+        exploration slice so we do not overfit nearest-neighbor only.
+
+        Cold start (no vector): popularity-ordered pool.
+        """
+        options = (
+            selectinload(Title.genres),
+            selectinload(Title.keywords),
+        )
+        base = select(Title).where(Title.embedding.is_not(None)).options(*options)
+        if exclude_ids:
+            # Keep SQL filter small; ranking also filters for safety.
+            base = base.where(Title.id.notin_(list(exclude_ids)))
+
+        use_ann = (
+            self._settings.rec_use_ann
+            and user_vector is not None
+            and len(user_vector) > 0
+        )
+
+        if use_ann:
+            ann_limit = max(self._settings.rec_ann_candidates, self._settings.rec_slate_size * 4)
+            pop_limit = max(self._settings.rec_popular_candidates, 20)
+            try:
+                ann_rows = (
+                    await self._session.scalars(
+                        base.order_by(Title.embedding.cosine_distance(user_vector)).limit(ann_limit)
+                    )
+                ).all()
+            except Exception:
+                # Index missing / empty table / driver issue → popularity fallback
+                logger.warning("ann_candidate_query_failed; falling back to popularity", exc_info=True)
+                ann_rows = []
+
+            pop_rows = (
+                await self._session.scalars(
+                    base.order_by(Title.popularity.desc()).limit(pop_limit)
+                )
+            ).all()
+
+            merged: dict[UUID, Title] = {}
+            for t in list(ann_rows) + list(pop_rows):
+                merged[t.id] = t
+            if merged:
+                return list(merged.values())
+
+        # Cold start or ANN fallback
+        pool = max(
+            self._settings.rec_ann_candidates + self._settings.rec_popular_candidates,
+            400,
+        )
+        return list(
+            (
+                await self._session.scalars(
+                    base.order_by(Title.popularity.desc()).limit(pool)
+                )
+            ).all()
+        )
+
     async def for_you(self, user_id: UUID, *, limit: int | None = None) -> list[tuple[Title, RankedItem]]:
         slate_size = limit or self._settings.rec_slate_size
         profile = await self._session.get(TasteProfile, user_id)
@@ -68,20 +135,6 @@ class RecommendationService:
         ).all()
         exclude_ids = {row.title_id for row in exclude_states}
 
-        # Ranking uses feature_snapshot + genres only — do not load credits here.
-        titles = (
-            await self._session.scalars(
-                select(Title)
-                .where(Title.embedding.is_not(None))
-                .options(
-                    selectinload(Title.genres),
-                    selectinload(Title.keywords),
-                )
-                .order_by(Title.popularity.desc())
-                .limit(800)
-            )
-        ).all()
-
         from app.recommendation.explanations import strip_explain_memory
 
         user_vector = None
@@ -89,6 +142,8 @@ class RecommendationService:
             user_vector = list(profile.vector)
         raw_features = dict(profile.features) if profile and profile.features else {}
         user_features, explain_memory = strip_explain_memory(raw_features)
+
+        titles = await self._load_candidates(user_vector=user_vector, exclude_ids=exclude_ids)
 
         ranked = rank_titles(
             user_vector=user_vector,

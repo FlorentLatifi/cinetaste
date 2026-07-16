@@ -85,6 +85,7 @@ Integration tests live under `tests/integration/` and **auto-skip** if Postgres/
 | `tests/test_onboarding_complete.py` | Complete gates + mocks |
 | `tests/conftest.py` | Shared fakes |
 | `tests/integration/` | API flow vs Postgres + Redis |
+| `tests/test_candidate_generation.py` | ANN/popular pool settings |
 
 ## Adding tests
 

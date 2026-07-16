@@ -39,6 +39,10 @@ class Settings(BaseSettings):
     rec_slate_size: int = 20
     rec_cache_ttl_seconds: int = 600
     rec_mmr_lambda: float = 0.7
+    # Candidate generation (pgvector ANN + popularity exploration pool)
+    rec_ann_candidates: int = 250
+    rec_popular_candidates: int = 120
+    rec_use_ann: bool = True
 
     # Rate limiting
     rate_limit_enabled: bool = True
