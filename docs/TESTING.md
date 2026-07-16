@@ -12,7 +12,7 @@ Focus: **fast, deterministic unit tests** for the ranking brain. Integration tes
 | **D. Explanations** | Anchors, human copy, memory strip | Pure unit | Instant |
 | **E. Onboarding complete** | Gates, action mapping, record calls | Service + mocks (no DB) | Instant |
 | **F. Seed deck** | Primary size, diversity axes | Pure unit | Instant |
-| **G. API / DB** *(later)* | `/onboarding/complete`, `/for-you` E2E | pytest + postgres + redis | Slow |
+| **G. API / DB** | register → onboard → for-you | `tests/integration/` + postgres + redis | Slow |
 
 **Critical path first (this repo today):** A–F.  
 **Explicitly deferred:** full HTTP E2E, Redis slate cache, live TMDb.
@@ -47,14 +47,31 @@ Focus: **fast, deterministic unit tests** for the ranking brain. Integration tes
 
 ## How to run
 
+### Unit only (no Docker)
+
 ```powershell
 cd backend
 $env:JWT_SECRET = "test-secret-for-unit-tests-only-32chars"
 $env:DATABASE_URL = "postgresql+asyncpg://u:p@localhost:5432/t"
+python -m pytest tests/ -q -m "not integration"
+```
+
+### Full suite including integration
+
+Needs Postgres (pgvector) + Redis — same URLs as Docker Compose / CI:
+
+```powershell
+cd backend
+$env:JWT_SECRET = "ci-test-secret-key-at-least-32-characters-long"
+$env:DATABASE_URL = "postgresql+asyncpg://cinetaste:cinetaste@localhost:5432/cinetaste"
+$env:REDIS_URL = "redis://localhost:6379/0"
+$env:APP_ENV = "test"
 python -m pytest tests/ -q
 ```
 
-`DATABASE_URL` / `JWT_SECRET` are required because some modules import app settings at import time (even for pure unit modules that transitively load infrastructure). Prefer fixing that import side-effect over time.
+Integration tests live under `tests/integration/` and **auto-skip** if Postgres/Redis are unreachable.
+
+`DATABASE_URL` / `JWT_SECRET` are required because some modules import app settings at import time. Prefer fixing that import side-effect over time.
 
 ## File map
 
@@ -67,6 +84,7 @@ python -m pytest tests/ -q
 | `tests/test_recommendation_pipeline.py` | Cold start, signals → rank, MMR, exclude |
 | `tests/test_onboarding_complete.py` | Complete gates + mocks |
 | `tests/conftest.py` | Shared fakes |
+| `tests/integration/` | API flow vs Postgres + Redis |
 
 ## Adding tests
 

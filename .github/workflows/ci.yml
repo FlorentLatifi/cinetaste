@@ -69,7 +69,10 @@ jobs:
         run: ruff check app tests
 
       - name: Unit tests
-        run: pytest -q
+        run: pytest -q -m "not integration"
+
+      - name: Integration tests (Postgres + Redis)
+        run: pytest -q tests/integration -m integration
 
       - name: Import app
         run: python -c "from app.main import app; print(app.title)"
