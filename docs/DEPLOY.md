@@ -54,6 +54,19 @@ Migrations run automatically via `entrypoint.sh` (`alembic upgrade head`).
 | Taste onboarding | Reactions validated first; profile recomputed **once** after all events. |
 | Proxy headers | Set `FORWARDED_ALLOW_IPS` to your LB/proxy IPs (not `*` in hostile networks). |
 
+### Auth cookies (SPA)
+
+| Item | Value |
+|------|--------|
+| Refresh token | **httpOnly** cookie `ct_refresh` (not in JSON / not localStorage) |
+| Access token | Short-lived JWT in SPA memory only |
+| Cookie path | `{API_PREFIX}/auth` |
+| Production | `Secure; SameSite=None` (cross-site Vercel → API host) |
+| Local | `SameSite=Lax` (localhost ports) |
+| CORS | `allow_credentials=true` + explicit `CORS_ORIGINS` (never `*`) |
+
+Frontend must call the API with `credentials: "include"`.
+
 ### Database URL note
 
 SQLAlchemy expects async URLs:
@@ -86,6 +99,7 @@ VITE_API_BASE_URL=https://<your-api-host>/api/v1
 
 6. Deploy → copy the production URL into API `CORS_ORIGINS`
 7. Redeploy API if CORS changed
+8. Confirm browser login sets `ct_refresh` cookie on the **API** host (Application → Cookies)
 
 `frontend/vercel.json` enables SPA fallback + basic security headers.
 

@@ -10,7 +10,6 @@ export type User = {
 
 export type TokenResponse = {
   access_token: string;
-  refresh_token: string;
   token_type: string;
   user: User;
 };
@@ -33,17 +32,19 @@ export function login(input: { email: string; password: string }) {
   });
 }
 
-export function refresh(refreshToken: string) {
+/** Uses httpOnly refresh cookie (no body). */
+export function refresh() {
   return apiFetch<TokenResponse>("/auth/refresh", {
     method: "POST",
-    body: JSON.stringify({ refresh_token: refreshToken }),
+    body: JSON.stringify({}),
   });
 }
 
-export function logout(refreshToken: string) {
+/** Clears server session + httpOnly cookie. */
+export function logout() {
   return apiFetch<void>("/auth/logout", {
     method: "POST",
-    body: JSON.stringify({ refresh_token: refreshToken }),
+    body: JSON.stringify({}),
   });
 }
 

@@ -45,9 +45,10 @@ async def test_register_login_refresh_me(
     assert reg.status_code == 201, reg.text
     tokens = reg.json()
     assert tokens["access_token"]
-    assert tokens["refresh_token"]
+    assert "refresh_token" not in tokens  # httpOnly cookie only
     assert tokens["user"]["email"] == email
     assert tokens["user"]["onboarding_completed_at"] is None
+    assert "ct_refresh" in client.cookies
 
     me = await client.get(
         f"{api_prefix}/me",
@@ -61,20 +62,20 @@ async def test_register_login_refresh_me(
         json={"email": email, "password": password},
     )
     assert login.status_code == 200
-    login_body = login.json()
+    old_cookie = client.cookies.get("ct_refresh")
+    assert old_cookie
 
-    refreshed = await client.post(
-        f"{api_prefix}/auth/refresh",
-        json={"refresh_token": login_body["refresh_token"]},
-    )
+    # Cookie-only refresh (no body token)
+    refreshed = await client.post(f"{api_prefix}/auth/refresh", json={})
     assert refreshed.status_code == 200
     assert refreshed.json()["access_token"]
+    new_cookie = client.cookies.get("ct_refresh")
+    assert new_cookie
+    assert new_cookie != old_cookie  # rotation
 
-    # Old refresh should no longer work after rotation
-    reused = await client.post(
-        f"{api_prefix}/auth/refresh",
-        json={"refresh_token": login_body["refresh_token"]},
-    )
+    # Reusing the previous raw cookie value must fail
+    client.cookies.set("ct_refresh", old_cookie, path=f"{api_prefix}/auth")
+    reused = await client.post(f"{api_prefix}/auth/refresh", json={})
     assert reused.status_code == 401
 
 

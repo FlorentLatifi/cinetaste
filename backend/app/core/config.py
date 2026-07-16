@@ -50,6 +50,9 @@ class Settings(BaseSettings):
     # Comma-separated hostnames allowed in production (optional)
     trusted_hosts: str = ""
 
+    # Force Secure cookies even outside production (e.g. https:// local tunnels)
+    cookie_secure: bool = False
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def strip_cors(cls, value: str) -> str:

@@ -18,11 +18,13 @@ class LoginRequest(BaseModel):
 
 
 class RefreshRequest(BaseModel):
-    refresh_token: str = Field(min_length=10)
+    """Optional body; browser clients should rely on the httpOnly cookie."""
+
+    refresh_token: str | None = Field(default=None, min_length=10)
 
 
 class LogoutRequest(BaseModel):
-    refresh_token: str = Field(min_length=10)
+    refresh_token: str | None = Field(default=None, min_length=10)
 
 
 class UserResponse(BaseModel):
@@ -36,7 +38,8 @@ class UserResponse(BaseModel):
 
 
 class TokenResponse(BaseModel):
+    """Access JWT + user. Refresh token is httpOnly cookie only (not in body)."""
+
     access_token: str
-    refresh_token: str
     token_type: str = "bearer"
     user: UserResponse

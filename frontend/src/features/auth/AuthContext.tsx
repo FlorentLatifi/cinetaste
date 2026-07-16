@@ -9,9 +9,8 @@ import {
 } from "react";
 import * as authApi from "../../api/auth";
 import type { User } from "../../api/auth";
-
-const ACCESS_KEY = "ct_access";
-const REFRESH_KEY = "ct_refresh";
+import { tryRefreshAccessToken } from "../../api/client";
+import { clearLegacyTokenStorage, setAccessToken } from "../../api/tokenStore";
 
 type AuthState = {
   user: User | null;
@@ -25,62 +24,40 @@ type AuthState = {
 
 const AuthContext = createContext<AuthState | null>(null);
 
-function persistTokens(access: string, refresh: string) {
-  localStorage.setItem(ACCESS_KEY, access);
-  localStorage.setItem(REFRESH_KEY, refresh);
-}
-
-function clearTokens() {
-  localStorage.removeItem(ACCESS_KEY);
-  localStorage.removeItem(REFRESH_KEY);
-}
-
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
-  const [accessToken, setAccessToken] = useState<string | null>(null);
+  const [accessToken, setAccessTokenState] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   const applySession = useCallback((tokens: authApi.TokenResponse) => {
-    persistTokens(tokens.access_token, tokens.refresh_token);
     setAccessToken(tokens.access_token);
+    setAccessTokenState(tokens.access_token);
     setUser(tokens.user);
   }, []);
 
   const refreshUser = useCallback(async () => {
-    const access = localStorage.getItem(ACCESS_KEY);
+    const access = await tryRefreshAccessToken();
     if (!access) return;
     const me = await authApi.getMe(access);
+    setAccessTokenState(access);
     setUser(me);
   }, []);
 
   useEffect(() => {
     let cancelled = false;
+    clearLegacyTokenStorage();
 
     async function bootstrap() {
-      const access = localStorage.getItem(ACCESS_KEY);
-      const refreshToken = localStorage.getItem(REFRESH_KEY);
-
-      if (!access || !refreshToken) {
-        if (!cancelled) setLoading(false);
-        return;
-      }
-
       try {
-        const me = await authApi.getMe(access);
-        if (!cancelled) {
-          setAccessToken(access);
-          setUser(me);
-        }
+        // Session restore: httpOnly cookie → new access token
+        const tokens = await authApi.refresh();
+        if (cancelled) return;
+        applySession(tokens);
       } catch {
-        try {
-          const tokens = await authApi.refresh(refreshToken);
-          if (!cancelled) applySession(tokens);
-        } catch {
-          clearTokens();
-          if (!cancelled) {
-            setAccessToken(null);
-            setUser(null);
-          }
+        if (!cancelled) {
+          setAccessToken(null);
+          setAccessTokenState(null);
+          setUser(null);
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -114,17 +91,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const logout = useCallback(async () => {
-    const refreshToken = localStorage.getItem(REFRESH_KEY);
-    if (refreshToken) {
-      try {
-        await authApi.logout(refreshToken);
-      } catch {
-        // Still clear local session
-      }
+    try {
+      await authApi.logout();
+    } catch {
+      // Still clear local session
     }
-    clearTokens();
     setAccessToken(null);
+    setAccessTokenState(null);
     setUser(null);
+    clearLegacyTokenStorage();
   }, []);
 
   const value = useMemo(
