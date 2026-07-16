@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ApiError } from "../api/client";
 import * as titlesApi from "../api/titles";
@@ -86,6 +86,8 @@ export function OnboardingPage() {
   const [exhausted, setExhausted] = useState(false);
   const [cardAnimKey, setCardAnimKey] = useState(0);
   const [exiting, setExiting] = useState(false);
+  const rateFirstRef = useRef<HTMLButtonElement>(null);
+  const titleRef = useRef<HTMLHeadingElement>(null);
 
   const loadBatch = useCallback(
     async (exclude: string[], replace: boolean) => {
@@ -176,7 +178,14 @@ export function OnboardingPage() {
   function advanceCard() {
     setExiting(false);
     setCardAnimKey((k) => k + 1);
+    requestAnimationFrame(() => titleRef.current?.focus());
   }
+
+  useEffect(() => {
+    if (rateMode) {
+      requestAnimationFrame(() => rateFirstRef.current?.focus());
+    }
+  }, [rateMode]);
 
   async function applyAction(action: OnboardingAction) {
     if (!current || submitting || exiting) return;
@@ -351,7 +360,7 @@ export function OnboardingPage() {
           </p>
         </div>
 
-        <div className="ob-progress" aria-live="polite">
+        <div className="ob-progress" aria-live="polite" aria-atomic="true">
           <div className="ob-progress-top">
             <span className="ob-progress-count">
               <strong>{ratedCount}</strong>
@@ -364,7 +373,14 @@ export function OnboardingPage() {
               </span>
             )}
           </div>
-          <div className="ob-progress-bar" role="progressbar" aria-valuenow={ratedCount} aria-valuemin={0} aria-valuemax={MIN_RATINGS}>
+          <div
+            className="ob-progress-bar"
+            role="progressbar"
+            aria-valuenow={ratedCount}
+            aria-valuemin={0}
+            aria-valuemax={MIN_RATINGS}
+            aria-label="Onboarding rating progress"
+          >
             <div className="ob-progress-fill" style={{ width: `${progressPct}%` }} />
           </div>
           <p className="ob-progress-hint">
@@ -381,8 +397,9 @@ export function OnboardingPage() {
         <article
           key={`${current.id}-${cardAnimKey}`}
           className={`ob-card ${exiting ? "ob-card-exit" : "ob-card-enter"}`}
+          aria-labelledby="ob-current-title"
         >
-          <div className="ob-poster-wrap">
+          <div className="ob-poster-wrap" aria-hidden="true">
             {poster ? (
               <img
                 className="ob-poster"
@@ -395,19 +412,29 @@ export function OnboardingPage() {
                 <span>{current.name}</span>
               </div>
             )}
-            <div className="ob-poster-fade" aria-hidden />
+            <div className="ob-poster-fade" />
           </div>
 
           <div className="ob-body">
             <div className="ob-title-block">
-              <h2 className="ob-title">{current.name}</h2>
+              <h2
+                ref={titleRef}
+                id="ob-current-title"
+                className="ob-title"
+                tabIndex={-1}
+              >
+                {current.name}
+              </h2>
               <p className="ob-meta">
                 {yearOf(current) && <span>{yearOf(current)}</span>}
                 {current.media_type && (
                   <span className="ob-pill">{current.media_type}</span>
                 )}
                 {current.vote_average > 0 && (
-                  <span className="ob-score">★ {current.vote_average.toFixed(1)}</span>
+                  <span className="ob-score">
+                    <span className="sr-only">Rating </span>★{" "}
+                    {current.vote_average.toFixed(1)}
+                  </span>
                 )}
               </p>
               {current.genres.length > 0 && (
@@ -424,11 +451,16 @@ export function OnboardingPage() {
             </div>
 
             {!rateMode ? (
-              <div className="ob-actions">
+              <div
+                className="ob-actions"
+                role="group"
+                aria-label={`Actions for ${current.name}`}
+              >
                 <button
                   type="button"
                   className="ob-btn ob-btn-ghost"
                   disabled={submitting || loadingMore || exiting}
+                  aria-label={`Haven't seen ${current.name} — zero taste signal`}
                   onClick={() => void applyAction("haven't_seen")}
                 >
                   <span className="ob-btn-label">Haven&apos;t seen it</span>
@@ -438,6 +470,7 @@ export function OnboardingPage() {
                   type="button"
                   className="ob-btn ob-btn-soft-danger"
                   disabled={submitting || loadingMore || exiting}
+                  aria-label={`Not interested in ${current.name}`}
                   onClick={() => void applyAction("not_interested")}
                 >
                   <span className="ob-btn-label">Not interested</span>
@@ -447,6 +480,8 @@ export function OnboardingPage() {
                   type="button"
                   className="ob-btn ob-btn-primary"
                   disabled={submitting || loadingMore || exiting}
+                  aria-label={`Rate ${current.name}`}
+                  aria-expanded={false}
                   onClick={() => setRateMode(true)}
                 >
                   <span className="ob-btn-label">Rate it</span>
@@ -454,9 +489,15 @@ export function OnboardingPage() {
                 </button>
               </div>
             ) : (
-              <div className="ob-rate">
+              <div
+                className="ob-rate"
+                role="group"
+                aria-label={`Rate ${current.name}`}
+              >
                 <div className="ob-rate-head">
-                  <p className="ob-rate-prompt">How was it for you?</p>
+                  <p className="ob-rate-prompt" id="ob-rate-prompt">
+                    How was it for you?
+                  </p>
                   <button
                     type="button"
                     className="ob-back"
@@ -466,17 +507,18 @@ export function OnboardingPage() {
                     ← Back
                   </button>
                 </div>
-                <div className="ob-rate-grid">
-                  {RATE_OPTIONS.map((opt) => (
+                <div className="ob-rate-grid" aria-labelledby="ob-rate-prompt">
+                  {RATE_OPTIONS.map((opt, idx) => (
                     <button
                       key={opt.action}
+                      ref={idx === 0 ? rateFirstRef : undefined}
                       type="button"
                       className={`ob-rate-btn ${opt.className}`}
                       disabled={submitting || loadingMore || exiting}
                       onClick={() => void applyAction(opt.action)}
-                      title={opt.hint}
+                      aria-label={`${opt.label}: ${opt.hint}`}
                     >
-                      <span className="ob-rate-emoji" aria-hidden>
+                      <span className="ob-rate-emoji" aria-hidden="true">
                         {opt.emoji}
                       </span>
                       <span className="ob-rate-label">{opt.label}</span>
@@ -498,9 +540,15 @@ export function OnboardingPage() {
               </button>
             )}
 
-            {error && <p className="form-error ob-error">{error}</p>}
+            {error && (
+              <p className="form-error ob-error" role="alert">
+                {error}
+              </p>
+            )}
             {loadingMore && (
-              <p className="ob-loading-more">Loading more titles…</p>
+              <p className="ob-loading-more" role="status">
+                Loading more titles…
+              </p>
             )}
           </div>
         </article>

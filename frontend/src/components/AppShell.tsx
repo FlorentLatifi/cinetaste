@@ -7,9 +7,19 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="shell">
+      <a className="skip-link" href="#main-content">
+        Skip to main content
+      </a>
       <header className="topbar">
-        <Link to="/" className="brand" style={{ textDecoration: "none", color: "inherit" }}>
-          <span className="brand-mark">C</span>
+        <Link
+          to="/"
+          className="brand"
+          style={{ textDecoration: "none", color: "inherit" }}
+          aria-label="CineTaste home"
+        >
+          <span className="brand-mark" aria-hidden="true">
+            C
+          </span>
           <div>
             <div className="brand-name">CineTaste</div>
             <div className="brand-tag">Taste-first discovery</div>
@@ -30,13 +40,23 @@ export function AppShell({ children }: { children: ReactNode }) {
           </NavLink>
         </nav>
         <div className="topbar-right">
-          <span className="user-chip">{user?.display_name || user?.email}</span>
-          <button type="button" className="btn ghost" onClick={() => void logout()}>
+          <span className="user-chip" title={user?.email || undefined}>
+            <span className="sr-only">Signed in as </span>
+            {user?.display_name || user?.email}
+          </span>
+          <button
+            type="button"
+            className="btn ghost"
+            onClick={() => void logout()}
+            aria-label="Sign out of CineTaste"
+          >
             Sign out
           </button>
         </div>
       </header>
-      <main className="main">{children}</main>
+      <main id="main-content" className="main" tabIndex={-1}>
+        {children}
+      </main>
     </div>
   );
 }

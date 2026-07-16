@@ -172,11 +172,16 @@ export function TitleDetailPage() {
             </p>
           )}
 
-          <div className="rec-actions">
+          <div
+            className="rec-actions"
+            role="group"
+            aria-label={`Actions for ${title.name}`}
+          >
             <button
               type="button"
               className="btn ghost"
               disabled={busy}
+              aria-label={`Pass on ${title.name}`}
               onClick={() => void act("dislike")}
             >
               Pass
@@ -185,6 +190,7 @@ export function TitleDetailPage() {
               type="button"
               className="btn ghost"
               disabled={busy}
+              aria-label={`Save ${title.name} to watchlist`}
               onClick={() => void act("watchlist")}
             >
               Save
@@ -193,6 +199,7 @@ export function TitleDetailPage() {
               type="button"
               className="btn danger"
               disabled={busy}
+              aria-label={`Mark ${title.name} as not interested`}
               onClick={() => void act("not_interested")}
             >
               Not interested
@@ -201,13 +208,22 @@ export function TitleDetailPage() {
               type="button"
               className="btn primary"
               disabled={busy}
+              aria-label={`Like ${title.name}`}
               onClick={() => void act("like")}
             >
               Like
             </button>
           </div>
-          {toast && <p className="toast-ok">{toast}</p>}
-          {error && <p className="form-error">{error}</p>}
+          {toast && (
+            <p className="toast-ok" role="status" aria-live="polite">
+              {toast}
+            </p>
+          )}
+          {error && (
+            <p className="form-error" role="alert">
+              {error}
+            </p>
+          )}
 
           {title.keywords.length > 0 && (
             <div className="chip-row">
@@ -245,26 +261,28 @@ export function TitleDetailPage() {
       )}
 
       {similar.length > 0 && (
-        <section className="similar-section">
-          <h2>More like this</h2>
-          <div className="similar-row">
+        <section className="similar-section" aria-labelledby="similar-heading">
+          <h2 id="similar-heading">More like this</h2>
+          <ul className="similar-row similar-row-list">
             {similar.map((t) => (
-              <Link key={t.id} to={`/titles/${t.id}`} className="similar-card">
-                <div className="similar-poster">
-                  {t.poster_url ? (
-                    <img src={t.poster_url} alt={t.name} loading="lazy" />
-                  ) : (
-                    <div className="poster-fallback">{t.name}</div>
-                  )}
-                </div>
-                <div className="similar-name">{t.name}</div>
-                <div className="similar-meta">
-                  {t.release_date ? t.release_date.slice(0, 4) : t.media_type}
-                  {t.vote_average ? ` · ★ ${t.vote_average.toFixed(1)}` : ""}
-                </div>
-              </Link>
+              <li key={t.id}>
+                <Link to={`/titles/${t.id}`} className="similar-card">
+                  <div className="similar-poster" aria-hidden="true">
+                    {t.poster_url ? (
+                      <img src={t.poster_url} alt="" loading="lazy" />
+                    ) : (
+                      <div className="poster-fallback">{t.name}</div>
+                    )}
+                  </div>
+                  <div className="similar-name">{t.name}</div>
+                  <div className="similar-meta">
+                    {t.release_date ? t.release_date.slice(0, 4) : t.media_type}
+                    {t.vote_average ? ` · ★ ${t.vote_average.toFixed(1)}` : ""}
+                  </div>
+                </Link>
+              </li>
             ))}
-          </div>
+          </ul>
         </section>
       )}
     </article>

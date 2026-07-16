@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { ApiError } from "../api/client";
 import * as titlesApi from "../api/titles";
@@ -14,6 +14,10 @@ export function SearchPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
+  const errorId = useId();
+  const statusId = useId();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const resultsHeadingRef = useRef<HTMLHeadingElement>(null);
 
   useEffect(() => {
     const q = params.get("q")?.trim() || "";
@@ -31,6 +35,8 @@ export function SearchPage() {
         if (!cancelled) {
           setResults(data);
           setSearched(true);
+          // Move focus to results heading for keyboard / SR users after search
+          requestAnimationFrame(() => resultsHeadingRef.current?.focus());
         }
       } catch (err) {
         if (!cancelled) {
@@ -52,61 +58,115 @@ export function SearchPage() {
     const q = query.trim();
     if (q.length < 2) {
       setError("Type at least 2 characters.");
+      inputRef.current?.focus();
       return;
     }
     setParams(q ? { q } : {});
   }
 
+  const qParam = params.get("q");
+  const statusText = loading
+    ? "Searching…"
+    : searched
+      ? results.length
+        ? `${results.length} result${results.length === 1 ? "" : "s"} for “${qParam}”`
+        : `No titles matched “${qParam}”`
+      : "";
+
   return (
-    <section className="feed">
+    <section className="feed" aria-labelledby="search-heading">
       <div className="feed-header">
         <div>
           <p className="eyebrow">Discover</p>
-          <h1>Search the catalog</h1>
+          <h1 id="search-heading">Search the catalog</h1>
           <p className="lede">Find a title you know, then rate or save it.</p>
         </div>
       </div>
 
-      <form className="search-bar" onSubmit={onSubmit} role="search">
+      <form className="search-bar" onSubmit={onSubmit} role="search" aria-label="Catalog search">
+        <label className="sr-only" htmlFor="catalog-search">
+          Search movies and TV
+        </label>
         <input
+          ref={inputRef}
+          id="catalog-search"
           type="search"
           name="q"
           placeholder="Search movies & TV…"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           minLength={2}
-          aria-label="Search titles"
+          autoComplete="off"
+          enterKeyHint="search"
+          aria-describedby={`${statusId}${error ? ` ${errorId}` : ""}`}
+          aria-invalid={error ? true : undefined}
+          aria-busy={loading || undefined}
         />
         <button className="btn primary" type="submit" disabled={loading}>
           {loading ? "Searching…" : "Search"}
         </button>
       </form>
 
-      {error && <p className="form-error">{error}</p>}
+      <p id={statusId} className="sr-only" aria-live="polite" aria-atomic="true">
+        {statusText}
+      </p>
 
-      {searched && !loading && !results.length && !error && (
-        <div className="callout">No titles matched “{params.get("q")}”.</div>
+      {error && (
+        <p id={errorId} className="form-error" role="alert">
+          {error}
+        </p>
       )}
 
-      <div className="rec-grid">
+      {searched && !loading && (
+        <h2
+          ref={resultsHeadingRef}
+          className="search-results-heading"
+          tabIndex={-1}
+        >
+          {results.length
+            ? `Results (${results.length})`
+            : error
+              ? "Search error"
+              : "No results"}
+        </h2>
+      )}
+
+      {searched && !loading && !results.length && !error && (
+        <div className="callout" role="status">
+          No titles matched “{qParam}”. Try another spelling or a shorter query.
+        </div>
+      )}
+
+      <ul className="rec-grid rec-grid-list" aria-label="Search results">
         {results.map((title) => (
-          <article key={title.id} className="rec-card compact">
-            <Link to={`/titles/${title.id}`} className="rec-poster-link">
+          <li key={title.id} className="rec-card compact">
+            <Link
+              to={`/titles/${title.id}`}
+              className="rec-poster-link"
+              tabIndex={-1}
+              aria-hidden="true"
+            >
               <div className="rec-poster">
                 {title.poster_url ? (
-                  <img src={title.poster_url} alt={title.name} loading="lazy" />
+                  <img src={title.poster_url} alt="" loading="lazy" />
                 ) : (
-                  <div className="poster-fallback">{title.name}</div>
+                  <div className="poster-fallback" aria-hidden="true">
+                    {title.name}
+                  </div>
                 )}
               </div>
             </Link>
             <div className="rec-body">
-              <h3>
-                <Link to={`/titles/${title.id}`} className="rec-title-link">
+              <h3 id={`search-title-${title.id}`}>
+                <Link
+                  to={`/titles/${title.id}`}
+                  className="rec-title-link"
+                  aria-describedby={`search-meta-${title.id}`}
+                >
                   {title.name}
                 </Link>
               </h3>
-              <p className="meta-line">
+              <p className="meta-line" id={`search-meta-${title.id}`}>
                 {title.media_type.toUpperCase()}
                 {title.release_date ? ` · ${title.release_date.slice(0, 4)}` : ""}
                 {title.vote_average ? ` · ★ ${title.vote_average.toFixed(1)}` : ""}
@@ -115,9 +175,9 @@ export function SearchPage() {
                 {title.genres.map((g) => g.name).join(" · ") || "—"}
               </p>
             </div>
-          </article>
+          </li>
         ))}
-      </div>
+      </ul>
     </section>
   );
 }
