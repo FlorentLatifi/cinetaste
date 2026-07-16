@@ -45,7 +45,9 @@ test("History: filter chips update URL and list", async ({ page }) => {
   // Mock returns a liked title; Liked filter keeps it, Passed empties.
   await page.getByRole("button", { name: "Liked", exact: true }).click();
   await expect(page).toHaveURL(/state=like/);
-  await expect(page.getByRole("heading", { name: mockTitle.name })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: mockTitle.name, exact: true }),
+  ).toBeVisible();
 
   await page.getByRole("button", { name: "Passed", exact: true }).click();
   await expect(page).toHaveURL(/state=dislike/);
@@ -53,7 +55,9 @@ test("History: filter chips update URL and list", async ({ page }) => {
 
   await page.getByRole("button", { name: "All", exact: true }).click();
   await expect(page).not.toHaveURL(/state=/);
-  await expect(page.getByRole("heading", { name: mockTitle.name })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: mockTitle.name, exact: true }),
+  ).toBeVisible();
 });
 
 test("History: infinite scroll / Load more appends next page", async ({ page }) => {
@@ -61,10 +65,12 @@ test("History: infinite scroll / Load more appends next page", async ({ page }) 
   await page.goto("/history");
   await page.getByRole("heading", { name: "History" }).waitFor();
 
-  await expect(page.getByRole("heading", { name: mockTitle.name })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: mockTitle.name, exact: true }),
+  ).toBeVisible();
 
   // Sentinel may auto-load when already in view; otherwise click Load more.
-  const second = page.getByRole("heading", { name: "Mock Classic II" });
+  const second = page.getByRole("heading", { name: "Mock Classic II", exact: true });
   try {
     await second.waitFor({ state: "visible", timeout: 3_000 });
   } catch {

@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { ApiError } from "../api/client";
 import * as titlesApi from "../api/titles";
 import type { Title } from "../api/titles";
+import { PosterCard } from "../components/PosterCard";
 import { useAuth } from "../features/auth/AuthContext";
 
 export function WatchlistPage() {
@@ -32,14 +33,15 @@ export function WatchlistPage() {
   }, [accessToken]);
 
   return (
-    <section className="feed">
+    <section className="feed" aria-labelledby="watchlist-heading">
       <div className="feed-header">
         <div>
           <p className="eyebrow">Saved</p>
-          <h1>Watchlist</h1>
+          <h1 id="watchlist-heading">Watchlist</h1>
+          <p className="lede">Titles you want to see — cover art first.</p>
         </div>
         <Link className="btn ghost" to="/">
-          Back to For you
+          Back to For You
         </Link>
       </div>
       {error && (
@@ -53,35 +55,21 @@ export function WatchlistPage() {
         </div>
       )}
       {!loading && !items.length && (
-        <div className="callout">
+        <div className="callout" role="status">
           Nothing saved yet. Hit Save on a recommendation or title page.
         </div>
       )}
-      <div className="rec-grid">
+      <ul className="poster-grid catalog" aria-label="Watchlist">
         {items.map((title) => (
-          <article key={title.id} className="rec-card compact">
-            <Link to={`/titles/${title.id}`} className="rec-poster-link">
-              <div className="rec-poster">
-                {title.poster_url ? (
-                  <img src={title.poster_url} alt={title.name} />
-                ) : (
-                  <div className="poster-fallback">{title.name}</div>
-                )}
-              </div>
-            </Link>
-            <div className="rec-body">
-              <h3>
-                <Link to={`/titles/${title.id}`} className="rec-title-link">
-                  {title.name}
-                </Link>
-              </h3>
-              <p className="genres">
-                {title.genres.map((g) => g.name).join(" · ") || "—"}
-              </p>
-            </div>
-          </article>
+          <li key={title.id}>
+            <PosterCard
+              title={title}
+              compact
+              badge={<span className="rec-badge discovery">Saved</span>}
+            />
+          </li>
         ))}
-      </div>
+      </ul>
     </section>
   );
 }

@@ -3,6 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { ApiError } from "../api/client";
 import * as titlesApi from "../api/titles";
 import type { HistoryItem } from "../api/titles";
+import { PosterCard } from "../components/PosterCard";
 import { useAuth } from "../features/auth/AuthContext";
 import { prefersReducedMotion } from "../features/taste/snapshot";
 
@@ -202,53 +203,35 @@ export function HistoryPage() {
 
       {!loading && items.length > 0 && (
         <>
-          <ul className="history-list" aria-label="Title history">
+          <ul className="poster-grid catalog history-grid" aria-label="Title history">
             {items.map((item) => {
               const name = item.title.name;
               const busy = busyId === item.title.id;
               return (
-                <li key={item.title.id} className="history-row">
-                  <Link
-                    to={`/titles/${item.title.id}`}
-                    className="history-poster-link"
-                    tabIndex={-1}
-                    aria-hidden="true"
-                  >
-                    <div className="history-poster" aria-hidden="true">
-                      {item.title.poster_url ? (
-                        <img src={item.title.poster_url} alt="" loading="lazy" />
-                      ) : (
-                        <div className="poster-fallback">{name.slice(0, 1)}</div>
-                      )}
-                    </div>
-                  </Link>
-                  <div className="history-body">
-                    <h2 className="history-title">
-                      <Link to={`/titles/${item.title.id}`} className="rec-title-link">
-                        {name}
-                      </Link>
-                    </h2>
-                    <p className="meta-line">
+                <li key={item.title.id}>
+                  <PosterCard
+                    title={item.title}
+                    compact
+                    headingLevel="h2"
+                    badge={
                       <span className={`history-badge state-${item.state}`}>
                         {item.label}
                       </span>
-                      <span> · {formatWhen(item.updated_at)}</span>
-                      {item.title.release_date
-                        ? ` · ${item.title.release_date.slice(0, 4)}`
-                        : ""}
-                    </p>
-                  </div>
-                  <div className="history-actions">
-                    <button
-                      type="button"
-                      className="btn ghost"
-                      disabled={busy}
-                      aria-label={`Clear status for ${name}`}
-                      onClick={() => void clearItem(item.title.id)}
-                    >
-                      {busy ? "Clearing…" : "Clear"}
-                    </button>
-                  </div>
+                    }
+                  >
+                    <div className="history-card-footer">
+                      <p className="meta-line history-when">{formatWhen(item.updated_at)}</p>
+                      <button
+                        type="button"
+                        className="btn ghost btn-sm"
+                        disabled={busy}
+                        aria-label={`Clear status for ${name}`}
+                        onClick={() => void clearItem(item.title.id)}
+                      >
+                        {busy ? "Clearing…" : "Clear"}
+                      </button>
+                    </div>
+                  </PosterCard>
                 </li>
               );
             })}

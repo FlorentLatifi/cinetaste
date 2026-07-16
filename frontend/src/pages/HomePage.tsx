@@ -9,6 +9,7 @@ import {
   FEEDBACK_ACTION_LABELS,
   type FeedbackAction,
 } from "../components/ActionToast";
+import { PosterCard } from "../components/PosterCard";
 import { useAuth } from "../features/auth/AuthContext";
 
 type LocationState = {
@@ -42,7 +43,6 @@ export function HomePage() {
     const state = (location.state as LocationState) || null;
     if (state?.fromOnboarding) {
       setWelcome(state);
-      // Clear router state so refresh doesn't re-show the banner forever
       navigate(location.pathname, { replace: true, state: null });
     }
   }, [location.state, location.pathname, navigate]);
@@ -197,7 +197,7 @@ export function HomePage() {
               ? "Picks matched to you"
               : "Picks matched to your taste"}
           </h1>
-          <p className="lede">Every card includes why it was recommended.</p>
+          <p className="lede">Posters first — every pick includes a short reason.</p>
         </div>
         <Link className="btn ghost" to="/watchlist">
           Watchlist
@@ -217,75 +217,43 @@ export function HomePage() {
         </div>
       )}
 
-      <ul className="rec-grid rec-grid-list" aria-label="Recommended titles">
+      <ul className="poster-grid for-you" aria-label="Recommended titles">
         {items.map((item) => {
           const name = item.title.name;
           const busy = busyId === item.title.id;
+          const badges = (
+            <>
+              {item.reasons.some((r) => r.code === "hidden_gem") && (
+                <span className="rec-badge gem">Hidden gem</span>
+              )}
+              {item.reasons.some((r) => r.code === "discovery") && (
+                <span className="rec-badge discovery">Discovery</span>
+              )}
+            </>
+          );
+          const hasBadge =
+            item.reasons.some((r) => r.code === "hidden_gem") ||
+            item.reasons.some((r) => r.code === "discovery");
+
           return (
-            <li key={item.title.id} className="rec-card">
-              <Link
-                to={`/titles/${item.title.id}`}
-                className="rec-poster-link"
-                tabIndex={-1}
-                aria-hidden="true"
+            <li key={item.title.id}>
+              <PosterCard
+                title={item.title}
+                badge={hasBadge ? <div className="rec-badges">{badges}</div> : undefined}
               >
-                <div className="rec-poster">
-                  {item.title.poster_url ? (
-                    <img
-                      src={item.title.poster_url}
-                      alt=""
-                      loading="lazy"
-                    />
-                  ) : (
-                    <div className="poster-fallback" aria-hidden="true">
-                      {name}
-                    </div>
-                  )}
-                </div>
-              </Link>
-              <div className="rec-body">
-                <h3 id={`rec-title-${item.title.id}`}>
-                  <Link
-                    to={`/titles/${item.title.id}`}
-                    className="rec-title-link"
-                  >
-                    {name}
-                  </Link>
-                </h3>
-                <p className="meta-line">
-                  {item.title.media_type.toUpperCase()}
-                  {item.title.release_date
-                    ? ` · ${item.title.release_date.slice(0, 4)}`
-                    : ""}
-                  {` · ★ ${item.title.vote_average.toFixed(1)}`}
-                </p>
-                {(item.reasons.some((r) => r.code === "hidden_gem") ||
-                  item.reasons.some((r) => r.code === "discovery")) && (
-                  <div className="rec-badges" aria-label="Pick type">
-                    {item.reasons.some((r) => r.code === "hidden_gem") && (
-                      <span className="rec-badge gem">Hidden gem</span>
-                    )}
-                    {item.reasons.some((r) => r.code === "discovery") && (
-                      <span className="rec-badge discovery">Discovery</span>
-                    )}
-                  </div>
-                )}
                 {item.reasons.length > 0 && (
                   <div className="why-block">
                     <p className="why-label" id={`why-${item.title.id}`}>
                       Why this pick
                     </p>
-                    <ul className="reasons" aria-labelledby={`why-${item.title.id}`}>
-                      {item.reasons.map((r, idx) => (
+                    <ul
+                      className="reasons"
+                      aria-labelledby={`why-${item.title.id}`}
+                    >
+                      {item.reasons.slice(0, 2).map((r, idx) => (
                         <li
                           key={`${r.code}-${idx}`}
-                          className={
-                            idx === 0
-                              ? "reason-primary"
-                              : r.code === "hidden_gem" || r.code === "discovery"
-                                ? `reason-${r.code}`
-                                : undefined
-                          }
+                          className={idx === 0 ? "reason-primary" : undefined}
                         >
                           {r.message}
                         </li>
@@ -293,10 +261,14 @@ export function HomePage() {
                     </ul>
                   </div>
                 )}
-                <div className="rec-actions" role="group" aria-label={`Actions for ${name}`}>
+                <div
+                  className="rec-actions poster-actions"
+                  role="group"
+                  aria-label={`Actions for ${name}`}
+                >
                   <button
                     type="button"
-                    className="btn ghost"
+                    className="btn ghost btn-sm"
                     disabled={busy}
                     aria-label={`Pass on ${name}`}
                     onClick={() => void act(item.title.id, "dislike")}
@@ -305,16 +277,7 @@ export function HomePage() {
                   </button>
                   <button
                     type="button"
-                    className="btn ghost"
-                    disabled={busy}
-                    aria-label={`Mark ${name} as not interested`}
-                    onClick={() => void act(item.title.id, "not_interested")}
-                  >
-                    Not interested
-                  </button>
-                  <button
-                    type="button"
-                    className="btn ghost"
+                    className="btn ghost btn-sm"
                     disabled={busy}
                     aria-label={`Save ${name} to watchlist`}
                     onClick={() => void act(item.title.id, "watchlist")}
@@ -323,7 +286,7 @@ export function HomePage() {
                   </button>
                   <button
                     type="button"
-                    className="btn primary"
+                    className="btn primary btn-sm"
                     disabled={busy}
                     aria-label={`Like ${name}`}
                     onClick={() => void act(item.title.id, "like")}
@@ -331,7 +294,7 @@ export function HomePage() {
                     Like
                   </button>
                 </div>
-              </div>
+              </PosterCard>
             </li>
           );
         })}

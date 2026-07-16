@@ -1,8 +1,9 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import { ApiError } from "../api/client";
 import * as titlesApi from "../api/titles";
 import type { Title } from "../api/titles";
+import { PosterCard } from "../components/PosterCard";
 import { useAuth } from "../features/auth/AuthContext";
 
 export function SearchPage() {
@@ -35,7 +36,6 @@ export function SearchPage() {
         if (!cancelled) {
           setResults(data);
           setSearched(true);
-          // Move focus to results heading for keyboard / SR users after search
           requestAnimationFrame(() => resultsHeadingRef.current?.focus());
         }
       } catch (err) {
@@ -79,7 +79,7 @@ export function SearchPage() {
         <div>
           <p className="eyebrow">Discover</p>
           <h1 id="search-heading">Search the catalog</h1>
-          <p className="lede">Find a title you know, then rate or save it.</p>
+          <p className="lede">Find a title you know — posters open the full detail.</p>
         </div>
       </div>
 
@@ -137,44 +137,18 @@ export function SearchPage() {
         </div>
       )}
 
-      <ul className="rec-grid rec-grid-list" aria-label="Search results">
+      <ul className="poster-grid catalog" aria-label="Search results">
         {results.map((title) => (
-          <li key={title.id} className="rec-card compact">
-            <Link
-              to={`/titles/${title.id}`}
-              className="rec-poster-link"
-              tabIndex={-1}
-              aria-hidden="true"
-            >
-              <div className="rec-poster">
-                {title.poster_url ? (
-                  <img src={title.poster_url} alt="" loading="lazy" />
-                ) : (
-                  <div className="poster-fallback" aria-hidden="true">
-                    {title.name}
-                  </div>
-                )}
-              </div>
-            </Link>
-            <div className="rec-body">
-              <h3 id={`search-title-${title.id}`}>
-                <Link
-                  to={`/titles/${title.id}`}
-                  className="rec-title-link"
-                  aria-describedby={`search-meta-${title.id}`}
-                >
-                  {title.name}
-                </Link>
-              </h3>
-              <p className="meta-line" id={`search-meta-${title.id}`}>
-                {title.media_type.toUpperCase()}
-                {title.release_date ? ` · ${title.release_date.slice(0, 4)}` : ""}
-                {title.vote_average ? ` · ★ ${title.vote_average.toFixed(1)}` : ""}
-              </p>
-              <p className="genres">
-                {title.genres.map((g) => g.name).join(" · ") || "—"}
-              </p>
-            </div>
+          <li key={title.id}>
+            <PosterCard
+              title={title}
+              compact
+              badge={
+                title.genres[0] ? (
+                  <span className="rec-badge discovery">{title.genres[0].name}</span>
+                ) : undefined
+              }
+            />
           </li>
         ))}
       </ul>
