@@ -1122,6 +1122,24 @@ html[data-contrast="high"] .rec-badge.discovery {
   opacity: 0.8;
 }
 
+.detail-action-status .text-btn {
+  appearance: none;
+  border: 0;
+  background: none;
+  color: var(--accent-strong);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+
+.detail-action-status .text-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 /* ——— Premium onboarding ——— */
 
 .ob-stage {

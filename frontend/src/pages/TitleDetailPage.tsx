@@ -1,8 +1,14 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { ApiError } from "../api/client";
 import * as titlesApi from "../api/titles";
 import type { Credit, ProviderOffer, Title, TitleDetail, WhereToWatch } from "../api/titles";
+import {
+  ActionToast,
+  ACTION_TOAST_MS,
+  FEEDBACK_ACTION_LABELS,
+  type FeedbackAction,
+} from "../components/ActionToast";
 import { useAuth } from "../features/auth/AuthContext";
 
 const WATCH_REGIONS = [
@@ -98,7 +104,18 @@ export function TitleDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
+  const [lastAction, setLastAction] = useState<FeedbackAction | null>(null);
+  const [toast, setToast] = useState<{ action: FeedbackAction; message: string } | null>(
+    null,
+  );
+  const [undoBusy, setUndoBusy] = useState(false);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (toastTimer.current) clearTimeout(toastTimer.current);
+    };
+  }, []);
 
   useEffect(() => {
     if (!accessToken || !titleId) return;
@@ -106,6 +123,8 @@ export function TitleDetailPage() {
     setLoading(true);
     setSimilar([]);
     setWatch(null);
+    setLastAction(null);
+    setToast(null);
     (async () => {
       try {
         const data = await titlesApi.getTitle(accessToken, titleId);
@@ -169,21 +188,53 @@ export function TitleDetailPage() {
     [title?.credits],
   );
 
-  async function act(event: "like" | "dislike" | "watchlist" | "not_interested") {
+  function dismissToast() {
+    if (toastTimer.current) {
+      clearTimeout(toastTimer.current);
+      toastTimer.current = null;
+    }
+    setToast(null);
+  }
+
+  function showToast(action: FeedbackAction, name: string) {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    setToast({
+      action,
+      message: `${FEEDBACK_ACTION_LABELS[action]} · ${name}`,
+    });
+    toastTimer.current = setTimeout(() => {
+      setToast(null);
+      toastTimer.current = null;
+    }, ACTION_TOAST_MS);
+  }
+
+  async function act(event: FeedbackAction) {
     if (!accessToken || !title) return;
     setBusy(true);
     setError(null);
     try {
       await titlesApi.interact(accessToken, title.id, event);
-      if (event === "watchlist") {
-        setToast("Saved to watchlist");
-        setBusy(false);
-        return;
-      }
-      navigate("/", { replace: false });
+      setLastAction(event);
+      showToast(event, title.name);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Action failed");
+    } finally {
       setBusy(false);
+    }
+  }
+
+  async function undoLast() {
+    if (!accessToken || !title || !toast || undoBusy) return;
+    setUndoBusy(true);
+    setError(null);
+    try {
+      await titlesApi.interact(accessToken, title.id, "clear");
+      setLastAction(null);
+      dismissToast();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not undo");
+    } finally {
+      setUndoBusy(false);
     }
   }
 
@@ -272,7 +323,7 @@ export function TitleDetailPage() {
             <button
               type="button"
               className="btn ghost"
-              disabled={busy}
+              disabled={busy || lastAction !== null}
               aria-label={`Pass on ${title.name}`}
               onClick={() => void act("dislike")}
             >
@@ -281,7 +332,7 @@ export function TitleDetailPage() {
             <button
               type="button"
               className="btn ghost"
-              disabled={busy}
+              disabled={busy || lastAction !== null}
               aria-label={`Save ${title.name} to watchlist`}
               onClick={() => void act("watchlist")}
             >
@@ -290,7 +341,7 @@ export function TitleDetailPage() {
             <button
               type="button"
               className="btn danger"
-              disabled={busy}
+              disabled={busy || lastAction !== null}
               aria-label={`Mark ${title.name} as not interested`}
               onClick={() => void act("not_interested")}
             >
@@ -299,16 +350,26 @@ export function TitleDetailPage() {
             <button
               type="button"
               className="btn primary"
-              disabled={busy}
+              disabled={busy || lastAction !== null}
               aria-label={`Like ${title.name}`}
               onClick={() => void act("like")}
             >
               Like
             </button>
           </div>
-          {toast && (
-            <p className="toast-ok" role="status" aria-live="polite">
-              {toast}
+          {lastAction && (
+            <p className="toast-ok detail-action-status" role="status">
+              {FEEDBACK_ACTION_LABELS[lastAction]}.{" "}
+              <Link to="/">Back to For You</Link>
+              {" · "}
+              <button
+                type="button"
+                className="text-btn"
+                disabled={undoBusy}
+                onClick={() => void undoLast()}
+              >
+                {undoBusy ? "Undoing…" : "Undo"}
+              </button>
             </p>
           )}
           {error && (
@@ -431,6 +492,15 @@ export function TitleDetailPage() {
             ))}
           </ul>
         </section>
+      )}
+
+      {toast && (
+        <ActionToast
+          message={toast.message}
+          undoBusy={undoBusy}
+          onUndo={() => void undoLast()}
+          onDismiss={dismissToast}
+        />
       )}
     </article>
   );

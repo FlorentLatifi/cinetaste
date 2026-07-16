@@ -3,6 +3,12 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { ApiError } from "../api/client";
 import * as titlesApi from "../api/titles";
 import type { RecommendationItem } from "../api/titles";
+import {
+  ActionToast,
+  ACTION_TOAST_MS,
+  FEEDBACK_ACTION_LABELS,
+  type FeedbackAction,
+} from "../components/ActionToast";
 import { useAuth } from "../features/auth/AuthContext";
 
 type LocationState = {
@@ -10,23 +16,12 @@ type LocationState = {
   ratingsCount?: number;
 } | null;
 
-type FeedAction = "like" | "dislike" | "watchlist" | "not_interested";
-
 type UndoToast = {
   item: RecommendationItem;
-  action: FeedAction;
+  action: FeedbackAction;
   message: string;
   index: number;
 };
-
-const ACTION_LABELS: Record<FeedAction, string> = {
-  like: "Liked",
-  dislike: "Passed",
-  watchlist: "Saved to watchlist",
-  not_interested: "Marked not interested",
-};
-
-const UNDO_MS = 8_000;
 
 export function HomePage() {
   const { accessToken, user } = useAuth();
@@ -99,10 +94,10 @@ export function HomePage() {
     toastTimer.current = setTimeout(() => {
       setToast(null);
       toastTimer.current = null;
-    }, UNDO_MS);
+    }, ACTION_TOAST_MS);
   }
 
-  async function act(titleId: string, event: FeedAction) {
+  async function act(titleId: string, event: FeedbackAction) {
     if (!accessToken) return;
     const index = items.findIndex((i) => i.title.id === titleId);
     if (index < 0) return;
@@ -116,7 +111,7 @@ export function HomePage() {
       showUndoToast({
         item,
         action: event,
-        message: `${ACTION_LABELS[event]} · ${item.title.name}`,
+        message: `${FEEDBACK_ACTION_LABELS[event]} · ${item.title.name}`,
         index,
       });
     } catch (err) {
@@ -343,25 +338,12 @@ export function HomePage() {
       </ul>
 
       {toast && (
-        <div className="feed-toast" role="status" aria-live="polite">
-          <p className="feed-toast-msg">{toast.message}</p>
-          <button
-            type="button"
-            className="btn ghost feed-toast-undo"
-            disabled={undoBusy}
-            onClick={() => void undoLast()}
-          >
-            {undoBusy ? "Undoing…" : "Undo"}
-          </button>
-          <button
-            type="button"
-            className="btn ghost feed-toast-dismiss"
-            aria-label="Dismiss notification"
-            onClick={dismissToast}
-          >
-            ✕
-          </button>
-        </div>
+        <ActionToast
+          message={toast.message}
+          undoBusy={undoBusy}
+          onUndo={() => void undoLast()}
+          onDismiss={dismissToast}
+        />
       )}
     </section>
   );

@@ -207,13 +207,72 @@ Then:
 - Catalog ingest API disabled when `APP_ENV=production`  
 - Non-root Docker user + healthcheck  
 
+**Already in place for beta:**
+
+- httpOnly refresh cookie + in-memory access JWT  
+- Optional Sentry (`SENTRY_DSN` / `VITE_SENTRY_DSN`)  
+- CI with Postgres/pgvector + Redis integration tests  
+- axe gate on guest SPA routes  
+
 **Still recommended before a large launch:**
 
-- httpOnly cookie session transport (vs localStorage tokens)
-- WAF / CDN in front of API
-- Automated DB backups verification
-- Sentry (or similar) error tracking
-- Staging environment mirror
+- WAF / CDN in front of API  
+- Automated DB backups verification (host-managed snapshots)  
+- Staging environment mirror (same compose/blueprint, separate secrets)  
+- Authenticated axe / broader e2e  
+
+---
+
+## 6b. Soft-launch checklist (public beta)
+
+Use this before inviting real users beyond friends/family.
+
+### Pre-flight
+
+| Check | How |
+|-------|-----|
+| CI green on `master` | GitHub Actions |
+| API `/ready` returns 200 with db + redis | `curl https://api…/api/v1/ready` |
+| SPA loads over HTTPS | Vercel production URL |
+| CORS matches SPA origin exactly | API env `CORS_ORIGINS` |
+| `JWT_SECRET` strong & unique | ≥48 chars, not in git |
+| `TMDB_API_KEY` set if you expect a real catalog | Render/Railway secrets |
+| Password reset path known | SMTP configured **or** log-only tokens acceptable |
+| Sentry optional | Blank DSN = disabled |
+
+### Smoke path (10 minutes)
+
+1. Register → verify refresh cookie on **API** host  
+2. Complete onboarding (≥6 ratings, ≥2 positive)  
+3. For You shows cards with **Why this pick** (and optional Hidden gem / Discovery badges)  
+4. Pass / Not interested → toast **Undo** restores card  
+5. Title detail → where-to-watch region works (or soft-empty without key)  
+6. Search finds a known title; open detail; Similar row loads  
+7. Account: password reset flow (or log token in API logs)  
+8. Sign out → cannot hit For You without re-login  
+
+### Backups (host-managed)
+
+| Host | Action |
+|------|--------|
+| **Render Postgres** | Enable point-in-time / daily backups on the paid plan; note restore docs |
+| **Railway Postgres** | Use platform backups or `pg_dump` cron to object storage |
+| **Redis** | Ephemeral OK (cache + rate limits); no durable user data |
+| **Verify** | Once before launch: restore a dump into a scratch DB and run migrations |
+
+Optional dump from a shell with network access:
+
+```bash
+pg_dump "$DATABASE_URL_SYNC" -Fc -f cinetaste-$(date +%Y%m%d).dump
+```
+
+(Use a `postgresql://` URL for `pg_dump`, not `postgresql+asyncpg://`.)
+
+### After invite
+
+- Watch Sentry / host logs for 5xx and auth spikes  
+- Confirm rate limits don’t false-positive on shared NATs  
+- Keep catalog ingest **off** in production (`APP_ENV=production`)  
 
 ---
 
@@ -222,7 +281,7 @@ Then:
 GitHub Actions (`.github/workflows/ci.yml`) runs on every push/PR:
 
 - Ruff + pytest (with Postgres/pgvector + Redis services)
-- Frontend typecheck/build
+- Frontend typecheck/build + Playwright axe on guest routes
 
 Merge only when CI is green.
 

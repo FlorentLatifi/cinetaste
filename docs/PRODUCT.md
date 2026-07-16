@@ -146,7 +146,8 @@ These are valuable later; they do not prove product-market fit faster than the c
 * Offline eval harness
 
 ### Phase 5 — Production hardening
-* CI/CD, staging, rate limits, monitoring, backups
+* CI/CD, rate limits, monitoring (Sentry optional), soft-launch checklist in `docs/DEPLOY.md`
+* Host-managed DB backups + smoke path before invites
 * Soft launch with real users
 
 ### Later (only with evidence)
