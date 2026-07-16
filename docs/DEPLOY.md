@@ -214,12 +214,16 @@ Then:
 - CI with Postgres/pgvector + Redis integration tests  
 - axe gate on guest SPA routes  
 
+**Already documented:**
+
+- Staging stack: `docker-compose.staging.yml` + `.env.staging.example` (see §9)  
+- Authenticated axe + interaction smokes in CI (`npm run test:a11y`)  
+
 **Still recommended before a large launch:**
 
 - WAF / CDN in front of API  
 - Automated DB backups verification (host-managed snapshots)  
-- Staging environment mirror (same compose/blueprint, separate secrets)  
-- Authenticated axe / broader e2e  
+- Hosted staging twin on Render/Vercel (optional; local compose is enough for many betas)  
 
 ---
 
@@ -248,8 +252,9 @@ Use this before inviting real users beyond friends/family.
 4. Pass / Not interested → toast **Undo** restores card  
 5. Title detail → **Watched** opens rate strip; rating or skip-rating + Undo works; where-to-watch region works (or soft-empty without key)  
 6. Search finds a known title; open detail; Similar row loads  
-7. Account: password reset flow (or log token in API logs)  
-8. Sign out → cannot hit For You without re-login  
+7. History filters + Clear; Account **Your taste** chips appear after ratings  
+8. Account: password reset flow (or log token in API logs)  
+9. Sign out → cannot hit For You without re-login  
 
 ### Backups (host-managed)
 
@@ -294,3 +299,94 @@ copy .env.production.example .env.production
 # fill secrets
 docker compose -f docker-compose.prod.yml --env-file .env.production up --build
 ```
+
+---
+
+## 9. Staging environment
+
+Goal: a **production-shaped** stack that does not share Postgres/Redis volumes with local
+dev (`docker-compose.yml`) or prod compose, so you can break things safely.
+
+| Concern | Local staging | Hosted staging (optional) |
+|---------|---------------|---------------------------|
+| Compose | `docker-compose.staging.yml` | Second Render Blueprint / service names |
+| Env file | `.env.staging` (from `.env.staging.example`) | Separate dashboard secrets |
+| `APP_ENV` | `staging` (not `production` — looser boot validators) | `staging` or `production` if you want full checks |
+| API port | **8001** (default) | Render URL |
+| Postgres | host **5433** → container 5432 | Separate DB instance |
+| Redis | host **6380** → container 6379 | Separate Redis |
+| SPA | local Vite or Vercel Preview | Vercel Preview / `*-staging` project |
+| Data | volume `postgres_staging_data` | never point at prod DB |
+
+### 9a. Start staging API locally
+
+```powershell
+cd cinetaste
+copy .env.staging.example .env.staging
+# set POSTGRES_PASSWORD + JWT_SECRET (and TMDB_API_KEY if testing catalog)
+
+# ENV_FILE points the API service at your secrets file (defaults to the example).
+$env:ENV_FILE=".env.staging"
+docker compose -p cinetaste-staging -f docker-compose.staging.yml --env-file .env.staging up --build
+```
+
+Checks:
+
+```powershell
+curl http://127.0.0.1:8001/api/v1/health
+curl http://127.0.0.1:8001/api/v1/ready
+```
+
+Point the SPA at staging:
+
+```powershell
+cd frontend
+# .env.local or shell:
+$env:VITE_API_BASE_URL="http://127.0.0.1:8001/api/v1"
+npm run dev
+```
+
+Ensure `CORS_ORIGINS` in `.env.staging` includes `http://localhost:5173` (and any preview URL).
+
+### 9b. Seed / migrate
+
+Migrations run on API start (`entrypoint.sh` → `alembic upgrade head`).
+
+Optional catalog (with `TMDB_API_KEY` set):
+
+```powershell
+docker compose -p cinetaste-staging -f docker-compose.staging.yml --env-file .env.staging exec api `
+  python -m app.scripts.seed_demo_catalog
+```
+
+### 9c. Tear down staging (wipe data)
+
+```powershell
+docker compose -p cinetaste-staging -f docker-compose.staging.yml down -v
+```
+
+### 9d. Hosted staging (Render + Vercel Preview)
+
+1. **Render:** duplicate the production blueprint with distinct names  
+   (`cinetaste-api-staging`, `cinetaste-db-staging`, `cinetaste-redis-staging`)  
+   or create a second Blueprint branch. Set `APP_ENV=staging`, a unique `JWT_SECRET`,  
+   and `CORS_ORIGINS` to your Vercel Preview origin.  
+2. **Vercel:** Preview deployments get unique URLs — either allow  
+   `https://*.vercel.app` is **not** valid CORS; set each preview origin explicitly  
+   or use a fixed staging domain (`staging.yourapp.com`).  
+3. **SPA env:** `VITE_API_BASE_URL=https://cinetaste-api-staging.onrender.com/api/v1`  
+4. **Sentry:** separate project or `environment=staging` so noise does not mix with prod.  
+5. **Never** share the production `DATABASE_URL` or `JWT_SECRET` with staging.
+
+### 9e. Staging vs production checklist
+
+| Item | Staging | Production |
+|------|---------|------------|
+| Isolated DB + Redis | Required | Required |
+| Strong unique `JWT_SECRET` | Required | Required (≥48 chars enforced when `APP_ENV=production`) |
+| Real user data | Synthetic / throwaway | Real |
+| Catalog ingest | Allowed for testing | Disabled when `APP_ENV=production` |
+| SMTP | Log-only OK | Real SMTP recommended |
+| Soft-launch smoke (§6b) | Run here first | Run again after promote |
+
+Promote path: green CI → staging smoke (§6b) → production deploy → production smoke.

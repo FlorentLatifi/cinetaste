@@ -12,6 +12,7 @@ backend/.venv/
 .env.*
 !.env.example
 !.env.production.example
+!.env.staging.example
 *.egg-info/
 .pytest_cache/
 .mypy_cache/

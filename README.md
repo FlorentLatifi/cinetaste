@@ -27,7 +27,7 @@ We are a **taste profile** product:
 | API | Python, FastAPI, SQLAlchemy, Alembic |
 | Data | PostgreSQL + pgvector, Redis |
 | Web | React, TypeScript, Vite |
-| Ops | Docker Compose (local), GitHub Actions / Railway/Render + Vercel (later) |
+| Ops | Docker Compose (local + staging + prod-like), GitHub Actions, Render + Vercel |
 
 Details: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) · Product/MVP: [`docs/PRODUCT.md`](docs/PRODUCT.md) · Agent constitution: [`AGENTS.md`](AGENTS.md)
 
@@ -36,15 +36,16 @@ Details: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) · Product/MVP: [`docs/P
 ## Repository layout
 
 ```
-movie-rec-platform/
+cinetaste/
 ├── AGENTS.md
-├── docker-compose.yml      # api + postgres(pgvector) + redis
-├── .env.example
-├── docs/
-├── backend/                # FastAPI app
-└── frontend/               # React + Vite SPA
+├── docker-compose.yml           # local dev
+├── docker-compose.staging.yml   # isolated staging stack
+├── docker-compose.prod.yml      # prod-like local
+├── .env.example / .env.staging.example / .env.production.example
+├── docs/                        # PRODUCT, ARCHITECTURE, DEPLOY, …
+├── backend/                     # FastAPI app
+└── frontend/                    # React + Vite SPA
 ```
-
 ---
 
 ## Current status
@@ -61,9 +62,9 @@ movie-rec-platform/
 - [x] Recommendation pipeline (score + MMR diversity + explanations)
 - [x] For You feed, watchlist, interactions
 - [x] CI (GitHub Actions) + rate limits + security headers
-- [x] Deploy blueprints (Render + Vercel) — see `docs/DEPLOY.md`
+- [x] Deploy blueprints (Render + Vercel) + staging compose — see `docs/DEPLOY.md`
+- [x] httpOnly refresh cookies, Sentry optional, soft-launch checklist
 - [ ] Live hosted deploy (you click connect on Render/Vercel)
-- [ ] httpOnly cookie auth + Sentry/monitoring polish
 
 ---
 
