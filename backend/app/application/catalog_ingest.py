@@ -41,8 +41,38 @@ class CatalogIngestService:
         self._person_cache: dict[int, Person] = {}
         self._keyword_cache: dict[int, Keyword] = {}
 
+    async def ingest_onboarding_seed(self) -> dict[str, int]:
+        """Upsert curated onboarding movies so cold-start is not pure popularity.
+
+        Always run before (or with) discover-based ingest. IDs live in
+        ``app/data/onboarding_seed_deck.json``.
+        """
+        from app.data.onboarding_seed import all_seed_tmdb_ids
+
+        await self._ensure_genres()
+        seed_ids = all_seed_tmdb_ids()
+        created = updated = errors = 0
+        for tmdb_id in seed_ids:
+            try:
+                status = await self.upsert_movie(tmdb_id)
+                created += status == "created"
+                updated += status == "updated"
+            except Exception:  # noqa: BLE001 — keep seed ingest resilient
+                logger.exception("Failed to ingest onboarding seed tmdb_id=%s", tmdb_id)
+                errors += 1
+        await self._session.commit()
+        return {
+            "seed_requested": len(seed_ids),
+            "created": created,
+            "updated": updated,
+            "errors": errors,
+        }
+
     async def ingest_popular(self, *, pages: int = 3, include_tv: bool = True) -> dict[str, int]:
         await self._ensure_genres()
+        # Curated cold-start titles first (may not appear on today's popular chart).
+        seed_stats = await self.ingest_onboarding_seed()
+
         movie_ids: list[int] = []
         tv_ids: list[int] = []
 
@@ -66,6 +96,7 @@ class CatalogIngestService:
 
         await self._session.commit()
         return {
+            "onboarding_seed": seed_stats,
             "movies_seen": len(set(movie_ids)),
             "tv_seen": len(set(tv_ids)),
             "created": created,

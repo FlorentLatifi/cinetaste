@@ -100,48 +100,70 @@ class RecommendationService:
     async def onboarding_cards(
         self,
         *,
-        limit: int = 24,
+        limit: int = 15,
         exclude_ids: set[UUID] | None = None,
     ) -> list[Title]:
-        """Diverse popular titles for rating-based onboarding.
+        """Cold-start cards: curated seed deck first, smart diversity fallback.
 
-        ``exclude_ids`` lets the client fetch another batch after many
-        “Haven't seen it” answers without repeating titles.
+        1. Prefer titles from ``app/data/onboarding_seed_deck.json`` (TMDb IDs),
+           in curated order (primary batch, then reserve for “haven't seen” fill).
+        2. If the seed is missing from the catalog or exhausted, fill with a
+           quality + diversity scorer (not pure popularity).
         """
+        from app.data.onboarding_seed import (
+            load_onboarding_seed_deck,
+            order_titles_by_seed,
+            pick_diverse_fallback,
+        )
+
         skip = exclude_ids or set()
-        # Pull a wide pool so diversity + excludes still leave enough cards.
-        pool_size = max(120, limit * 6 + len(skip))
-        titles = (
+        deck = load_onboarding_seed_deck()
+        seed_ids = deck.tmdb_ids()
+
+        seeded_rows = (
             await self._session.scalars(
                 select(Title)
-                .where(Title.poster_path.is_not(None), Title.embedding.is_not(None))
+                .where(
+                    Title.external_tmdb_id.in_(seed_ids),
+                    Title.poster_path.is_not(None),
+                    Title.embedding.is_not(None),
+                )
                 .options(selectinload(Title.genres))
-                .order_by(Title.popularity.desc())
+            )
+        ).all()
+        seeded_ordered = [
+            t for t in order_titles_by_seed(list(seeded_rows), seed_ids) if t.id not in skip
+        ]
+        picked: list[Title] = seeded_ordered[:limit]
+        if len(picked) >= limit:
+            return picked
+
+        # Fallback pool: broader catalog, quality-aware diversity (not chart dump).
+        need = limit - len(picked)
+        picked_ids = {t.id for t in picked} | skip
+        pool_size = max(200, limit * 10 + len(skip))
+        pool = (
+            await self._session.scalars(
+                select(Title)
+                .where(
+                    Title.poster_path.is_not(None),
+                    Title.embedding.is_not(None),
+                    Title.media_type == "movie",
+                )
+                .options(selectinload(Title.genres))
+                .order_by(Title.vote_count.desc())
                 .limit(pool_size)
             )
         ).all()
-
-        candidates = [t for t in titles if t.id not in skip]
-
-        # Greedy diversity by primary genre
-        picked: list[Title] = []
-        genre_counts: dict[str, int] = {}
-        per_genre_cap = max(3, (limit // 6) + 1)
-        for title in candidates:
-            primary = title.genres[0].name if title.genres else "unknown"
-            if genre_counts.get(primary, 0) >= per_genre_cap:
-                continue
-            genre_counts[primary] = genre_counts.get(primary, 0) + 1
-            picked.append(title)
-            if len(picked) >= limit:
-                break
-
-        if len(picked) < limit:
-            for title in candidates:
-                if title not in picked:
-                    picked.append(title)
-                if len(picked) >= limit:
-                    break
+        fill = pick_diverse_fallback(
+            list(pool),
+            limit=need,
+            exclude_ids=picked_ids,
+            max_per_genre=2,
+            max_per_decade=3,
+            max_per_language=4,
+        )
+        picked.extend(fill)
         return picked
 
     async def search(self, query: str, *, limit: int = 20) -> list[Title]:

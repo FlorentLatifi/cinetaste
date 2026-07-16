@@ -1,0 +1,634 @@
+{
+  "version": 1,
+  "description": "Curated cold-start onboarding deck. Primary is the first batch (diverse, recognizable). Reserve fills when users mark many as unseen. Edit this file to retune onboarding — IDs are TMDb movie IDs (media_type=movie).",
+  "notes": [
+    "Order within primary is intentional for genre/decade/country/tone spread.",
+    "polarizing=true means high signal: strong likes and dislikes both teach taste.",
+    "tier: iconic | well_known | quality_gem — mix recognition with quality.",
+    "Ingest prioritizes these IDs so they exist in catalog even if not 'popular' today."
+  ],
+  "primary": [
+    {
+      "tmdb_id": 278,
+      "name": "The Shawshank Redemption",
+      "tier": "iconic",
+      "decade": 1990,
+      "genres": ["Drama"],
+      "origin": "US",
+      "tone": "uplifting",
+      "polarizing": false
+    },
+    {
+      "tmdb_id": 129,
+      "name": "Spirited Away",
+      "tier": "iconic",
+      "decade": 2000,
+      "genres": ["Animation", "Fantasy"],
+      "origin": "JP",
+      "tone": "whimsical",
+      "polarizing": false
+    },
+    {
+      "tmdb_id": 155,
+      "name": "The Dark Knight",
+      "tier": "iconic",
+      "decade": 2000,
+      "genres": ["Action", "Crime"],
+      "origin": "US",
+      "tone": "dark",
+      "polarizing": false
+    },
+    {
+      "tmdb_id": 496243,
+      "name": "Parasite",
+      "tier": "well_known",
+      "decade": 2010,
+      "genres": ["Thriller", "Comedy", "Drama"],
+      "origin": "KR",
+      "tone": "satirical",
+      "polarizing": false
+    },
+    {
+      "tmdb_id": 680,
+      "name": "Pulp Fiction",
+      "tier": "iconic",
+      "decade": 1990,
+      "genres": ["Crime", "Thriller"],
+      "origin": "US",
+      "tone": "stylized",
+      "polarizing": true
+    },
+    {
+      "tmdb_id": 194,
+      "name": "Amélie",
+      "tier": "well_known",
+      "decade": 2000,
+      "genres": ["Romance", "Comedy"],
+      "origin": "FR",
+      "tone": "whimsical",
+      "polarizing": false
+    },
+    {
+      "tmdb_id": 419430,
+      "name": "Get Out",
+      "tier": "well_known",
+      "decade": 2010,
+      "genres": ["Horror", "Mystery"],
+      "origin": "US",
+      "tone": "tense",
+      "polarizing": false
+    },
+    {
+      "tmdb_id": 76341,
+      "name": "Mad Max: Fury Road",
+      "tier": "well_known",
+      "decade": 2010,
+      "genres": ["Action", "Adventure"],
+      "origin": "AU",
+      "tone": "visceral",
+      "polarizing": false
+    },
+    {
+      "tmdb_id": 238,
+      "name": "The Godfather",
+      "tier": "iconic",
+      "decade": 1970,
+      "genres": ["Crime", "Drama"],
+      "origin": "US",
+      "tone": "operatic",
+      "polarizing": false
+    },
+    {
+      "tmdb_id": 313369,
+      "name": "La La Land",
+      "tier": "well_known",
+      "decade": 2010,
+      "genres": ["Romance", "Music", "Drama"],
+      "origin": "US",
+      "tone": "bittersweet",
+      "polarizing": true
+    },
+    {
+      "tmdb_id": 27205,
+      "name": "Inception",
+      "tier": "iconic",
+      "decade": 2010,
+      "genres": ["Science Fiction", "Action"],
+      "origin": "US",
+      "tone": "cerebral",
+      "polarizing": false
+    },
+    {
+      "tmdb_id": 598,
+      "name": "City of God",
+      "tier": "quality_gem",
+      "decade": 2000,
+      "genres": ["Crime", "Drama"],
+      "origin": "BR",
+      "tone": "raw",
+      "polarizing": false
+    },
+    {
+      "tmdb_id": 120467,
+      "name": "The Grand Budapest Hotel",
+      "tier": "well_known",
+      "decade": 2010,
+      "genres": ["Comedy", "Adventure"],
+      "origin": "US",
+      "tone": "stylized",
+      "polarizing": false
+    },
+    {
+      "tmdb_id": 244786,
+      "name": "Whiplash",
+      "tier": "well_known",
+      "decade": 2010,
+      "genres": ["Drama", "Music"],
+      "origin": "US",
+      "tone": "intense",
+      "polarizing": false
+    },
+    {
+      "tmdb_id": 62,
+      "name": "2001: A Space Odyssey",
+      "tier": "iconic",
+      "decade": 1960,
+      "genres": ["Science Fiction"],
+      "origin": "US",
+      "tone": "meditative",
+      "polarizing": true
+    }
+  ],
+  "reserve": [
+    {
+      "tmdb_id": 550,
+      "name": "Fight Club",
+      "tier": "iconic",
+      "decade": 1990,
+      "genres": ["Drama"],
+      "origin": "US",
+      "tone": "dark",
+      "polarizing": true
+    },
+    {
+      "tmdb_id": 152601,
+      "name": "Her",
+      "tier": "well_known",
+      "decade": 2010,
+      "genres": ["Romance", "Science Fiction"],
+      "origin": "US",
+      "tone": "intimate",
+      "polarizing": false
+    },
+    {
+      "tmdb_id": 603,
+      "name": "The Matrix",
+      "tier": "iconic",
+      "decade": 1990,
+      "genres": ["Science Fiction", "Action"],
+      "origin": "US",
+      "tone": "cool",
+      "polarizing": false
+    },
+    {
+      "tmdb_id": 1417,
+      "name": "Pan's Labyrinth",
+      "tier": "quality_gem",
+      "decade": 2000,
+      "genres": ["Fantasy", "Drama", "War"],
+      "origin": "ES",
+      "tone": "dark fairy tale",
+      "polarizing": false
+    },
+    {
+      "tmdb_id": 38,
+      "name": "Eternal Sunshine of the Spotless Mind",
+      "tier": "well_known",
+      "decade": 2000,
+      "genres": ["Romance", "Science Fiction"],
+      "origin": "US",
+      "tone": "melancholy",
+      "polarizing": false
+    },
+    {
+      "tmdb_id": 531428,
+      "name": "Portrait of a Lady on Fire",
+      "tier": "quality_gem",
+      "decade": 2010,
+      "genres": ["Romance", "Drama"],
+      "origin": "FR",
+      "tone": "painterly",
+      "polarizing": false
+    },
+    {
+      "tmdb_id": 545611,
+      "name": "Everything Everywhere All at Once",
+      "tier": "well_known",
+      "decade": 2020,
+      "genres": ["Action", "Comedy", "Science Fiction"],
+      "origin": "US",
+      "tone": "chaotic",
+      "polarizing": true
+    },
+    {
+      "tmdb_id": 274,
+      "name": "The Silence of the Lambs",
+      "tier": "iconic",
+      "decade": 1990,
+      "genres": ["Thriller", "Crime", "Horror"],
+      "origin": "US",
+      "tone": "tense",
+      "polarizing": false
+    },
+    {
+      "tmdb_id": 329865,
+      "name": "Arrival",
+      "tier": "well_known",
+      "decade": 2010,
+      "genres": ["Science Fiction", "Drama"],
+      "origin": "US",
+      "tone": "cerebral",
+      "polarizing": false
+    },
+    {
+      "tmdb_id": 376867,
+      "name": "Moonlight",
+      "tier": "quality_gem",
+      "decade": 2010,
+      "genres": ["Drama"],
+      "origin": "US",
+      "tone": "intimate",
+      "polarizing": false
+    },
+    {
+      "tmdb_id": 8363,
+      "name": "Superbad",
+      "tier": "well_known",
+      "decade": 2000,
+      "genres": ["Comedy"],
+      "origin": "US",
+      "tone": "raunchy",
+      "polarizing": false
+    },
+    {
+      "tmdb_id": 1091,
+      "name": "The Thing",
+      "tier": "quality_gem",
+      "decade": 1980,
+      "genres": ["Horror", "Science Fiction"],
+      "origin": "US",
+      "tone": "paranoid",
+      "polarizing": false
+    },
+    {
+      "tmdb_id": 289,
+      "name": "Casablanca",
+      "tier": "iconic",
+      "decade": 1940,
+      "genres": ["Romance", "Drama", "War"],
+      "origin": "US",
+      "tone": "classic",
+      "polarizing": false
+    },
+    {
+      "tmdb_id": 346,
+      "name": "Seven Samurai",
+      "tier": "iconic",
+      "decade": 1950,
+      "genres": ["Action", "Drama"],
+      "origin": "JP",
+      "tone": "epic",
+      "polarizing": false
+    },
+    {
+      "tmdb_id": 670,
+      "name": "Oldboy",
+      "tier": "quality_gem",
+      "decade": 2000,
+      "genres": ["Thriller", "Action", "Drama"],
+      "origin": "KR",
+      "tone": "brutal",
+      "polarizing": true
+    },
+    {
+      "tmdb_id": 115,
+      "name": "The Big Lebowski",
+      "tier": "well_known",
+      "decade": 1990,
+      "genres": ["Comedy", "Crime"],
+      "origin": "US",
+      "tone": "absurdist",
+      "polarizing": true
+    },
+    {
+      "tmdb_id": 7345,
+      "name": "There Will Be Blood",
+      "tier": "quality_gem",
+      "decade": 2000,
+      "genres": ["Drama"],
+      "origin": "US",
+      "tone": "austere",
+      "polarizing": true
+    },
+    {
+      "tmdb_id": 2062,
+      "name": "Ratatouille",
+      "tier": "iconic",
+      "decade": 2000,
+      "genres": ["Animation", "Comedy", "Family"],
+      "origin": "US",
+      "tone": "warm",
+      "polarizing": false
+    },
+    {
+      "tmdb_id": 157336,
+      "name": "Interstellar",
+      "tier": "well_known",
+      "decade": 2010,
+      "genres": ["Science Fiction", "Drama", "Adventure"],
+      "origin": "US",
+      "tone": "epic",
+      "polarizing": true
+    },
+    {
+      "tmdb_id": 490132,
+      "name": "Roma",
+      "tier": "quality_gem",
+      "decade": 2010,
+      "genres": ["Drama"],
+      "origin": "MX",
+      "tone": "observational",
+      "polarizing": false
+    },
+    {
+      "tmdb_id": 128,
+      "name": "Princess Mononoke",
+      "tier": "well_known",
+      "decade": 1990,
+      "genres": ["Animation", "Fantasy", "Adventure"],
+      "origin": "JP",
+      "tone": "mythic",
+      "polarizing": false
+    },
+    {
+      "tmdb_id": 438631,
+      "name": "Dune",
+      "tier": "well_known",
+      "decade": 2020,
+      "genres": ["Science Fiction", "Adventure"],
+      "origin": "US",
+      "tone": "epic",
+      "polarizing": false
+    },
+    {
+      "tmdb_id": 37799,
+      "name": "The Social Network",
+      "tier": "well_known",
+      "decade": 2010,
+      "genres": ["Drama"],
+      "origin": "US",
+      "tone": "sharp",
+      "polarizing": false
+    },
+    {
+      "tmdb_id": 6977,
+      "name": "No Country for Old Men",
+      "tier": "well_known",
+      "decade": 2000,
+      "genres": ["Thriller", "Crime"],
+      "origin": "US",
+      "tone": "bleak",
+      "polarizing": false
+    },
+    {
+      "tmdb_id": 1124,
+      "name": "The Prestige",
+      "tier": "well_known",
+      "decade": 2000,
+      "genres": ["Drama", "Mystery", "Science Fiction"],
+      "origin": "US",
+      "tone": "twisty",
+      "polarizing": false
+    },
+    {
+      "tmdb_id": 546554,
+      "name": "Knives Out",
+      "tier": "well_known",
+      "decade": 2010,
+      "genres": ["Comedy", "Crime", "Mystery"],
+      "origin": "US",
+      "tone": "playful",
+      "polarizing": false
+    },
+    {
+      "tmdb_id": 475557,
+      "name": "Joker",
+      "tier": "well_known",
+      "decade": 2010,
+      "genres": ["Crime", "Drama", "Thriller"],
+      "origin": "US",
+      "tone": "grim",
+      "polarizing": true
+    },
+    {
+      "tmdb_id": 76,
+      "name": "Before Sunrise",
+      "tier": "quality_gem",
+      "decade": 1990,
+      "genres": ["Romance", "Drama"],
+      "origin": "US",
+      "tone": "talky",
+      "polarizing": false
+    },
+    {
+      "tmdb_id": 582,
+      "name": "The Lives of Others",
+      "tier": "quality_gem",
+      "decade": 2000,
+      "genres": ["Drama", "Thriller"],
+      "origin": "DE",
+      "tone": "restrained",
+      "polarizing": false
+    },
+    {
+      "tmdb_id": 335984,
+      "name": "Blade Runner 2049",
+      "tier": "well_known",
+      "decade": 2010,
+      "genres": ["Science Fiction", "Drama"],
+      "origin": "US",
+      "tone": "noir",
+      "polarizing": false
+    },
+    {
+      "tmdb_id": 769,
+      "name": "Goodfellas",
+      "tier": "iconic",
+      "decade": 1990,
+      "genres": ["Crime", "Drama"],
+      "origin": "US",
+      "tone": "kinetic",
+      "polarizing": false
+    },
+    {
+      "tmdb_id": 290098,
+      "name": "The Handmaiden",
+      "tier": "quality_gem",
+      "decade": 2010,
+      "genres": ["Thriller", "Romance", "Drama"],
+      "origin": "KR",
+      "tone": "sensual",
+      "polarizing": false
+    },
+    {
+      "tmdb_id": 627,
+      "name": "Trainspotting",
+      "tier": "well_known",
+      "decade": 1990,
+      "genres": ["Drama"],
+      "origin": "GB",
+      "tone": "raw",
+      "polarizing": true
+    },
+    {
+      "tmdb_id": 1422,
+      "name": "The Departed",
+      "tier": "well_known",
+      "decade": 2000,
+      "genres": ["Crime", "Thriller", "Drama"],
+      "origin": "US",
+      "tone": "tense",
+      "polarizing": false
+    },
+    {
+      "tmdb_id": 13,
+      "name": "Forrest Gump",
+      "tier": "iconic",
+      "decade": 1990,
+      "genres": ["Drama", "Romance", "Comedy"],
+      "origin": "US",
+      "tone": "sentimental",
+      "polarizing": true
+    },
+    {
+      "tmdb_id": 424,
+      "name": "Schindler's List",
+      "tier": "iconic",
+      "decade": 1990,
+      "genres": ["Drama", "History", "War"],
+      "origin": "US",
+      "tone": "harrowing",
+      "polarizing": false
+    },
+    {
+      "tmdb_id": 11,
+      "name": "Star Wars",
+      "tier": "iconic",
+      "decade": 1970,
+      "genres": ["Science Fiction", "Adventure"],
+      "origin": "US",
+      "tone": "mythic",
+      "polarizing": false
+    },
+    {
+      "tmdb_id": 372058,
+      "name": "Your Name.",
+      "tier": "well_known",
+      "decade": 2010,
+      "genres": ["Animation", "Romance", "Drama"],
+      "origin": "JP",
+      "tone": "bittersweet",
+      "polarizing": false
+    },
+    {
+      "tmdb_id": 324857,
+      "name": "Spider-Man: Into the Spider-Verse",
+      "tier": "well_known",
+      "decade": 2010,
+      "genres": ["Animation", "Action", "Adventure"],
+      "origin": "US",
+      "tone": "energetic",
+      "polarizing": false
+    },
+    {
+      "tmdb_id": 508947,
+      "name": "Turning Red",
+      "tier": "well_known",
+      "decade": 2020,
+      "genres": ["Animation", "Comedy", "Family"],
+      "origin": "US",
+      "tone": "warm",
+      "polarizing": false
+    },
+    {
+      "tmdb_id": 497,
+      "name": "The Green Mile",
+      "tier": "well_known",
+      "decade": 1990,
+      "genres": ["Fantasy", "Drama", "Crime"],
+      "origin": "US",
+      "tone": "emotional",
+      "polarizing": false
+    },
+    {
+      "tmdb_id": 807,
+      "name": "Se7en",
+      "tier": "iconic",
+      "decade": 1990,
+      "genres": ["Crime", "Mystery", "Thriller"],
+      "origin": "US",
+      "tone": "bleak",
+      "polarizing": false
+    },
+    {
+      "tmdb_id": 16869,
+      "name": "Inglourious Basterds",
+      "tier": "well_known",
+      "decade": 2000,
+      "genres": ["War", "Drama", "Action"],
+      "origin": "US",
+      "tone": "stylized",
+      "polarizing": true
+    },
+    {
+      "tmdb_id": 493922,
+      "name": "Hereditary",
+      "tier": "well_known",
+      "decade": 2010,
+      "genres": ["Horror", "Mystery", "Thriller"],
+      "origin": "US",
+      "tone": "dread",
+      "polarizing": true
+    },
+    {
+      "tmdb_id": 637,
+      "name": "Life Is Beautiful",
+      "tier": "well_known",
+      "decade": 1990,
+      "genres": ["Comedy", "Drama"],
+      "origin": "IT",
+      "tone": "bittersweet",
+      "polarizing": true
+    },
+    {
+      "tmdb_id": 539,
+      "name": "Psycho",
+      "tier": "iconic",
+      "decade": 1960,
+      "genres": ["Horror", "Thriller", "Mystery"],
+      "origin": "US",
+      "tone": "classic thriller",
+      "polarizing": false
+    },
+    {
+      "tmdb_id": 105,
+      "name": "Back to the Future",
+      "tier": "iconic",
+      "decade": 1980,
+      "genres": ["Adventure", "Comedy", "Science Fiction"],
+      "origin": "US",
+      "tone": "fun",
+      "polarizing": false
+    }
+  ]
+}

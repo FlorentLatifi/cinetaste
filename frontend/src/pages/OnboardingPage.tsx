@@ -8,7 +8,8 @@ import { useAuth } from "../features/auth/AuthContext";
 /** Must match backend MIN_ONBOARDING_RATINGS / MIN_ONBOARDING_POSITIVE. */
 const MIN_RATINGS = 6;
 const MIN_POSITIVE = 2;
-const BATCH_SIZE = 24;
+/** First batch matches curated primary seed (~15); later batches pull reserve. */
+const BATCH_SIZE = 15;
 
 const RATE_OPTIONS: {
   action: OnboardingAction;

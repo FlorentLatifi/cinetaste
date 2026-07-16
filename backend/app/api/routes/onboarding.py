@@ -21,7 +21,12 @@ async def onboarding_cards(
     user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_db)],
     settings: Annotated[Settings, Depends(get_settings_dep)],
-    limit: int = Query(default=24, ge=8, le=40),
+    limit: int = Query(
+        default=15,
+        ge=8,
+        le=40,
+        description="Cards to return. First batch uses the curated primary seed deck (~15).",
+    ),
     exclude: list[UUID] | None = Query(
         default=None,
         description="Title IDs already shown (e.g. after many Haven't seen answers).",

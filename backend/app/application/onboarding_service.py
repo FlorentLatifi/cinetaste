@@ -55,18 +55,20 @@ class OnboardingService:
 
     async def cards(
         self,
-        limit: int = 24,
+        limit: int = 15,
         *,
         exclude_ids: list[UUID] | None = None,
     ):
+        """Return cold-start cards (curated seed deck; see onboarding_seed_deck.json)."""
         cards = await self._recommendations.onboarding_cards(
             limit=limit,
             exclude_ids=set(exclude_ids or []),
         )
         if len(cards) < 8 and not exclude_ids:
             raise AppError(
-                "Catalog is empty. Run catalog ingest first "
-                "(python -m app.scripts.ingest_catalog).",
+                "Catalog is empty or missing seed titles. Run catalog ingest first "
+                "(python -m app.scripts.ingest_catalog) so the onboarding seed deck "
+                "is available.",
                 status_code=503,
                 code="catalog_empty",
             )
