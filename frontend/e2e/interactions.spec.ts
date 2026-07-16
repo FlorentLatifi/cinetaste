@@ -4,6 +4,43 @@ import { installApiMock, mockTitle } from "./helpers/mockApi";
 /**
  * Behavioral smoke tests against Playwright API mocks (no real backend).
  */
+test("Landing: guest home shows Start free and preview", async ({ page }) => {
+  await page.goto("/");
+  await expect(
+    page.getByRole("heading", {
+      name: "One poster. Your taste. Every pick explained.",
+    }),
+  ).toBeVisible();
+  await expect(page.getByRole("link", { name: /Start free/i })).toBeVisible();
+  await expect(page.getByRole("link", { name: /Get started/i })).toBeVisible();
+  await page.getByRole("link", { name: /Start free/i }).click();
+  await expect(page).toHaveURL(/\/register/);
+  await expect(page.getByRole("heading", { name: "Create account" })).toBeVisible();
+});
+
+test("Register: password show toggle and strength meter", async ({ page }) => {
+  await page.goto("/register");
+  await page.getByRole("heading", { name: "Create account" }).waitFor();
+
+  const password = page.locator('input[autocomplete="new-password"]');
+  await expect(password).toBeVisible();
+  await password.fill("short");
+  await expect(page.getByText("Strength:")).toBeVisible();
+  await expect(page.locator(".password-strength-label strong")).toHaveText(
+    /Weak|Fair/,
+  );
+
+  await page.getByRole("button", { name: "Show password" }).click();
+  await expect(password).toHaveAttribute("type", "text");
+  await page.getByRole("button", { name: "Hide password" }).click();
+  await expect(password).toHaveAttribute("type", "password");
+
+  await password.fill("Str0ng!pass");
+  await expect(page.locator(".password-strength-label strong")).toHaveText(
+    /Good|Strong/,
+  );
+});
+
 test("For You: Pass removes card and Undo restores it", async ({ page }) => {
   await installApiMock(page, { onboardingComplete: true });
   await page.goto("/");

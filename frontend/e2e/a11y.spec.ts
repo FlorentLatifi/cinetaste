@@ -6,6 +6,11 @@ import { expect, test } from "@playwright/test";
  * Auth bootstrap fails closed → login/register render after loading spinner.
  */
 const guestRoutes: { path: string; ready: string }[] = [
+  {
+    path: "/",
+    ready:
+      "role=heading[name='One poster. Your taste. Every pick explained.']",
+  },
   { path: "/login", ready: "role=heading[name='Welcome back']" },
   { path: "/register", ready: "role=heading[name='Create account']" },
   { path: "/forgot-password", ready: "role=heading[name='Forgot password']" },
