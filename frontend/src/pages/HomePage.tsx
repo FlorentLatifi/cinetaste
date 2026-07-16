@@ -115,11 +115,18 @@ export function HomePage() {
                 {item.title.release_date ? ` · ${item.title.release_date.slice(0, 4)}` : ""}
                 {` · ★ ${item.title.vote_average.toFixed(1)}`}
               </p>
-              <ul className="reasons">
-                {item.reasons.map((r) => (
-                  <li key={r.code + r.message}>{r.message}</li>
-                ))}
-              </ul>
+              {item.reasons.length > 0 && (
+                <div className="why-block">
+                  <p className="why-label">Why this pick</p>
+                  <ul className="reasons">
+                    {item.reasons.map((r, idx) => (
+                      <li key={`${r.code}-${idx}`} className={idx === 0 ? "reason-primary" : undefined}>
+                        {r.message}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
               <div className="rec-actions">
                 <button
                   type="button"

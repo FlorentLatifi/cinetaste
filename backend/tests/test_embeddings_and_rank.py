@@ -176,10 +176,26 @@ def test_explain_prefers_director_over_genre() -> None:
         title_extra={"feature_snapshot": title_features},
         title_genres=["Thriller"],
         similarity=0.7,
+        explain_memory={
+            "anchors": [
+                {
+                    "title_id": "x",
+                    "name": "Inception",
+                    "weight": 1.55,
+                    "directors": ["nolan"],
+                    "cast": [],
+                    "writers": [],
+                    "tones": ["cerebral"],
+                    "keywords": ["mind-bending"],
+                    "genres": ["thriller"],
+                }
+            ]
+        },
     )
     assert reasons
     assert all(r.message for r in reasons)
-    assert reasons[0].code == "same_director"
+    assert reasons[0].code in {"because_you_liked", "same_director"}
+    assert "Inception" in reasons[0].message or "Nolan" in reasons[0].message
 
 
 class _G:

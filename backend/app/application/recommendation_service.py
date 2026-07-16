@@ -59,10 +59,13 @@ class RecommendationService:
             )
         ).all()
 
+        from app.recommendation.explanations import strip_explain_memory
+
         user_vector = None
         if profile is not None and profile.vector is not None:
             user_vector = list(profile.vector)
-        user_features = dict(profile.features) if profile and profile.features else {}
+        raw_features = dict(profile.features) if profile and profile.features else {}
+        user_features, explain_memory = strip_explain_memory(raw_features)
 
         ranked = rank_titles(
             user_vector=user_vector,
@@ -71,6 +74,7 @@ class RecommendationService:
             exclude_ids=exclude_ids,
             slate_size=slate_size,
             mmr_lambda=self._settings.rec_mmr_lambda,
+            explain_memory=explain_memory,
         )
 
         cache_payload = [

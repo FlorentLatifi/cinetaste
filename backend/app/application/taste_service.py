@@ -37,6 +37,10 @@ from app.infrastructure.db.models.catalog import Title
 from app.infrastructure.db.models.interaction import InteractionEvent, UserTitleState
 from app.infrastructure.db.models.taste import TasteProfile
 from app.recommendation.embeddings import blend_vectors, normalize_feature_families
+from app.recommendation.explanations import (
+    build_anchor_from_title,
+    merge_explain_memory,
+)
 
 # Below this absolute weight, an event never touches features or embeddings.
 ZERO_SIGNAL_EPS = 1e-9
@@ -152,6 +156,10 @@ class TasteService:
 
         feature_acc: dict[str, float] = {}
         vectors: list[tuple[list[float], float]] = []
+        # Strongest positive ratings become citation anchors for "because you liked X".
+        anchors: list[dict[str, Any]] = []
+        # Latest event per title wins for anchor metadata.
+        latest_positive: dict[UUID, Any] = {}
 
         for event in events:
             # Haven't-seen and any other zero-weight event: no taste influence.
@@ -165,23 +173,53 @@ class TasteService:
                 continue
             snap = (title.extra or {}).get("feature_snapshot") or {}
             for key, value in snap.items():
-                feature_acc[key] = feature_acc.get(key, 0.0) + float(value) * float(event.weight)
+                if str(key).startswith("__"):
+                    continue
+                try:
+                    feature_acc[str(key)] = feature_acc.get(str(key), 0.0) + float(value) * float(
+                        event.weight
+                    )
+                except (TypeError, ValueError):
+                    continue
             if title.embedding is not None:  # numpy/pgvector: use identity check only
                 vectors.append((list(title.embedding), float(event.weight)))
+
+            if float(event.weight) >= 0.85 and event.event_type in POSITIVE_RATING_EVENT_TYPES:
+                latest_positive[event.title_id] = event
+
+        for title_id, event in latest_positive.items():
+            title = titles.get(title_id)
+            if title is None:
+                continue
+            year = title.release_date.year if title.release_date else None
+            anchors.append(
+                build_anchor_from_title(
+                    title_id=title.id,
+                    name=title.name,
+                    event_type=event.event_type,
+                    weight=float(event.weight),
+                    feature_snapshot=(title.extra or {}).get("feature_snapshot") or {},
+                    year=year,
+                )
+            )
 
         # Drop near-zero noise, then rebalance families so keywords don't drown directors.
         raw_features = {k: round(v, 4) for k, v in feature_acc.items() if abs(v) > 0.05}
         # Soft per-key cap before family norms (limits single-title domination).
         capped = {k: max(min(v, 4.5), -4.5) for k, v in raw_features.items()}
         features = normalize_feature_families(capped)
+        # Persist named favorites + creative DNA for human explanations.
+        features_with_memory = merge_explain_memory(features, anchors)
         vector = blend_vectors(vectors)
 
         profile = await self._session.get(TasteProfile, user_id)
         if profile is None:
-            profile = TasteProfile(user_id=user_id, version=1, features=features, vector=vector)
+            profile = TasteProfile(
+                user_id=user_id, version=1, features=features_with_memory, vector=vector
+            )
             self._session.add(profile)
         else:
-            profile.features = features
+            profile.features = features_with_memory
             profile.vector = vector
             profile.version = int(profile.version or 1) + 1
 

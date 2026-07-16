@@ -498,14 +498,21 @@ def top_feature_overlap(
     """Rank overlapping features by user strength × title weight × family weight."""
     scored: list[tuple[str, float]] = []
     for key, t_w in title_features.items():
-        u_w = float(user_features.get(key, 0.0) or 0.0)
+        if str(key).startswith("__"):
+            continue
+        raw_u = user_features.get(key, 0.0)
+        try:
+            u_w = float(raw_u or 0.0)
+            t_val = float(t_w)
+        except (TypeError, ValueError):
+            continue
         if positive_only and u_w <= 0:
             continue
         if not positive_only and u_w == 0:
             continue
-        if t_w <= 0:
+        if t_val <= 0:
             continue
-        strength = abs(u_w) * float(t_w) * family_score_weight(key)
+        strength = abs(u_w) * t_val * family_score_weight(key)
         scored.append((key, strength if u_w > 0 else -strength))
     scored.sort(key=lambda x: abs(x[1]), reverse=True)
     return scored[:limit]
@@ -519,13 +526,20 @@ def sparse_channel_scores(
     pos = 0.0
     neg = 0.0
     for key, t_w in title_features.items():
-        u_w = float(user_features.get(key, 0.0) or 0.0)
-        if u_w == 0.0 or t_w <= 0:
+        if str(key).startswith("__"):
+            continue
+        raw_u = user_features.get(key, 0.0)
+        try:
+            u_w = float(raw_u or 0.0)
+            t_val = float(t_w)
+        except (TypeError, ValueError):
+            continue
+        if u_w == 0.0 or t_val <= 0:
             continue
         fam = family_score_weight(key)
         # Cap single-key influence so one favorite director cannot explode score.
         capped_user = min(abs(u_w), 3.0)
-        contrib = fam * capped_user * float(t_w) * 0.085
+        contrib = fam * capped_user * t_val * 0.085
         if u_w > 0:
             pos += contrib
         else:

@@ -14,9 +14,25 @@ class GenreOut(BaseModel):
 
 
 class ReasonOut(BaseModel):
-    code: str
-    message: str
-    evidence: dict = Field(default_factory=dict)
+    """Human-readable explanation for a recommendation.
+
+    ``message`` is the user-facing line. ``evidence`` holds structured
+    detail for UI polish / debugging (liked title names, directors, tones…).
+    """
+
+    code: str = Field(
+        description=(
+            "Reason kind: because_you_liked | taste_blend | similar_style | "
+            "same_director | similar_cast | similar_themes | similar_origin | "
+            "similar_language | similar_era | shared_genre | taste_similarity | "
+            "genre_fit | discovery"
+        )
+    )
+    message: str = Field(description="Thoughtful, specific sentence shown to the user")
+    evidence: dict = Field(
+        default_factory=dict,
+        description="Structured support: liked_titles, directors, tones, keywords, genres, …",
+    )
 
 
 class TitleSummary(BaseModel):

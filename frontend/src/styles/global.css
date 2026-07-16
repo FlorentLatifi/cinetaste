@@ -394,15 +394,37 @@ p {
   overflow: hidden;
 }
 
+.why-block {
+  margin: 0.35rem 0 0.55rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: 12px;
+  background: rgba(232, 194, 122, 0.06);
+  border: 1px solid rgba(232, 194, 122, 0.12);
+}
+
+.why-label {
+  margin: 0 0 0.35rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
 .reasons {
-  margin: 0.35rem 0 0.5rem;
-  padding-left: 1.1rem;
+  margin: 0;
+  padding-left: 1.05rem;
   color: var(--accent-strong);
   font-size: 0.9rem;
 }
 
 .reasons li {
-  margin-bottom: 0.25rem;
+  margin-bottom: 0.3rem;
+}
+
+.reasons li.reason-primary {
+  color: var(--text);
+  font-weight: 500;
 }
 
 .rec-actions,

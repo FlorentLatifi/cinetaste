@@ -19,8 +19,11 @@ export type Title = {
 };
 
 export type Reason = {
+  /** Stable reason kind (because_you_liked, taste_blend, same_director, …). */
   code: string;
+  /** User-facing explanation sentence. */
   message: string;
+  /** Optional structured support (liked_titles, directors, tones, …). */
   evidence: Record<string, unknown>;
 };
 
