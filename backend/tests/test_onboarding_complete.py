@@ -28,6 +28,7 @@ def _service() -> tuple[OnboardingService, AsyncMock, AsyncMock, AsyncMock]:
     session.flush = AsyncMock()
     taste = AsyncMock()
     taste.record_interaction = AsyncMock()
+    taste.recompute_profile = AsyncMock()
     rec = AsyncMock()
     rec.invalidate_user = AsyncMock()
     rec.onboarding_cards = AsyncMock(return_value=[MagicMock() for _ in range(10)])
@@ -54,8 +55,9 @@ async def test_complete_rejects_only_havent_seen() -> None:
     with pytest.raises(AppError) as exc:
         await service.complete(_user(), _reactions(actions))
     assert exc.value.code == "onboarding_insufficient_ratings"
-    # Interactions are still recorded (state/analytics) before the gate
-    assert taste.record_interaction.await_count == 10
+    # Gates run before persistence — no partial writes on failure
+    taste.record_interaction.assert_not_awaited()
+    taste.recompute_profile.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -85,6 +87,10 @@ async def test_complete_accepts_six_ratings_with_positives() -> None:
     assert user.onboarding_completed_at is not None
     assert user.onboarding_completed_at.tzinfo is not None
     assert taste.record_interaction.await_count == len(actions)
+    # One recompute for the whole batch (not per reaction)
+    taste.recompute_profile.assert_awaited_once_with(user.id)
+    for call in taste.record_interaction.await_args_list:
+        assert call.kwargs.get("recompute") is False
     session.flush.assert_awaited()
     rec.invalidate_user.assert_awaited_once_with(user.id)
 

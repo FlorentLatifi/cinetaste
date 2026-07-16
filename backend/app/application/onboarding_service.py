@@ -85,32 +85,26 @@ class OnboardingService:
         - ``not_interested`` → mild negative signal
         - ``rate_1``…``rate_4`` → Bad … Favorite scale
         """
+        # Validate first so we never leave partial interactions when gates fail.
+        normalized: list[tuple[UUID, str]] = []
         rated = 0
         positive = 0
-        recorded = 0
 
         for reaction in reactions:
-            title_id = UUID(reaction["title_id"])
             action = reaction["action"]
             if action not in ONBOARDING_ACTIONS:
                 continue
             event_type = _LEGACY_ACTION_MAP.get(action, action)
             if not is_supported_event(event_type):
                 continue
-
-            await self._taste.record_interaction(
-                user_id=user.id,
-                title_id=title_id,
-                event_type=event_type,
-            )
-            recorded += 1
-
+            title_id = UUID(reaction["title_id"])
+            normalized.append((title_id, event_type))
             if event_type in RATING_EVENT_TYPES:
                 rated += 1
             if event_type in POSITIVE_RATING_EVENT_TYPES:
                 positive += 1
 
-        if recorded < 1:
+        if not normalized:
             raise AppError(
                 "No valid reactions provided.",
                 status_code=400,
@@ -133,6 +127,16 @@ class OnboardingService:
                 status_code=400,
                 code="onboarding_insufficient_positive",
             )
+
+        # Persist all signals, then recompute the profile once (not per card).
+        for title_id, event_type in normalized:
+            await self._taste.record_interaction(
+                user_id=user.id,
+                title_id=title_id,
+                event_type=event_type,
+                recompute=False,
+            )
+        await self._taste.recompute_profile(user.id)
 
         user.onboarding_completed_at = datetime.now(UTC)
         await self._session.flush()

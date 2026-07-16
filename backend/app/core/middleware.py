@@ -68,18 +68,39 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         return response
 
 
+def client_ip(request: Request, *, trust_x_forwarded_for: bool) -> str:
+    """Resolve client IP.
+
+    Only honor X-Forwarded-For when the process is known to sit behind a
+    trusted reverse proxy (production). Otherwise clients can spoof the header
+    and evade rate limits.
+    """
+    if trust_x_forwarded_for:
+        forwarded = request.headers.get("x-forwarded-for")
+        if forwarded:
+            return forwarded.split(",")[0].strip() or "unknown"
+    return request.client.host if request.client else "unknown"
+
+
 class RateLimitMiddleware(BaseHTTPMiddleware):
-    """Fixed-window rate limiting via Redis. Fails open if Redis is unavailable."""
+    """Fixed-window rate limiting via Redis.
+
+    - Auth routes: **fail closed** if Redis is unavailable (prevents brute force).
+    - Other routes: fail open with a warning (recs remain available).
+    """
 
     def __init__(self, app, settings: Settings) -> None:
         super().__init__(app)
         self._settings = settings
 
+    def _is_auth_path(self, path: str) -> bool:
+        return "/auth/" in path
+
     def _limits_for(self, path: str) -> tuple[int, int]:
         """Return (max_requests, window_seconds)."""
         if path.endswith("/auth/login") or path.endswith("/auth/register"):
             return self._settings.rate_limit_auth_requests, self._settings.rate_limit_auth_window_seconds
-        if "/auth/" in path:
+        if self._is_auth_path(path):
             return self._settings.rate_limit_auth_requests * 2, self._settings.rate_limit_auth_window_seconds
         return self._settings.rate_limit_requests, self._settings.rate_limit_window_seconds
 
@@ -92,13 +113,13 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         if path.endswith("/health") or path.endswith("/ready"):
             return await call_next(request)
 
-        client_ip = request.client.host if request.client else "unknown"
-        forwarded = request.headers.get("x-forwarded-for")
-        if forwarded:
-            client_ip = forwarded.split(",")[0].strip()
+        trust_xff = self._settings.is_production
+        ip = client_ip(request, trust_x_forwarded_for=trust_xff)
 
         max_requests, window = self._limits_for(path)
-        bucket = f"rl:{client_ip}:{path}:{window}"
+        # Bucket by route family, not full path+query, to limit cardinality.
+        family = "auth" if self._is_auth_path(path) else "api"
+        bucket = f"rl:{ip}:{family}:{window}"
 
         try:
             redis = await get_redis()
@@ -120,5 +141,15 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 )
         except Exception:
             logger.warning("rate_limit_unavailable path=%s", path, exc_info=True)
+            if self._is_auth_path(path):
+                # Fail closed for auth: better temporary 503 than open brute-force.
+                return JSONResponse(
+                    status_code=503,
+                    content={
+                        "code": "rate_limit_unavailable",
+                        "message": "Authentication temporarily unavailable. Try again shortly.",
+                    },
+                    headers={"Retry-After": "5"},
+                )
 
         return await call_next(request)

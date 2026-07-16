@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
 from uuid import UUID
 
@@ -16,6 +17,8 @@ from app.infrastructure.db.models.taste import TasteProfile
 from app.infrastructure.db.redis import get_redis
 from app.recommendation.pipeline import RankedItem, rank_titles
 
+logger = logging.getLogger(__name__)
+
 
 class RecommendationService:
     """Candidate generation + ranking. Taste *weights* live in domain.taste_signals."""
@@ -24,17 +27,35 @@ class RecommendationService:
         self._session = session
         self._settings = settings
 
+    async def _cache_get(self, key: str) -> str | None:
+        try:
+            redis = await get_redis()
+            return await redis.get(key)
+        except Exception:
+            logger.warning("redis_cache_get_failed key=%s", key, exc_info=True)
+            return None
+
+    async def _cache_set(self, key: str, value: str, ex: int) -> None:
+        try:
+            redis = await get_redis()
+            await redis.set(key, value, ex=ex)
+        except Exception:
+            logger.warning("redis_cache_set_failed key=%s", key, exc_info=True)
+
     async def for_you(self, user_id: UUID, *, limit: int | None = None) -> list[tuple[Title, RankedItem]]:
         slate_size = limit or self._settings.rec_slate_size
         profile = await self._session.get(TasteProfile, user_id)
         profile_version = profile.version if profile else 0
         cache_key = f"slate:{user_id}:{profile_version}:{slate_size}"
 
-        redis = await get_redis()
-        cached = await redis.get(cache_key)
+        # Redis is optional: cache miss or Redis down both fall through to compute.
+        cached = await self._cache_get(cache_key)
         if cached:
-            payload = json.loads(cached)
-            return await self._hydrate(payload)
+            try:
+                payload = json.loads(cached)
+                return await self._hydrate(payload)
+            except Exception:
+                logger.warning("redis_cache_payload_invalid key=%s", cache_key, exc_info=True)
 
         # States derived from taste signal policy (haven't_seen is never excluded).
         exclude_states = (
@@ -47,6 +68,7 @@ class RecommendationService:
         ).all()
         exclude_ids = {row.title_id for row in exclude_states}
 
+        # Ranking uses feature_snapshot + genres only — do not load credits here.
         titles = (
             await self._session.scalars(
                 select(Title)
@@ -54,7 +76,6 @@ class RecommendationService:
                 .options(
                     selectinload(Title.genres),
                     selectinload(Title.keywords),
-                    selectinload(Title.credits),
                 )
                 .order_by(Title.popularity.desc())
                 .limit(800)
@@ -90,7 +111,7 @@ class RecommendationService:
             }
             for item in ranked
         ]
-        await redis.set(
+        await self._cache_set(
             cache_key,
             json.dumps(cache_payload),
             ex=self._settings.rec_cache_ttl_seconds,
@@ -98,10 +119,12 @@ class RecommendationService:
         return await self._hydrate(cache_payload)
 
     async def invalidate_user(self, user_id: UUID) -> None:
-        redis = await get_redis()
-        # Simple pattern delete for local Redis
-        async for key in redis.scan_iter(match=f"slate:{user_id}:*"):
-            await redis.delete(key)
+        try:
+            redis = await get_redis()
+            async for key in redis.scan_iter(match=f"slate:{user_id}:*"):
+                await redis.delete(key)
+        except Exception:
+            logger.warning("redis_invalidate_failed user_id=%s", user_id, exc_info=True)
 
     async def onboarding_cards(
         self,

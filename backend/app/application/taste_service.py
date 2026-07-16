@@ -9,6 +9,12 @@ This service:
 1. Records append-only InteractionEvents with policy weights
 2. Updates UserTitleState for feed/watchlist filters
 3. Recomputes sparse features + dense vector + explain anchors
+
+Performance note
+----------------
+``record_interaction(..., recompute=True)`` is the default for single feed actions.
+Bulk flows (onboarding complete) MUST use ``recompute=False`` and call
+``recompute_profile`` once at the end to avoid O(n²) full-history replays.
 """
 
 from typing import Any
@@ -72,7 +78,13 @@ class TasteService:
         title_id: UUID,
         event_type: str,
         weight: float | None = None,
+        recompute: bool = True,
     ) -> UserTitleState:
+        """Persist one interaction.
+
+        Set ``recompute=False`` when recording many events in a loop, then call
+        ``recompute_profile`` once.
+        """
         if not is_supported_event(event_type):
             raise ValueError(f"Unsupported event_type: {event_type}")
 
@@ -105,9 +117,8 @@ class TasteService:
             self._session.add(state)
 
         await self._session.flush()
-        # Recompute even for zero-signal events so version stays consistent
-        # when other events already exist (and to refresh explain memory).
-        await self.recompute_profile(user_id)
+        if recompute:
+            await self.recompute_profile(user_id)
         return state
 
     async def recompute_profile(self, user_id: UUID) -> TasteProfile:

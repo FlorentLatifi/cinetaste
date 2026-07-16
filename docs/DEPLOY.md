@@ -43,8 +43,16 @@ CREATE EXTENSION IF NOT EXISTS vector;
 
 Migrations run automatically via `entrypoint.sh` (`alembic upgrade head`).
 
-6. Health check: `https://<api-host>/api/v1/health`  
-7. Readiness: `https://<api-host>/api/v1/ready`
+6. Liveness: `https://<api-host>/api/v1/health` (process up)  
+7. Readiness: `https://<api-host>/api/v1/ready` — returns **503** if DB (or Redis in production) is down; use this for load balancers  
+
+### Resilience notes (production)
+
+| Concern | Behavior |
+|---------|----------|
+| Redis down | `/recommendations/for-you` still computes (no cache). Auth routes **fail closed** (503) if rate limiter cannot reach Redis. |
+| Taste onboarding | Reactions validated first; profile recomputed **once** after all events. |
+| Proxy headers | Set `FORWARDED_ALLOW_IPS` to your LB/proxy IPs (not `*` in hostile networks). |
 
 ### Database URL note
 
