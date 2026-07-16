@@ -1,5 +1,31 @@
 from __future__ import annotations
 
+"""Taste profile learning from user–title interactions.
+
+Signal semantics (how each action moves genre weights / embeddings)
+------------------------------------------------------------------
+Every stored InteractionEvent has a numeric ``weight``. On recompute we
+accumulate ``feature_snapshot[key] * weight`` into sparse genre/keyword
+features and blend title embeddings with the same weight.
+
+| event_type       | weight | Affects taste? | UserTitleState   | Notes |
+|------------------|--------|----------------|------------------|-------|
+| haven't_seen     |  0.0   | **No**         | haven't_seen     | Seen in onboarding only for UX/analytics. Zero contribution to features/vector. Not excluded from For You. |
+| not_interested   | -0.40  | Mild negative  | not_interested   | User knows the title (or type) and rejects it. Mild genre push-away; excluded from For You. |
+| rate_1 (Bad)     | -0.90  | Strong negative| dislike          | Explicit low rating after claiming familiarity. |
+| rate_2 (It's ok) |  0.30  | Weak positive  | rated            | Soft positive — seen but not loved. |
+| rate_3 (Good)    |  1.00  | Positive       | like             | Solid like. |
+| rate_4 (Favorite)|  1.55  | Strong positive| like             | Boosts matching genres/embeddings hardest. |
+| like             |  1.00  | Positive       | like             | Post-onboarding shortcut (same as rate_3). |
+| dislike          | -0.85  | Strong negative| dislike          | Post-onboarding shortcut (≈ rate_1). |
+| watchlist        |  0.45  | Mild positive  | watchlist        | Intent to watch. |
+| skip             | -0.15  | Tiny negative  | (none)           | Soft pass in feed; barely moves profile. |
+| view             |  0.05  | Near-zero      | (none)           | Impression logging; almost no learning. |
+
+Events with ``abs(weight) < ZERO_SIGNAL_EPS`` are skipped entirely during
+recompute so they cannot drift genre weights or embeddings.
+"""
+
 from typing import Any
 from uuid import UUID
 
@@ -12,22 +38,47 @@ from app.infrastructure.db.models.interaction import InteractionEvent, UserTitle
 from app.infrastructure.db.models.taste import TasteProfile
 from app.recommendation.embeddings import blend_vectors
 
-# Signal weights for taste learning
-SIGNAL_WEIGHTS = {
+# Below this absolute weight, an event never touches features or embeddings.
+ZERO_SIGNAL_EPS = 1e-9
+
+# Signal weights for taste learning (see module docstring).
+SIGNAL_WEIGHTS: dict[str, float] = {
+    "haven't_seen": 0.0,
+    "not_interested": -0.40,
+    "rate_1": -0.90,
+    "rate_2": 0.30,
+    "rate_3": 1.00,
+    "rate_4": 1.55,
     "like": 1.0,
     "dislike": -0.85,
     "watchlist": 0.45,
-    "not_interested": -1.0,
     "skip": -0.15,
     "view": 0.05,
 }
 
-STATE_FROM_EVENT = {
+# Events that count as an explicit rating of a title the user has seen.
+RATING_EVENT_TYPES = frozenset({"rate_1", "rate_2", "rate_3", "rate_4"})
+
+# Positive rating steps (used for onboarding quality gates).
+POSITIVE_RATING_EVENT_TYPES = frozenset({"rate_2", "rate_3", "rate_4", "like"})
+
+STATE_FROM_EVENT: dict[str, str] = {
     "like": "like",
     "dislike": "dislike",
     "watchlist": "watchlist",
     "not_interested": "not_interested",
+    "haven't_seen": "haven't_seen",
+    "rate_1": "dislike",
+    "rate_2": "rated",
+    "rate_3": "like",
+    "rate_4": "like",
 }
+
+# States that should not reappear on the For You slate.
+FEED_EXCLUDE_STATES = frozenset(
+    {"like", "dislike", "not_interested", "watchlist", "rated"}
+)
+# "haven't_seen" is intentionally NOT excluded — user may still enjoy a rec.
 
 
 class TasteService:
@@ -73,6 +124,8 @@ class TasteService:
             self._session.add(state)
 
         await self._session.flush()
+        # Zero-signal events still recompute (no-op for that event) so profile
+        # version stays consistent if other events exist.
         await self.recompute_profile(user_id)
         return state
 
@@ -101,12 +154,18 @@ class TasteService:
         vectors: list[tuple[list[float], float]] = []
 
         for event in events:
+            # Haven't-seen and any other zero-weight event: no taste influence.
+            if abs(float(event.weight)) < ZERO_SIGNAL_EPS:
+                continue
+            if event.event_type == "haven't_seen":
+                continue
+
             title = titles.get(event.title_id)
             if title is None:
                 continue
             snap = (title.extra or {}).get("feature_snapshot") or {}
             for key, value in snap.items():
-                feature_acc[key] = feature_acc.get(key, 0.0) + float(value) * event.weight
+                feature_acc[key] = feature_acc.get(key, 0.0) + float(value) * float(event.weight)
             if title.embedding is not None:  # numpy/pgvector: use identity check only
                 vectors.append((list(title.embedding), float(event.weight)))
 

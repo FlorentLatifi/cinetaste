@@ -30,6 +30,20 @@ export type RecommendationItem = {
   reasons: Reason[];
 };
 
+/** Onboarding / interaction actions that move (or don't move) taste. */
+export type OnboardingAction =
+  | "haven't_seen"
+  | "not_interested"
+  | "rate_1"
+  | "rate_2"
+  | "rate_3"
+  | "rate_4";
+
+export type OnboardingReaction = {
+  title_id: string;
+  action: OnboardingAction;
+};
+
 export function getForYou(accessToken: string, limit = 20) {
   return apiFetch<{ items: RecommendationItem[] }>(
     `/recommendations/for-you?limit=${limit}`,
@@ -38,13 +52,26 @@ export function getForYou(accessToken: string, limit = 20) {
   );
 }
 
-export function getOnboardingCards(accessToken: string) {
-  return apiFetch<{ items: Title[] }>("/onboarding/cards", {}, accessToken);
+export function getOnboardingCards(
+  accessToken: string,
+  opts?: { limit?: number; exclude?: string[] },
+) {
+  const params = new URLSearchParams();
+  if (opts?.limit) params.set("limit", String(opts.limit));
+  for (const id of opts?.exclude ?? []) {
+    params.append("exclude", id);
+  }
+  const qs = params.toString();
+  return apiFetch<{ items: Title[] }>(
+    `/onboarding/cards${qs ? `?${qs}` : ""}`,
+    {},
+    accessToken,
+  );
 }
 
 export function completeOnboarding(
   accessToken: string,
-  reactions: { title_id: string; action: "like" | "dislike" }[],
+  reactions: OnboardingReaction[],
 ) {
   return apiFetch(
     "/onboarding/complete",
@@ -59,7 +86,18 @@ export function completeOnboarding(
 export function interact(
   accessToken: string,
   titleId: string,
-  event_type: "like" | "dislike" | "watchlist" | "not_interested" | "skip" | "view",
+  event_type:
+    | "like"
+    | "dislike"
+    | "watchlist"
+    | "not_interested"
+    | "skip"
+    | "view"
+    | "haven't_seen"
+    | "rate_1"
+    | "rate_2"
+    | "rate_3"
+    | "rate_4",
 ) {
   return apiFetch<void>(
     `/titles/${titleId}/interactions`,

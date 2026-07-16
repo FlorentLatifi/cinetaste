@@ -8,6 +8,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.application.taste_service import FEED_EXCLUDE_STATES
 from app.core.config import Settings
 from app.infrastructure.db.models.catalog import Title
 from app.infrastructure.db.models.interaction import UserTitleState
@@ -37,13 +38,11 @@ class RecommendationService:
             await self._session.scalars(
                 select(UserTitleState).where(
                     UserTitleState.user_id == user_id,
-                    UserTitleState.state.in_(
-                        ["like", "dislike", "not_interested", "watchlist"]
-                    ),
+                    UserTitleState.state.in_(list(FEED_EXCLUDE_STATES)),
                 )
             )
         ).all()
-        # Still allow re-surfacing watchlist lightly? For MVP exclude all known states for freshness
+        # Haven't-seen is NOT excluded — user may still want those recommended.
         exclude_ids = {row.title_id for row in exclude_states}
 
         titles = (
@@ -98,24 +97,39 @@ class RecommendationService:
         async for key in redis.scan_iter(match=f"slate:{user_id}:*"):
             await redis.delete(key)
 
-    async def onboarding_cards(self, *, limit: int = 20) -> list[Title]:
-        """Diverse popular titles for swipe onboarding."""
+    async def onboarding_cards(
+        self,
+        *,
+        limit: int = 24,
+        exclude_ids: set[UUID] | None = None,
+    ) -> list[Title]:
+        """Diverse popular titles for rating-based onboarding.
+
+        ``exclude_ids`` lets the client fetch another batch after many
+        “Haven't seen it” answers without repeating titles.
+        """
+        skip = exclude_ids or set()
+        # Pull a wide pool so diversity + excludes still leave enough cards.
+        pool_size = max(120, limit * 6 + len(skip))
         titles = (
             await self._session.scalars(
                 select(Title)
                 .where(Title.poster_path.is_not(None), Title.embedding.is_not(None))
                 .options(selectinload(Title.genres))
                 .order_by(Title.popularity.desc())
-                .limit(120)
+                .limit(pool_size)
             )
         ).all()
+
+        candidates = [t for t in titles if t.id not in skip]
 
         # Greedy diversity by primary genre
         picked: list[Title] = []
         genre_counts: dict[str, int] = {}
-        for title in titles:
+        per_genre_cap = max(3, (limit // 6) + 1)
+        for title in candidates:
             primary = title.genres[0].name if title.genres else "unknown"
-            if genre_counts.get(primary, 0) >= 3:
+            if genre_counts.get(primary, 0) >= per_genre_cap:
                 continue
             genre_counts[primary] = genre_counts.get(primary, 0) + 1
             picked.append(title)
@@ -123,7 +137,7 @@ class RecommendationService:
                 break
 
         if len(picked) < limit:
-            for title in titles:
+            for title in candidates:
                 if title not in picked:
                     picked.append(title)
                 if len(picked) >= limit:

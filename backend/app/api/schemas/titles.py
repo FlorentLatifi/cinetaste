@@ -71,16 +71,34 @@ class RecommendationSlateOut(BaseModel):
 
 
 class InteractionRequest(BaseModel):
-    event_type: str = Field(pattern="^(like|dislike|watchlist|not_interested|skip|view)$")
+    event_type: str = Field(
+        pattern=(
+            "^(like|dislike|watchlist|not_interested|skip|view|"
+            "haven't_seen|rate_1|rate_2|rate_3|rate_4)$"
+        )
+    )
 
 
 class OnboardingReaction(BaseModel):
+    """One card decision during onboarding.
+
+    Actions:
+    - haven't_seen — zero taste signal
+    - not_interested — mild negative signal
+    - rate_1 … rate_4 — Bad / It's ok / Good / Favorite
+    - like / dislike — legacy aliases (mapped to rate_3 / rate_1)
+    """
+
     title_id: UUID
-    action: str = Field(pattern="^(like|dislike)$")
+    action: str = Field(
+        pattern=(
+            "^(haven't_seen|not_interested|rate_1|rate_2|rate_3|rate_4|like|dislike)$"
+        )
+    )
 
 
 class OnboardingCompleteRequest(BaseModel):
-    reactions: list[OnboardingReaction] = Field(min_length=1, max_length=40)
+    reactions: list[OnboardingReaction] = Field(min_length=1, max_length=80)
 
 
 class OnboardingCardsOut(BaseModel):

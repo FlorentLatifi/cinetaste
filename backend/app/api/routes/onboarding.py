@@ -1,6 +1,7 @@
 from typing import Annotated
+from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUser, get_settings_dep
@@ -20,11 +21,16 @@ async def onboarding_cards(
     user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_db)],
     settings: Annotated[Settings, Depends(get_settings_dep)],
+    limit: int = Query(default=24, ge=8, le=40),
+    exclude: list[UUID] | None = Query(
+        default=None,
+        description="Title IDs already shown (e.g. after many Haven't seen answers).",
+    ),
 ) -> OnboardingCardsOut:
     rec = RecommendationService(session, settings)
     taste = TasteService(session)
     service = OnboardingService(session, taste, rec)
-    cards = await service.cards()
+    cards = await service.cards(limit=limit, exclude_ids=exclude)
     return OnboardingCardsOut(items=[TitleSummaryOut.from_title(t) for t in cards])
 
 

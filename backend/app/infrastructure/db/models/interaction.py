@@ -22,7 +22,8 @@ class InteractionEvent(Base):
     title_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("titles.id", ondelete="CASCADE"), index=True, nullable=False
     )
-    # like | dislike | watchlist | not_interested | skip | view
+    # like | dislike | watchlist | not_interested | skip | view |
+    # haven't_seen | rate_1 | rate_2 | rate_3 | rate_4
     event_type: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     weight: Mapped[float] = mapped_column(Float, default=1.0, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
@@ -43,7 +44,7 @@ class UserTitleState(Base):
     title_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("titles.id", ondelete="CASCADE"), index=True, nullable=False
     )
-    # like | dislike | watchlist | not_interested | none
+    # like | dislike | watchlist | not_interested | haven't_seen | rated | none
     state: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
