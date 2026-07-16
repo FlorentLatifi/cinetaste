@@ -25,6 +25,7 @@ export function AccountPage() {
   const [exportStatus, setExportStatus] = useState<string | null>(null);
   const [importPreview, setImportPreview] = useState<TasteSnapshotV1 | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
+  const [importBusy, setImportBusy] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -110,6 +111,30 @@ export function AccountPage() {
       setExportStatus(`Opened snapshot from ${file.name}.`);
     } catch {
       setImportError("Could not read that file.");
+    }
+  }
+
+  async function mergeSnapshot() {
+    if (!accessToken || !importPreview) return;
+    setImportBusy(true);
+    setImportError(null);
+    try {
+      const result = await authApi.importTaste(accessToken, {
+        schema: importPreview.schema,
+        likes: importPreview.likes,
+        dislikes: importPreview.dislikes,
+      });
+      setTaste(result.summary);
+      setExportStatus(
+        `Merged ${result.merged_features} signals into your profile (v${result.profile_version}).`,
+      );
+      setImportPreview(null);
+    } catch (err) {
+      setImportError(
+        err instanceof ApiError ? err.message : "Could not merge snapshot",
+      );
+    } finally {
+      setImportBusy(false);
     }
   }
 
@@ -317,24 +342,37 @@ export function AccountPage() {
               </p>
             )}
             <p className="taste-export-note">
-              Preview only — opening a file does not change your live profile.
-              Rate titles to train taste; export is a private backup/share format.
+              Merge soft-blends these signals into your profile (scaled so live
+              ratings still dominate). It does not replace history or the dense
+              vector. For You cache is refreshed after merge.
             </p>
-            <button
-              type="button"
-              className="btn ghost"
-              onClick={() => {
-                setImportPreview(null);
-                setImportError(null);
-              }}
-            >
-              Dismiss preview
-            </button>
+            <div className="taste-export">
+              <button
+                type="button"
+                className="btn primary"
+                disabled={importBusy}
+                onClick={() => void mergeSnapshot()}
+              >
+                {importBusy ? "Merging…" : "Merge into my profile"}
+              </button>
+              <button
+                type="button"
+                className="btn ghost"
+                disabled={importBusy}
+                onClick={() => {
+                  setImportPreview(null);
+                  setImportError(null);
+                }}
+              >
+                Dismiss
+              </button>
+            </div>
           </div>
         )}
         <p className="taste-export-note">
           Export is private to you — no embedding vector, only readable signals
-          and title anchors. Open a previously downloaded JSON to review it here.
+          and title anchors. Open a downloaded JSON to preview, then optionally
+          merge.
         </p>
       </div>
 

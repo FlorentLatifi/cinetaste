@@ -150,6 +150,40 @@ export async function installApiMock(
       return;
     }
 
+    if (method === "POST" && path === "/me/taste/import") {
+      await route.fulfill(
+        json({
+          merged_features: 2,
+          profile_version: 4,
+          summary: {
+            version: 4,
+            updated_at: "2026-01-16T12:00:00.000Z",
+            has_vector: true,
+            feature_count: 5,
+            anchor_count: 1,
+            ready: true,
+            likes: [
+              {
+                key: "genre:drama",
+                family: "genre",
+                label: "Drama",
+                weight: 2.4,
+              },
+            ],
+            dislikes: [
+              {
+                key: "genre:horror",
+                family: "genre",
+                label: "Horror",
+                weight: -1.4,
+              },
+            ],
+          },
+        }),
+      );
+      return;
+    }
+
     if (method === "GET" && path.startsWith("/recommendations/for-you")) {
       await route.fulfill(
         json({

@@ -2,6 +2,8 @@ from app.application.taste_summary import (
     build_taste_export,
     format_taste_export_text,
     humanize_feature_key,
+    is_allowed_feature_key,
+    merge_import_overlay,
     rank_features,
     summarize_profile_features,
 )
@@ -82,3 +84,24 @@ def test_build_taste_export_and_text() -> None:
     assert "Horror" in text
     assert "Inception (2010)" in text
     assert "secret" not in text
+
+
+def test_merge_import_overlay_scales_and_filters() -> None:
+    assert is_allowed_feature_key("genre:drama")
+    assert not is_allowed_feature_key("__import_overlay__")
+    assert not is_allowed_feature_key("hack:me")
+
+    overlay = merge_import_overlay(
+        {"genre:drama": 1.0},
+        likes=[
+            {"key": "genre:drama", "weight": 2.0, "label": "Drama", "family": "genre"},
+            {"key": "evil:x", "weight": 9.0, "label": "Nope", "family": "x"},
+        ],
+        dislikes=[
+            {"key": "genre:horror", "weight": -1.0, "label": "Horror", "family": "genre"},
+        ],
+        scale=0.5,
+    )
+    assert overlay["genre:drama"] == 2.0  # 1.0 + 2.0*0.5
+    assert overlay["genre:horror"] == -0.5
+    assert "evil:x" not in overlay

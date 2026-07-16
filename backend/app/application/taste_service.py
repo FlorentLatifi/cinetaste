@@ -44,6 +44,7 @@ from app.domain.taste_signals import (
 from app.infrastructure.db.models.catalog import Title
 from app.infrastructure.db.models.interaction import InteractionEvent, UserTitleState
 from app.infrastructure.db.models.taste import TasteProfile
+from app.application.taste_summary import IMPORT_OVERLAY_KEY, merge_import_overlay
 from app.recommendation.embeddings import blend_vectors, normalize_feature_families
 from app.recommendation.explanations import (
     build_anchor_from_title,
@@ -155,6 +156,20 @@ class TasteService:
             (e.title_id, e.event_type, e.created_at) for e in events
         )
 
+        # Preserve durable import overlay across recompute.
+        existing_profile = await self._session.get(TasteProfile, user_id)
+        import_overlay: dict[str, float] = {}
+        if existing_profile and isinstance(existing_profile.features, dict):
+            raw_overlay = existing_profile.features.get(IMPORT_OVERLAY_KEY)
+            if isinstance(raw_overlay, dict):
+                for k, v in raw_overlay.items():
+                    if str(k).startswith("__"):
+                        continue
+                    try:
+                        import_overlay[str(k)] = float(v)
+                    except (TypeError, ValueError):
+                        continue
+
         for event in events:
             if is_superseded_by_clear(
                 title_id=event.title_id,
@@ -189,6 +204,10 @@ class TasteService:
             ):
                 latest_anchor[event.title_id] = event
 
+        # Apply import overlay into scoring features (live ratings still dominate scale).
+        for key, value in import_overlay.items():
+            feature_acc[key] = feature_acc.get(key, 0.0) + float(value)
+
         anchors: list[dict[str, Any]] = []
         for title_id, event in latest_anchor.items():
             title = titles.get(title_id)
@@ -210,9 +229,13 @@ class TasteService:
         capped = {k: max(min(v, 4.5), -4.5) for k, v in raw_features.items()}
         features = normalize_feature_families(capped)
         features_with_memory = merge_explain_memory(features, anchors)
+        if import_overlay:
+            features_with_memory[IMPORT_OVERLAY_KEY] = {
+                k: round(v, 4) for k, v in import_overlay.items()
+            }
         vector = blend_vectors(vectors)
 
-        profile = await self._session.get(TasteProfile, user_id)
+        profile = existing_profile
         if profile is None:
             profile = TasteProfile(
                 user_id=user_id, version=1, features=features_with_memory, vector=vector
@@ -225,6 +248,49 @@ class TasteService:
 
         await self._session.flush()
         return profile
+
+    async def merge_taste_snapshot(
+        self,
+        user_id: UUID,
+        *,
+        likes: list[dict[str, Any]],
+        dislikes: list[dict[str, Any]],
+    ) -> TasteProfile:
+        """Merge an exported snapshot into a durable import overlay, then recompute."""
+        profile = await self._session.get(TasteProfile, user_id)
+        existing_features: dict[str, Any] = {}
+        if profile is not None and isinstance(profile.features, dict):
+            existing_features = dict(profile.features)
+
+        raw_overlay = existing_features.get(IMPORT_OVERLAY_KEY)
+        overlay = merge_import_overlay(
+            raw_overlay if isinstance(raw_overlay, dict) else None,
+            likes=likes,
+            dislikes=dislikes,
+        )
+        if not overlay and not likes and not dislikes:
+            # Nothing to merge — still return profile
+            if profile is None:
+                profile = TasteProfile(
+                    user_id=user_id, version=1, features={}, vector=None
+                )
+                self._session.add(profile)
+                await self._session.flush()
+            return profile
+
+        existing_features[IMPORT_OVERLAY_KEY] = overlay
+        if profile is None:
+            profile = TasteProfile(
+                user_id=user_id,
+                version=1,
+                features=existing_features,
+                vector=None,
+            )
+            self._session.add(profile)
+        else:
+            profile.features = existing_features
+        await self._session.flush()
+        return await self.recompute_profile(user_id)
 
     async def get_profile(self, user_id: UUID) -> TasteProfile | None:
         return await self._session.get(TasteProfile, user_id)

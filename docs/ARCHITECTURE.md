@@ -249,6 +249,7 @@ Swap implementations without rewriting the API.
 | GET | `/me/history` | Paginated history (`items`, `next_cursor`, `has_more`); optional `?state=` + `?cursor=` |
 | GET | `/me/taste` | Interpretable taste summary (top likes / dislikes chips) |
 | GET | `/me/taste/export` | Downloadable taste snapshot (JSON fields + plain-text share body; no embedding) |
+| POST | `/me/taste/import` | Merge snapshot likes/dislikes into durable sparse overlay + recompute |
 | GET | `/watchlist` | Saved titles |
 | GET | `/search?q=` | Title search |
 | GET | `/health` | Liveness |

@@ -7,6 +7,26 @@ from typing import Any
 
 from app.recommendation.explanations import EXPLAIN_MEMORY_KEY, strip_explain_memory
 
+# Durable sparse overlay applied after event recompute (survives clear/re-rate).
+IMPORT_OVERLAY_KEY = "__import_overlay__"
+
+# Soften imported weights so live ratings still dominate.
+IMPORT_MERGE_SCALE = 0.65
+
+_ALLOWED_FEATURE_PREFIXES = (
+    "person:director:",
+    "person:writer:",
+    "person:cast:",
+    "genre:",
+    "tone:",
+    "keyword:",
+    "lang:",
+    "country:",
+    "decade:",
+    "runtime:",
+    "media:",
+)
+
 
 @dataclass(frozen=True)
 class FeatureChip:
@@ -177,6 +197,53 @@ def build_taste_export(
         "dislikes": dislikes,
         "anchors": anchors,
     }
+
+
+def is_allowed_feature_key(key: str) -> bool:
+    if not key or key.startswith("__"):
+        return False
+    return any(key.startswith(p) for p in _ALLOWED_FEATURE_PREFIXES)
+
+
+def merge_import_overlay(
+    existing_overlay: dict[str, Any] | None,
+    *,
+    likes: list[dict[str, Any]],
+    dislikes: list[dict[str, Any]],
+    scale: float = IMPORT_MERGE_SCALE,
+) -> dict[str, float]:
+    """Merge snapshot chips into a durable import overlay map."""
+    out: dict[str, float] = {}
+    if existing_overlay:
+        for k, v in existing_overlay.items():
+            if not is_allowed_feature_key(str(k)):
+                continue
+            try:
+                out[str(k)] = float(v)
+            except (TypeError, ValueError):
+                continue
+
+    def _add(rows: list[dict[str, Any]], *, expect_positive: bool) -> None:
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            key = row.get("key")
+            if not isinstance(key, str) or not is_allowed_feature_key(key):
+                continue
+            try:
+                weight = float(row.get("weight", 0))
+            except (TypeError, ValueError):
+                continue
+            if expect_positive and weight <= 0:
+                continue
+            if not expect_positive and weight >= 0:
+                continue
+            out[key] = out.get(key, 0.0) + weight * scale
+
+    _add(likes, expect_positive=True)
+    _add(dislikes, expect_positive=False)
+    # Cap so a re-import loop cannot explode the profile
+    return {k: max(min(round(v, 4), 4.5), -4.5) for k, v in out.items() if abs(v) > 0.02}
 
 
 def format_taste_export_text(snapshot: dict[str, Any]) -> str:

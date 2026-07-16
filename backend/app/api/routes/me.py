@@ -10,6 +10,8 @@ from app.api.schemas.auth import (
     TasteAnchorOut,
     TasteExportOut,
     TasteFeatureOut,
+    TasteImportRequest,
+    TasteImportResultOut,
     TasteSummaryOut,
     UserResponse,
 )
@@ -133,6 +135,72 @@ async def export_taste(
         ],
         anchors=[TasteAnchorOut(**row) for row in snapshot["anchors"]],
         text=format_taste_export_text(snapshot),
+    )
+
+
+@router.post("/me/taste/import", response_model=TasteImportResultOut)
+async def import_taste(
+    body: TasteImportRequest,
+    user: CurrentUser,
+    session: Annotated[AsyncSession, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_settings_dep)],
+) -> TasteImportResultOut:
+    """Merge an exported taste snapshot into a durable sparse overlay.
+
+    Soft-scaled (does not replace ratings). Survives profile recompute.
+    Invalidates For You slate cache.
+    """
+    if body.schema_version != "cinetaste.taste_snapshot.v1":
+        raise AppError(
+            'Unsupported schema — expected "cinetaste.taste_snapshot.v1"',
+            status_code=400,
+            code="invalid_snapshot_schema",
+        )
+    if not body.likes and not body.dislikes:
+        raise AppError(
+            "Snapshot has no likes or dislikes to merge",
+            status_code=400,
+            code="empty_snapshot",
+        )
+
+    taste = TasteService(session)
+    profile = await taste.merge_taste_snapshot(
+        user.id,
+        likes=[f.model_dump() for f in body.likes],
+        dislikes=[f.model_dump() for f in body.dislikes],
+    )
+
+    # Drop cached For You slate so new features apply immediately
+    rec = RecommendationService(session, settings)
+    await rec.invalidate_user(user.id)
+
+    summary = summarize_profile_features(profile.features, limit=8)
+    has_vector = profile.vector is not None and len(list(profile.vector)) > 0
+
+    def map_chips(rows: list) -> list[TasteFeatureOut]:
+        return [
+            TasteFeatureOut(
+                key=c.key,
+                family=c.family,
+                label=c.label,
+                weight=c.weight,
+            )
+            for c in rows
+        ]
+
+    return TasteImportResultOut(
+        merged_features=len(body.likes) + len(body.dislikes),
+        profile_version=int(profile.version or 1),
+        summary=TasteSummaryOut(
+            version=int(profile.version or 1),
+            updated_at=profile.updated_at,
+            has_vector=has_vector,
+            feature_count=summary["feature_count"],
+            anchor_count=summary["anchor_count"],
+            likes=map_chips(summary["likes"]),
+            dislikes=map_chips(summary["dislikes"]),
+            ready=summary["feature_count"] > 0 or has_vector,
+        ),
     )
 
 

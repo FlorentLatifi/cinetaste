@@ -119,3 +119,27 @@ export type TasteExport = {
 export function exportTaste(accessToken: string) {
   return apiFetch<TasteExport>("/me/taste/export", {}, accessToken);
 }
+
+export type TasteImportResult = {
+  merged_features: number;
+  profile_version: number;
+  summary: TasteSummary;
+};
+
+export function importTaste(
+  accessToken: string,
+  body: {
+    schema: string;
+    likes: TasteFeature[];
+    dislikes: TasteFeature[];
+  },
+) {
+  return apiFetch<TasteImportResult>(
+    "/me/taste/import",
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+    },
+    accessToken,
+  );
+}

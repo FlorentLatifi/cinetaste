@@ -84,6 +84,28 @@ class TasteExportOut(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
+class TasteImportRequest(BaseModel):
+    """Merge a previously exported taste snapshot into the live profile."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    schema_version: str = Field(
+        default="cinetaste.taste_snapshot.v1",
+        alias="schema",
+        description='Must be "cinetaste.taste_snapshot.v1"',
+    )
+    likes: list[TasteFeatureOut] = Field(default_factory=list, max_length=40)
+    dislikes: list[TasteFeatureOut] = Field(default_factory=list, max_length=40)
+
+
+class TasteImportResultOut(BaseModel):
+    """Result of a snapshot merge."""
+
+    merged_features: int
+    profile_version: int
+    summary: TasteSummaryOut
+
+
 class TokenResponse(BaseModel):
     """Access JWT + user. Refresh token is httpOnly cookie only (not in body)."""
 

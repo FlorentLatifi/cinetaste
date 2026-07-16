@@ -49,6 +49,17 @@ User action
 | **Watched + liked** | `watched_liked` | **+1.10** | positive | Yes | `like` | Yes | Convenience; slightly above Good. |
 | **Watched + disliked** | `watched_disliked` | **−0.95** | negative | Yes | `dislike` | Yes | Strong negative — they invested time. |
 
+### Taste snapshot export / import
+
+| Action | Endpoint | Behavior |
+|--------|----------|----------|
+| Export | `GET /me/taste/export` | Human-readable likes/dislikes + anchor names; **no** dense embedding |
+| Import merge | `POST /me/taste/import` | Soft-scales chips into `__import_overlay__` (survives recompute), then recomputes |
+
+Import does **not** rewrite interaction history. Overlay weights are capped and
+scaled (`IMPORT_MERGE_SCALE`) so live ratings still dominate. For You slate cache
+is invalidated after merge.
+
 ### History page
 
 `GET /me/history` returns a page of current `UserTitleState` rows in  
