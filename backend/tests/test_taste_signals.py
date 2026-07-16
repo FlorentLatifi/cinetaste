@@ -65,6 +65,9 @@ def test_history_states_and_labels() -> None:
     assert label_for_state("like") == "Liked"
     assert label_for_state("not_interested") == "Not interested"
     assert label_for_state("custom_x") == "Custom X"
+    # API filter allow-list matches UI chips
+    for s in ("like", "dislike", "watchlist", "not_interested", "rated", "watched"):
+        assert s in HISTORY_VISIBLE_STATES
 
 
 def test_clear_is_zero_signal_and_active_api() -> None:

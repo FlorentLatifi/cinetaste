@@ -1,9 +1,19 @@
-import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { ApiError } from "../api/client";
 import * as titlesApi from "../api/titles";
 import type { HistoryItem } from "../api/titles";
 import { useAuth } from "../features/auth/AuthContext";
+
+const FILTERS: { id: string; label: string; state?: string }[] = [
+  { id: "all", label: "All" },
+  { id: "like", label: "Liked", state: "like" },
+  { id: "rated", label: "Rated", state: "rated" },
+  { id: "watched", label: "Watched", state: "watched" },
+  { id: "watchlist", label: "Watchlist", state: "watchlist" },
+  { id: "dislike", label: "Passed", state: "dislike" },
+  { id: "not_interested", label: "Not interested", state: "not_interested" },
+];
 
 function formatWhen(iso: string): string {
   try {
@@ -18,8 +28,18 @@ function formatWhen(iso: string): string {
   }
 }
 
+function resolveFilter(raw: string | null): (typeof FILTERS)[number] {
+  const found = FILTERS.find((f) => f.id === raw);
+  return found ?? FILTERS[0];
+}
+
 export function HistoryPage() {
   const { accessToken } = useAuth();
+  const [params, setParams] = useSearchParams();
+  const filter = useMemo(
+    () => resolveFilter(params.get("state")),
+    [params],
+  );
   const [items, setItems] = useState<HistoryItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -28,13 +48,17 @@ export function HistoryPage() {
   useEffect(() => {
     if (!accessToken) return;
     let cancelled = false;
+    setLoading(true);
     (async () => {
       try {
-        const data = await titlesApi.getHistory(accessToken);
+        const data = await titlesApi.getHistory(accessToken, {
+          state: filter.state,
+        });
         if (!cancelled) setItems(data);
       } catch (err) {
         if (!cancelled) {
           setError(err instanceof ApiError ? err.message : "Could not load history");
+          setItems([]);
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -43,7 +67,15 @@ export function HistoryPage() {
     return () => {
       cancelled = true;
     };
-  }, [accessToken]);
+  }, [accessToken, filter.state]);
+
+  function setFilter(next: (typeof FILTERS)[number]) {
+    if (next.id === "all") {
+      setParams({}, { replace: true });
+    } else {
+      setParams({ state: next.id }, { replace: true });
+    }
+  }
 
   async function clearItem(titleId: string) {
     if (!accessToken) return;
@@ -75,6 +107,27 @@ export function HistoryPage() {
         </Link>
       </div>
 
+      <div
+        className="history-filters"
+        role="toolbar"
+        aria-label="Filter history by status"
+      >
+        {FILTERS.map((f) => {
+          const active = f.id === filter.id;
+          return (
+            <button
+              key={f.id}
+              type="button"
+              className={active ? "history-filter active" : "history-filter"}
+              aria-pressed={active}
+              onClick={() => setFilter(f)}
+            >
+              {f.label}
+            </button>
+          );
+        })}
+      </div>
+
       {error && (
         <p className="form-error" role="alert">
           {error}
@@ -89,7 +142,9 @@ export function HistoryPage() {
 
       {!loading && !items.length && (
         <div className="callout" role="status">
-          No history yet. Rate or save titles from For You or search.
+          {filter.id === "all"
+            ? "No history yet. Rate or save titles from For You or search."
+            : `No titles marked “${filter.label}” yet.`}
         </div>
       )}
 

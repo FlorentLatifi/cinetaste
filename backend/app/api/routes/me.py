@@ -28,18 +28,34 @@ async def my_history(
     session: Annotated[AsyncSession, Depends(get_db)],
     settings: Annotated[Settings, Depends(get_settings_dep)],
     limit: int = Query(default=50, ge=1, le=100),
+    state: str | None = Query(
+        default=None,
+        description=(
+            "Optional filter: like | dislike | watchlist | not_interested | "
+            "rated | watched"
+        ),
+    ),
 ) -> list[HistoryItemOut]:
     """Current likes, ratings, watchlist, passes — newest first."""
+    from app.domain.taste_signals import HISTORY_VISIBLE_STATES
+
+    if state is not None and state not in HISTORY_VISIBLE_STATES:
+        raise AppError(
+            f"Invalid history state filter: {state}",
+            status_code=400,
+            code="invalid_history_state",
+        )
+
     service = RecommendationService(session, settings)
-    rows = await service.history(user.id, limit=limit)
+    rows = await service.history(user.id, limit=limit, state=state)
     return [
         HistoryItemOut(
             title=TitleSummaryOut.from_title(title),
-            state=state.state,
-            label=label_for_state(state.state),
-            updated_at=state.updated_at,
+            state=state_row.state,
+            label=label_for_state(state_row.state),
+            updated_at=state_row.updated_at,
         )
-        for title, state in rows
+        for title, state_row in rows
     ]
 
 

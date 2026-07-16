@@ -114,16 +114,20 @@ export async function installApiMock(
     }
 
     if (method === "GET" && path.startsWith("/me/history")) {
-      await route.fulfill(
-        json([
-          {
-            title: mockTitle,
-            state: "like",
-            label: "Liked",
-            updated_at: "2026-01-15T12:00:00.000Z",
-          },
-        ]),
-      );
+      const stateFilter = url.searchParams.get("state");
+      const all = [
+        {
+          title: mockTitle,
+          state: "like",
+          label: "Liked",
+          updated_at: "2026-01-15T12:00:00.000Z",
+        },
+      ];
+      const rows =
+        !stateFilter || stateFilter === "like"
+          ? all
+          : [];
+      await route.fulfill(json(rows));
       return;
     }
 

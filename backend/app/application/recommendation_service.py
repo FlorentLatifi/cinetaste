@@ -367,16 +367,23 @@ class RecommendationService:
         user_id: UUID,
         *,
         limit: int = 50,
+        state: str | None = None,
     ) -> list[tuple[Title, UserTitleState]]:
         """Current user–title relationships (liked, watched, saved, …), newest first."""
         from app.domain.taste_signals import HISTORY_VISIBLE_STATES
+
+        allowed = list(HISTORY_VISIBLE_STATES)
+        if state is not None:
+            if state not in HISTORY_VISIBLE_STATES:
+                return []
+            allowed = [state]
 
         states = (
             await self._session.scalars(
                 select(UserTitleState)
                 .where(
                     UserTitleState.user_id == user_id,
-                    UserTitleState.state.in_(list(HISTORY_VISIBLE_STATES)),
+                    UserTitleState.state.in_(allowed),
                 )
                 .order_by(UserTitleState.updated_at.desc())
                 .limit(limit)

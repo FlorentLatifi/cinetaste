@@ -196,9 +196,15 @@ export type HistoryItem = {
   updated_at: string;
 };
 
-export function getHistory(accessToken: string, limit = 50) {
+export function getHistory(
+  accessToken: string,
+  opts?: { limit?: number; state?: string },
+) {
+  const params = new URLSearchParams();
+  params.set("limit", String(opts?.limit ?? 50));
+  if (opts?.state) params.set("state", opts.state);
   return apiFetch<HistoryItem[]>(
-    `/me/history?limit=${limit}`,
+    `/me/history?${params.toString()}`,
     {},
     accessToken,
   );
