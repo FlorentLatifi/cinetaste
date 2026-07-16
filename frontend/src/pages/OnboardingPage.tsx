@@ -8,19 +8,43 @@ import { useAuth } from "../features/auth/AuthContext";
 /** Must match backend MIN_ONBOARDING_RATINGS / MIN_ONBOARDING_POSITIVE. */
 const MIN_RATINGS = 6;
 const MIN_POSITIVE = 2;
-/** First batch matches curated primary seed (~15); later batches pull reserve. */
 const BATCH_SIZE = 15;
 
 const RATE_OPTIONS: {
   action: OnboardingAction;
   label: string;
   hint: string;
+  emoji: string;
   className: string;
 }[] = [
-  { action: "rate_1", label: "Bad", hint: "Would not watch again", className: "rate-bad" },
-  { action: "rate_2", label: "It's ok", hint: "Fine, not special", className: "rate-ok" },
-  { action: "rate_3", label: "Good", hint: "I'd recommend it", className: "rate-good" },
-  { action: "rate_4", label: "Favorite", hint: "Peak taste for me", className: "rate-fav" },
+  {
+    action: "rate_1",
+    label: "Bad",
+    hint: "Not for me",
+    emoji: "👎",
+    className: "ob-rate-bad",
+  },
+  {
+    action: "rate_2",
+    label: "OK",
+    hint: "Fine, not special",
+    emoji: "😐",
+    className: "ob-rate-ok",
+  },
+  {
+    action: "rate_3",
+    label: "Good",
+    hint: "I'd recommend it",
+    emoji: "👍",
+    className: "ob-rate-good",
+  },
+  {
+    action: "rate_4",
+    label: "Favorite",
+    hint: "Peak taste",
+    emoji: "✦",
+    className: "ob-rate-fav",
+  },
 ];
 
 function isRating(action: OnboardingAction): boolean {
@@ -31,8 +55,25 @@ function isPositive(action: OnboardingAction): boolean {
   return action === "rate_2" || action === "rate_3" || action === "rate_4";
 }
 
+function yearOf(title: Title): string | null {
+  return title.release_date ? title.release_date.slice(0, 4) : null;
+}
+
+/** Prefer a larger TMDb size for the hero poster when possible. */
+function heroPosterUrl(title: Title): string | null {
+  if (!title.poster_url && !title.poster_path) return null;
+  const raw = title.poster_path || title.poster_url || "";
+  if (raw.startsWith("http") && raw.includes("/w500")) {
+    return raw.replace("/w500", "/w780");
+  }
+  if (raw.startsWith("/") && !raw.startsWith("http")) {
+    return `https://image.tmdb.org/t/p/w780${raw}`;
+  }
+  return title.poster_url;
+}
+
 export function OnboardingPage() {
-  const { accessToken, user } = useAuth();
+  const { accessToken, user, refreshUser } = useAuth();
   const navigate = useNavigate();
   const [cards, setCards] = useState<Title[]>([]);
   const [index, setIndex] = useState(0);
@@ -43,6 +84,8 @@ export function OnboardingPage() {
   const [submitting, setSubmitting] = useState(false);
   const [rateMode, setRateMode] = useState(false);
   const [exhausted, setExhausted] = useState(false);
+  const [cardAnimKey, setCardAnimKey] = useState(0);
+  const [exiting, setExiting] = useState(false);
 
   const loadBatch = useCallback(
     async (exclude: string[], replace: boolean) => {
@@ -106,8 +149,13 @@ export function OnboardingPage() {
     ratedCount >= MIN_RATINGS && positiveCount >= MIN_POSITIVE && !submitting;
 
   const seenIds = useMemo(() => cards.map((c) => c.id), [cards]);
+  const progressPct = Math.min(100, (ratedCount / MIN_RATINGS) * 100);
+  const poster = current ? heroPosterUrl(current) : null;
 
-  async function ensureMoreCardsIfNeeded(nextIndex: number, nextReactions: OnboardingReaction[]) {
+  async function ensureMoreCardsIfNeeded(
+    nextIndex: number,
+    nextReactions: OnboardingReaction[],
+  ) {
     const remaining = cards.length - nextIndex;
     const ratingsSoFar = nextReactions.filter((r) => isRating(r.action)).length;
     if (remaining > 3 || exhausted || !accessToken) return;
@@ -125,10 +173,16 @@ export function OnboardingPage() {
     }
   }
 
+  function advanceCard() {
+    setExiting(false);
+    setCardAnimKey((k) => k + 1);
+  }
+
   async function applyAction(action: OnboardingAction) {
-    if (!current || submitting) return;
+    if (!current || submitting || exiting) return;
     setRateMode(false);
     setError(null);
+    setExiting(true);
 
     const nextReactions = [
       ...reactions.filter((r) => r.title_id !== current.id),
@@ -136,26 +190,30 @@ export function OnboardingPage() {
     ];
     setReactions(nextReactions);
 
+    // Brief exit animation before swapping the card
+    await new Promise((r) => setTimeout(r, 160));
+
     const nextIndex = index + 1;
     const nextRated = nextReactions.filter((r) => isRating(r.action)).length;
     const nextPositive = nextReactions.filter((r) => isPositive(r.action)).length;
 
     if (nextIndex < cards.length) {
       setIndex(nextIndex);
+      advanceCard();
       void ensureMoreCardsIfNeeded(nextIndex, nextReactions);
       return;
     }
 
-    // End of deck
     if (nextRated >= MIN_RATINGS && nextPositive >= MIN_POSITIVE) {
       await finish(nextReactions);
       return;
     }
 
-    // Need more real ratings — fetch another batch
     setLoadingMore(true);
     try {
-      const exclude = [...new Set([...seenIds, ...nextReactions.map((r) => r.title_id)])];
+      const exclude = [
+        ...new Set([...seenIds, ...nextReactions.map((r) => r.title_id)]),
+      ];
       const data = await titlesApi.getOnboardingCards(accessToken!, {
         limit: BATCH_SIZE,
         exclude,
@@ -164,15 +222,20 @@ export function OnboardingPage() {
         setExhausted(true);
         setError(
           `We need ${MIN_RATINGS} ratings of titles you've seen (you have ${nextRated}). ` +
-            "Try finishing with what you have if the catalog is limited, or seed more titles.",
+            "“Haven't seen it” doesn't count — keep going when more titles load, or seed the catalog.",
         );
+        setExiting(false);
         setReactions(nextReactions);
         return;
       }
       setCards((prev) => [...prev, ...data.items]);
       setIndex(nextIndex);
+      advanceCard();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Could not load more titles");
+      setError(
+        err instanceof ApiError ? err.message : "Could not load more titles",
+      );
+      setExiting(false);
     } finally {
       setLoadingMore(false);
     }
@@ -187,12 +250,14 @@ export function OnboardingPage() {
         `Rate at least ${MIN_RATINGS} titles you've actually seen. ` +
           `Current: ${ratings}. “Haven't seen it” does not count.`,
       );
+      setExiting(false);
       return;
     }
     if (positives < MIN_POSITIVE) {
       setError(
-        `Mark at least ${MIN_POSITIVE} as It's ok, Good, or Favorite so we know what you like.`,
+        `Mark at least ${MIN_POSITIVE} as OK, Good, or Favorite so we know what you like.`,
       );
+      setExiting(false);
       return;
     }
 
@@ -200,36 +265,65 @@ export function OnboardingPage() {
     setError(null);
     try {
       await titlesApi.completeOnboarding(accessToken, finalReactions);
-      window.location.href = "/";
+      // Refresh auth user so Home sees onboarding_completed_at without full reload
+      try {
+        await refreshUser();
+      } catch {
+        // Still navigate; home may re-fetch user on next load
+      }
+      navigate("/", {
+        replace: true,
+        state: {
+          fromOnboarding: true,
+          ratingsCount: ratings,
+        },
+      });
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Could not finish onboarding");
+      setError(
+        err instanceof ApiError ? err.message : "Could not finish onboarding",
+      );
       setSubmitting(false);
+      setExiting(false);
     }
   }
 
   if (loading) {
     return (
-      <div className="center-screen">
+      <div className="ob-stage ob-stage-loading">
         <div className="spinner" />
+        <p className="ob-loading-copy">Curating your taste deck…</p>
       </div>
     );
   }
 
-  if (!current && !submitting && !loadingMore) {
+  if (submitting) {
     return (
-      <div className="center-screen narrow">
-        <h1>Onboarding unavailable</h1>
-        <p className="lede">
-          {error || "No cards available. Seed the catalog first."}
+      <div className="ob-stage ob-stage-loading">
+        <div className="spinner" />
+        <p className="eyebrow">Almost there</p>
+        <h1 className="ob-loading-title">Building your taste profile</h1>
+        <p className="ob-loading-copy">
+          Weaving your ratings into a personal For You slate…
         </p>
-        {reactions.length > 0 && (
+      </div>
+    );
+  }
+
+  if (!current && !loadingMore) {
+    return (
+      <div className="ob-stage ob-stage-empty">
+        <p className="eyebrow">Onboarding</p>
+        <h1>No titles available</h1>
+        <p className="lede">
+          {error || "Seed the catalog first so we can show movies to rate."}
+        </p>
+        {reactions.length > 0 && canFinish && (
           <button
             type="button"
             className="btn primary"
-            disabled={!canFinish}
             onClick={() => void finish(reactions)}
           >
-            Try finish with {ratedCount} ratings
+            Finish with {ratedCount} ratings
           </button>
         )}
       </div>
@@ -237,140 +331,179 @@ export function OnboardingPage() {
   }
 
   return (
-    <div className="onboarding">
-      <div className="onboarding-meta">
-        <p className="eyebrow">Taste calibration</p>
-        <h1>Rate movies you know</h1>
-        <p className="lede">
-          Skip titles you have not seen — they give us zero signal. Rate the ones
-          you know so we learn real taste, not popularity.
-        </p>
-        <ul className="signal-legend">
-          <li>
-            <strong>Haven&apos;t seen it</strong> — no effect on your profile
-          </li>
-          <li>
-            <strong>Not interested</strong> — mild “avoid this vibe”
-          </li>
-          <li>
-            <strong>Rate it</strong> — Bad → Favorite builds your vector
-          </li>
-        </ul>
-        <div className="progress-row">
-          <div className="progress-bar">
-            <div
-              className="progress-fill"
-              style={{
-                width: `${Math.min(100, (ratedCount / MIN_RATINGS) * 100)}%`,
-              }}
-            />
-          </div>
-          <span>
-            {ratedCount}/{MIN_RATINGS} ratings · {positiveCount} positive
-            {unseenCount > 0 ? ` · ${unseenCount} unseen` : ""}
-            {loadingMore ? " · loading more…" : ""}
-          </span>
-        </div>
-      </div>
+    <div className="ob-stage">
+      {/* Ambient poster glow */}
+      {poster && (
+        <div
+          className="ob-ambient"
+          style={{ backgroundImage: `url(${poster})` }}
+          aria-hidden
+        />
+      )}
 
-      {current && (
-        <article className="swipe-card">
-          <div className="swipe-poster">
-            {current.poster_url ? (
-              <img src={current.poster_url} alt={current.name} />
-            ) : (
-              <div className="poster-fallback">{current.name}</div>
+      <header className="ob-header">
+        <div className="ob-header-text">
+          <p className="eyebrow">Taste calibration</p>
+          <h1>Rate what you know</h1>
+          <p className="ob-sub">
+            Skip the unfamiliar — zero signal. Rate the ones you&apos;ve seen so
+            recommendations feel like you.
+          </p>
+        </div>
+
+        <div className="ob-progress" aria-live="polite">
+          <div className="ob-progress-top">
+            <span className="ob-progress-count">
+              <strong>{ratedCount}</strong>
+              <span className="ob-progress-of"> of {MIN_RATINGS} rated</span>
+            </span>
+            {positiveCount > 0 && (
+              <span className="ob-progress-meta">
+                {positiveCount} positive
+                {unseenCount > 0 ? ` · ${unseenCount} skipped` : ""}
+              </span>
             )}
           </div>
-          <div className="swipe-body">
-            <h2>{current.name}</h2>
-            <p className="meta-line">
-              {current.media_type.toUpperCase()}
-              {current.release_date ? ` · ${current.release_date.slice(0, 4)}` : ""}
-              {current.vote_average ? ` · ★ ${current.vote_average.toFixed(1)}` : ""}
-            </p>
-            <p className="genres">
-              {current.genres.map((g) => g.name).join(" · ") || "Uncategorized"}
-            </p>
-            <p className="overview">{current.overview || "No synopsis available."}</p>
+          <div className="ob-progress-bar" role="progressbar" aria-valuenow={ratedCount} aria-valuemin={0} aria-valuemax={MIN_RATINGS}>
+            <div className="ob-progress-fill" style={{ width: `${progressPct}%` }} />
+          </div>
+          <p className="ob-progress-hint">
+            {ratedCount < MIN_RATINGS
+              ? `${MIN_RATINGS - ratedCount} more rating${MIN_RATINGS - ratedCount === 1 ? "" : "s"} to unlock For You`
+              : positiveCount < MIN_POSITIVE
+                ? "Add a couple of OK / Good / Favorite picks"
+                : "You can finish anytime — or keep refining"}
+          </p>
+        </div>
+      </header>
+
+      {current && (
+        <article
+          key={`${current.id}-${cardAnimKey}`}
+          className={`ob-card ${exiting ? "ob-card-exit" : "ob-card-enter"}`}
+        >
+          <div className="ob-poster-wrap">
+            {poster ? (
+              <img
+                className="ob-poster"
+                src={poster}
+                alt=""
+                draggable={false}
+              />
+            ) : (
+              <div className="ob-poster ob-poster-fallback">
+                <span>{current.name}</span>
+              </div>
+            )}
+            <div className="ob-poster-fade" aria-hidden />
+          </div>
+
+          <div className="ob-body">
+            <div className="ob-title-block">
+              <h2 className="ob-title">{current.name}</h2>
+              <p className="ob-meta">
+                {yearOf(current) && <span>{yearOf(current)}</span>}
+                {current.media_type && (
+                  <span className="ob-pill">{current.media_type}</span>
+                )}
+                {current.vote_average > 0 && (
+                  <span className="ob-score">★ {current.vote_average.toFixed(1)}</span>
+                )}
+              </p>
+              {current.genres.length > 0 && (
+                <p className="ob-genres">
+                  {current.genres
+                    .slice(0, 4)
+                    .map((g) => g.name)
+                    .join(" · ")}
+                </p>
+              )}
+              {current.overview && (
+                <p className="ob-overview">{current.overview}</p>
+              )}
+            </div>
 
             {!rateMode ? (
-              <div className="swipe-actions onboarding-primary-actions">
+              <div className="ob-actions">
                 <button
                   type="button"
-                  className="btn ghost"
-                  disabled={submitting || loadingMore}
+                  className="ob-btn ob-btn-ghost"
+                  disabled={submitting || loadingMore || exiting}
                   onClick={() => void applyAction("haven't_seen")}
                 >
-                  Haven&apos;t seen it
+                  <span className="ob-btn-label">Haven&apos;t seen it</span>
+                  <span className="ob-btn-hint">Zero signal</span>
                 </button>
                 <button
                   type="button"
-                  className="btn danger"
-                  disabled={submitting || loadingMore}
+                  className="ob-btn ob-btn-soft-danger"
+                  disabled={submitting || loadingMore || exiting}
                   onClick={() => void applyAction("not_interested")}
                 >
-                  Not interested
+                  <span className="ob-btn-label">Not interested</span>
+                  <span className="ob-btn-hint">Mild avoid</span>
                 </button>
                 <button
                   type="button"
-                  className="btn primary"
-                  disabled={submitting || loadingMore}
+                  className="ob-btn ob-btn-primary"
+                  disabled={submitting || loadingMore || exiting}
                   onClick={() => setRateMode(true)}
                 >
-                  Rate it
+                  <span className="ob-btn-label">Rate it</span>
+                  <span className="ob-btn-hint">Bad → Favorite</span>
                 </button>
               </div>
             ) : (
-              <div className="rate-panel">
-                <p className="rate-prompt">How do you feel about this one?</p>
-                <div className="rate-grid">
+              <div className="ob-rate">
+                <div className="ob-rate-head">
+                  <p className="ob-rate-prompt">How was it for you?</p>
+                  <button
+                    type="button"
+                    className="ob-back"
+                    disabled={submitting || exiting}
+                    onClick={() => setRateMode(false)}
+                  >
+                    ← Back
+                  </button>
+                </div>
+                <div className="ob-rate-grid">
                   {RATE_OPTIONS.map((opt) => (
                     <button
                       key={opt.action}
                       type="button"
-                      className={`btn rate-btn ${opt.className}`}
-                      disabled={submitting || loadingMore}
+                      className={`ob-rate-btn ${opt.className}`}
+                      disabled={submitting || loadingMore || exiting}
                       onClick={() => void applyAction(opt.action)}
                       title={opt.hint}
                     >
-                      <span className="rate-label">{opt.label}</span>
-                      <span className="rate-hint">{opt.hint}</span>
+                      <span className="ob-rate-emoji" aria-hidden>
+                        {opt.emoji}
+                      </span>
+                      <span className="ob-rate-label">{opt.label}</span>
+                      <span className="ob-rate-hint">{opt.hint}</span>
                     </button>
                   ))}
                 </div>
-                <button
-                  type="button"
-                  className="btn ghost full"
-                  disabled={submitting}
-                  onClick={() => setRateMode(false)}
-                >
-                  Back
-                </button>
               </div>
             )}
 
             {canFinish && (
               <button
                 type="button"
-                className="btn ghost full"
-                disabled={submitting}
+                className="ob-finish"
+                disabled={submitting || exiting}
                 onClick={() => void finish(reactions)}
               >
-                {submitting
-                  ? "Building your profile…"
-                  : `Finish with ${ratedCount} ratings`}
+                See my recommendations →
               </button>
             )}
-            {error && <p className="form-error">{error}</p>}
+
+            {error && <p className="form-error ob-error">{error}</p>}
+            {loadingMore && (
+              <p className="ob-loading-more">Loading more titles…</p>
+            )}
           </div>
         </article>
-      )}
-
-      {(submitting || (loadingMore && !current)) && (
-        <div className="center-inline">
-          <div className="spinner" />
-        </div>
       )}
     </div>
   );

@@ -76,7 +76,7 @@ export function completeOnboarding(
   accessToken: string,
   reactions: OnboardingReaction[],
 ) {
-  return apiFetch(
+  return apiFetch<import("./auth").User>(
     "/onboarding/complete",
     {
       method: "POST",
