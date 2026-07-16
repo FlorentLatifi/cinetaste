@@ -36,7 +36,7 @@ from sqlalchemy.orm import selectinload
 from app.infrastructure.db.models.catalog import Title
 from app.infrastructure.db.models.interaction import InteractionEvent, UserTitleState
 from app.infrastructure.db.models.taste import TasteProfile
-from app.recommendation.embeddings import blend_vectors
+from app.recommendation.embeddings import blend_vectors, normalize_feature_families
 
 # Below this absolute weight, an event never touches features or embeddings.
 ZERO_SIGNAL_EPS = 1e-9
@@ -169,8 +169,11 @@ class TasteService:
             if title.embedding is not None:  # numpy/pgvector: use identity check only
                 vectors.append((list(title.embedding), float(event.weight)))
 
-        # Drop near-zero noise
-        features = {k: round(v, 4) for k, v in feature_acc.items() if abs(v) > 0.05}
+        # Drop near-zero noise, then rebalance families so keywords don't drown directors.
+        raw_features = {k: round(v, 4) for k, v in feature_acc.items() if abs(v) > 0.05}
+        # Soft per-key cap before family norms (limits single-title domination).
+        capped = {k: max(min(v, 4.5), -4.5) for k, v in raw_features.items()}
+        features = normalize_feature_families(capped)
         vector = blend_vectors(vectors)
 
         profile = await self._session.get(TasteProfile, user_id)

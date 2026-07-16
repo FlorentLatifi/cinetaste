@@ -19,7 +19,7 @@ from app.infrastructure.db.models.catalog import (
     TitleKeyword,
 )
 from app.infrastructure.tmdb.client import TmdbClient
-from app.recommendation.embeddings import build_title_embedding, features_from_title
+from app.recommendation.embeddings import PersonSignal, build_title_signals
 
 logger = logging.getLogger(__name__)
 
@@ -227,8 +227,7 @@ class CatalogIngestService:
             keyword_names.append(keyword.name)
 
         credits = payload.get("credits") or {}
-        people_for_embed: list[str] = []
-        people_for_features: list[tuple[str, str]] = []
+        people_signals: list[PersonSignal] = []
 
         for cast in (credits.get("cast") or [])[:8]:
             if not cast.get("id") or not cast.get("name"):
@@ -236,6 +235,8 @@ class CatalogIngestService:
             person = await self._get_or_create_person(
                 int(cast["id"]), cast["name"], cast.get("profile_path")
             )
+            order = cast.get("order")
+            billing = int(order) if order is not None else None
             self._session.add(
                 Credit(
                     id=uuid4(),
@@ -244,11 +245,12 @@ class CatalogIngestService:
                     credit_type="cast",
                     job=None,
                     character=cast.get("character"),
-                    billing_order=cast.get("order"),
+                    billing_order=billing,
                 )
             )
-            people_for_embed.append(person.name)
-            people_for_features.append((person.name, "cast"))
+            people_signals.append(
+                PersonSignal(name=person.name, role="cast", billing_order=billing)
+            )
 
         for crew in credits.get("crew") or []:
             job = (crew.get("job") or "").strip()
@@ -270,33 +272,43 @@ class CatalogIngestService:
                     billing_order=None,
                 )
             )
-            people_for_embed.append(person.name)
             role = "director" if job == "Director" else "writer"
-            people_for_features.append((person.name, role))
+            people_signals.append(PersonSignal(name=person.name, role=role))
+
+        # Production countries (ISO 3166-1) for origin taste signal.
+        countries: list[str] = []
+        for c in payload.get("production_countries") or []:
+            code = (c.get("iso_3166_1") or "").strip().upper()
+            if code and code not in countries:
+                countries.append(code)
+            if len(countries) >= 3:
+                break
+        # TV often uses origin_country list of ISO codes
+        if not countries:
+            for code in payload.get("origin_country") or []:
+                c = str(code).strip().upper()
+                if c and c not in countries:
+                    countries.append(c)
+                if len(countries) >= 3:
+                    break
 
         year = release.year if release else None
-        title.embedding = build_title_embedding(
+        embedding, _features, meta = build_title_signals(
             name=title.name,
             overview=title.overview,
             genres=genre_names,
             keywords=keyword_names,
-            people=people_for_embed,
+            people=people_signals,
             media_type=media_type,
             release_year=year,
             runtime=runtime,
             popularity=title.popularity,
             vote_average=title.vote_average,
+            original_language=title.original_language,
+            countries=countries,
         )
-        title.extra = {
-            "feature_snapshot": features_from_title(
-                genres=genre_names,
-                keywords=keyword_names,
-                people=people_for_features,
-                release_year=year,
-                runtime=runtime,
-                media_type=media_type,
-            )
-        }
+        title.embedding = embedding
+        title.extra = meta
         await self._session.flush()
         logger.info("%s title tmdb_id=%s name=%s", status, tmdb_id, title.name)
         return status

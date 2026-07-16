@@ -18,7 +18,7 @@ from app.core.config import get_settings
 from app.core.logging import configure_logging
 from app.infrastructure.db.models.catalog import Genre, Title, TitleGenre
 from app.infrastructure.db.session import async_session_factory
-from app.recommendation.embeddings import build_title_embedding, features_from_title
+from app.recommendation.embeddings import PersonSignal, build_title_signals
 
 DEMO_TITLES = [
     ("Neon Harbor", "movie", ["Thriller", "Crime"], 2019, 118, 8.1, "A detective hunts a ghost in a rain-soaked port city."),
@@ -101,32 +101,30 @@ async def main() -> None:
                 original_language="en",
                 external_tmdb_id=900000 + idx,
             )
-            title.embedding = build_title_embedding(
+            people = [
+                PersonSignal(name=f"Director {genres[0]}", role="director"),
+                PersonSignal(name=f"Star {idx}", role="cast", billing_order=0),
+            ]
+            # Synthetic keywords carry light tone signal for local demos.
+            demo_keywords = list(genres) + (
+                ["feel-good"] if "Comedy" in genres or "Romance" in genres else ["suspense"]
+            )
+            embedding, _features, meta = build_title_signals(
                 name=name,
                 overview=overview,
                 genres=genres,
-                keywords=genres,
-                people=[f"Director {genres[0]}", f"Star {idx}"],
+                keywords=demo_keywords,
+                people=people,
                 media_type=media_type,
                 release_year=year,
                 runtime=runtime,
                 popularity=title.popularity,
                 vote_average=title.vote_average,
+                original_language="en",
+                countries=["US"],
             )
-            title.extra = {
-                "feature_snapshot": features_from_title(
-                    genres=genres,
-                    keywords=genres,
-                    people=[
-                        (f"Director {genres[0]}", "director"),
-                        (f"Star {idx}", "cast"),
-                    ],
-                    release_year=year,
-                    runtime=runtime,
-                    media_type=media_type,
-                ),
-                "demo": True,
-            }
+            title.embedding = embedding
+            title.extra = {**meta, "demo": True}
             session.add(title)
             await session.flush()
             for gname in genres:

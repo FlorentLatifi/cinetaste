@@ -4,7 +4,19 @@ from dataclasses import dataclass, field
 from typing import Any
 from uuid import UUID
 
-from app.recommendation.embeddings import cosine, top_feature_overlap
+from app.recommendation.embeddings import (
+    cosine,
+    sparse_channel_scores,
+    top_feature_overlap,
+)
+
+
+# Blend of dense similarity vs sparse explainable features.
+W_SIM = 0.42
+W_POS = 0.40
+W_NEG = 0.12
+W_GEM = 1.0
+W_COLD = 1.0
 
 
 @dataclass
@@ -26,6 +38,14 @@ def _feature_snapshot(title_extra: dict[str, Any] | None) -> dict[str, float]:
     return {str(k): float(v) for k, v in snap.items()}
 
 
+def _pretty_person(raw: str) -> str:
+    return " ".join(part.capitalize() for part in raw.replace("_", " ").split())
+
+
+def _pretty_label(raw: str) -> str:
+    return raw.replace("_", " ").strip()
+
+
 def explain(
     *,
     user_features: dict[str, Any],
@@ -33,64 +53,119 @@ def explain(
     title_genres: list[str],
     similarity: float,
 ) -> list[Reason]:
+    """Build up to 3 human reasons, preferring people/tone/themes over genre."""
     reasons: list[Reason] = []
     title_features = _feature_snapshot(title_extra)
-    overlap = top_feature_overlap(user_features, title_features, limit=8)
+    # Pull a wider overlap so non-genre signals can surface first.
+    overlap = top_feature_overlap(user_features, title_features, limit=16)
 
-    genre_hits = [k.split(":", 1)[1] for k, _ in overlap if k.startswith("genre:")]
-    if genre_hits:
+    def _take(prefix: str, n: int = 3) -> list[str]:
+        hits: list[str] = []
+        for key, strength in overlap:
+            if strength <= 0:
+                continue
+            if not key.startswith(prefix):
+                continue
+            value = key[len(prefix) :]
+            if value and value not in hits:
+                hits.append(value)
+            if len(hits) >= n:
+                break
+        return hits
+
+    directors = _take("person:director:", 2)
+    if directors:
+        name = _pretty_person(directors[0])
+        reasons.append(
+            Reason(
+                code="same_director",
+                message=f"You tend to like films by {name}",
+                evidence={"directors": directors[:2]},
+            )
+        )
+
+    cast_hits = _take("person:cast:", 3)
+    if cast_hits and len(reasons) < 3:
+        name = _pretty_person(cast_hits[0])
+        reasons.append(
+            Reason(
+                code="similar_cast",
+                message=f"Features talent you respond to ({name})",
+                evidence={"cast": cast_hits[:3]},
+            )
+        )
+
+    tones = _take("tone:", 3)
+    if tones and len(reasons) < 3:
+        pretty = ", ".join(_pretty_label(t) for t in tones[:2])
+        reasons.append(
+            Reason(
+                code="similar_tone",
+                message=f"Similar tone to titles you like ({pretty})",
+                evidence={"tones": tones[:3]},
+            )
+        )
+
+    keywords = _take("kw:", 4)
+    if keywords and len(reasons) < 3:
+        themes = ", ".join(_pretty_label(k) for k in keywords[:3])
+        reasons.append(
+            Reason(
+                code="similar_themes",
+                message=f"Shares themes you like: {themes}",
+                evidence={"keywords": keywords[:3]},
+            )
+        )
+
+    writers = _take("person:writer:", 2)
+    if writers and len(reasons) < 3:
+        name = _pretty_person(writers[0])
+        reasons.append(
+            Reason(
+                code="same_writer",
+                message=f"Connected to writers you favor ({name})",
+                evidence={"writers": writers[:2]},
+            )
+        )
+
+    countries = _take("country:", 2)
+    if countries and len(reasons) < 3:
+        reasons.append(
+            Reason(
+                code="similar_origin",
+                message=f"From cinema origins you lean toward ({', '.join(countries)})",
+                evidence={"countries": countries},
+            )
+        )
+
+    langs = _take("lang:", 2)
+    if langs and len(reasons) < 3:
+        reasons.append(
+            Reason(
+                code="similar_language",
+                message=f"Matches languages you enjoy ({', '.join(langs)})",
+                evidence={"languages": langs},
+            )
+        )
+
+    decades = _take("decade:", 1)
+    if decades and len(reasons) < 3:
+        reasons.append(
+            Reason(
+                code="similar_era",
+                message=f"Fits your preferred era ({decades[0]}s)",
+                evidence={"decades": decades[:1]},
+            )
+        )
+
+    genre_hits = _take("genre:", 3)
+    if genre_hits and len(reasons) < 3:
         pretty = ", ".join(g.title() for g in genre_hits[:3])
         reasons.append(
             Reason(
                 code="shared_genre",
                 message=f"Matches genres you like: {pretty}",
                 evidence={"genres": genre_hits[:3]},
-            )
-        )
-
-    directors = [
-        k.split(":", 2)[-1]
-        for k, _ in overlap
-        if k.startswith("person:director:")
-    ]
-    if directors:
-        name = directors[0].title()
-        reasons.append(
-            Reason(
-                code="same_director",
-                message=f"Connected to director taste ({name})",
-                evidence={"directors": directors[:2]},
-            )
-        )
-
-    cast_hits = [k.split(":", 2)[-1] for k, _ in overlap if k.startswith("person:cast:")]
-    if cast_hits:
-        reasons.append(
-            Reason(
-                code="similar_cast",
-                message=f"Features talent you respond to ({cast_hits[0].title()})",
-                evidence={"cast": cast_hits[:3]},
-            )
-        )
-
-    keywords = [k.split(":", 1)[1] for k, _ in overlap if k.startswith("kw:")]
-    if keywords:
-        themes = ", ".join(keywords[:3])
-        reasons.append(
-            Reason(
-                code="similar_themes",
-                message=f"Similar themes: {themes}",
-                evidence={"keywords": keywords[:3]},
-            )
-        )
-
-    decades = [k.split(":", 1)[1] for k, _ in overlap if k.startswith("decade:")]
-    if decades:
-        reasons.append(
-            Reason(
-                code="similar_era",
-                message=f"Fits your preferred era ({decades[0]}s)",
-                evidence={"decades": decades[:1]},
             )
         )
 
@@ -103,14 +178,15 @@ def explain(
             )
         )
 
-    if similarity >= 0.55 and not any(r.code == "similar_themes" for r in reasons):
-        reasons.append(
-            Reason(
-                code="taste_similarity",
-                message="Strong overall match to your taste profile",
-                evidence={"similarity": round(similarity, 3)},
+    if similarity >= 0.52 and len(reasons) < 3:
+        if not any(r.code == "taste_similarity" for r in reasons):
+            reasons.append(
+                Reason(
+                    code="taste_similarity",
+                    message="Strong overall match to your taste profile",
+                    evidence={"similarity": round(similarity, 3)},
+                )
             )
-        )
 
     if not reasons:
         reasons.append(
@@ -168,6 +244,8 @@ def rank_titles(
 ) -> list[RankedItem]:
     """titles: objects with id, embedding, extra, genres, popularity, vote_average."""
     scored: list[tuple[Any, float]] = []
+    profile_strength = sum(abs(float(v)) for v in user_features.values()) if user_features else 0.0
+    cold = user_vector is None or profile_strength < 0.8
 
     for title in titles:
         if title.id in exclude_ids:
@@ -178,11 +256,7 @@ def rank_titles(
 
         sim = cosine(user_vector, emb) if user_vector is not None else 0.0
         title_features = _feature_snapshot(title.extra)
-        feature_boost = 0.0
-        for key, t_w in title_features.items():
-            u_w = float(user_features.get(key, 0.0) or 0.0)
-            if u_w > 0:
-                feature_boost += min(u_w, 3.0) * 0.03 * t_w
+        pos_sparse, neg_sparse = sparse_channel_scores(user_features, title_features)
 
         # Hidden gem: solid rating, not ultra-popular
         gem = 0.0
@@ -193,10 +267,16 @@ def rank_titles(
 
         # Mild popularity prior for cold profiles
         pop_prior = 0.0
-        if not user_vector:
-            pop_prior = min(title.popularity / 200.0, 0.25)
+        if cold:
+            pop_prior = min(title.popularity / 200.0, 0.22)
 
-        score = sim + feature_boost + gem + pop_prior
+        score = (
+            W_SIM * sim
+            + W_POS * pos_sparse
+            - W_NEG * neg_sparse
+            + W_GEM * gem
+            + W_COLD * pop_prior
+        )
         scored.append((title, score))
 
     scored.sort(key=lambda x: x[1], reverse=True)
