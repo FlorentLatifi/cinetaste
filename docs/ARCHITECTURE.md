@@ -220,7 +220,7 @@ Swap implementations without rewriting the API.
 
 ### Ops / product
 * `onboarding_cards` or derive from curated seed lists
-* `recommendation_impressions` (optional MVP+: user_id, title_id, slate_id, position, reasons, created_at) — critical for offline eval later; consider logging from day one (cheap, high value)
+* `recommendation_impressions` — For You append-only log (user_id, title_id, slate_id, position, score, reason_codes); `REC_LOG_IMPRESSIONS` (default on), fail-open
 
 ### Indexing (must-haves)
 * Unique: users.email, titles.external_tmdb_id  

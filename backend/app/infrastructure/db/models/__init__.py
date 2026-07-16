@@ -12,7 +12,11 @@ from app.infrastructure.db.models.catalog import (
     TitleGenre,
     TitleKeyword,
 )
-from app.infrastructure.db.models.interaction import InteractionEvent, UserTitleState
+from app.infrastructure.db.models.interaction import (
+    InteractionEvent,
+    RecommendationImpression,
+    UserTitleState,
+)
 from app.infrastructure.db.models.taste import TasteProfile
 from app.infrastructure.db.models.user import PasswordResetToken, RefreshToken, User
 
@@ -29,5 +33,6 @@ __all__ = [
     "TitleKeyword",
     "InteractionEvent",
     "UserTitleState",
+    "RecommendationImpression",
     "TasteProfile",
 ]

@@ -49,6 +49,8 @@ class Settings(BaseSettings):
     rec_ann_candidates: int = 250
     rec_popular_candidates: int = 120
     rec_use_ann: bool = True
+    # Append-only For You impression log (offline eval). Fail-open if write fails.
+    rec_log_impressions: bool = True
 
     # Rate limiting
     rate_limit_enabled: bool = True

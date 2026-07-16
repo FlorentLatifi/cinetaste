@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,7 +12,7 @@ from sqlalchemy.orm import selectinload
 from app.core.config import Settings
 from app.domain.taste_signals import FEED_EXCLUDE_STATES
 from app.infrastructure.db.models.catalog import Title
-from app.infrastructure.db.models.interaction import UserTitleState
+from app.infrastructure.db.models.interaction import RecommendationImpression, UserTitleState
 from app.infrastructure.db.models.taste import TasteProfile
 from app.infrastructure.db.redis import get_redis
 from app.recommendation.pipeline import RankedItem, rank_titles
@@ -181,6 +181,44 @@ class RecommendationService:
                 await redis.delete(key)
         except Exception:
             logger.warning("redis_invalidate_failed user_id=%s", user_id, exc_info=True)
+
+    async def log_impressions(
+        self,
+        user_id: UUID,
+        ranked: list[tuple[Title, RankedItem]],
+        *,
+        slate_id: UUID | None = None,
+    ) -> UUID | None:
+        """Append For You impressions. Fail-open: never raise to callers.
+
+        Uses a savepoint so a write failure does not abort the parent request txn.
+        """
+        if not self._settings.rec_log_impressions or not ranked:
+            return None
+        sid = slate_id or uuid4()
+        try:
+            async with self._session.begin_nested():
+                for pos, (title, item) in enumerate(ranked):
+                    codes = [r.code for r in (item.reasons or [])][:8]
+                    self._session.add(
+                        RecommendationImpression(
+                            user_id=user_id,
+                            title_id=title.id,
+                            slate_id=sid,
+                            position=pos,
+                            score=float(item.score),
+                            reason_codes=codes or None,
+                        )
+                    )
+            return sid
+        except Exception:
+            logger.warning(
+                "impression_log_failed user_id=%s slate_id=%s",
+                user_id,
+                sid,
+                exc_info=True,
+            )
+            return None
 
     async def onboarding_cards(
         self,

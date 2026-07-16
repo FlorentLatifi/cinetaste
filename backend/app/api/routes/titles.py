@@ -38,6 +38,7 @@ async def for_you(
 ) -> RecommendationSlateOut:
     service = _rec_service(session, settings)
     ranked = await service.for_you(user.id, limit=limit)
+    slate_id = await service.log_impressions(user.id, ranked)
     items = [
         RecommendationItemOut(
             title=TitleSummaryOut.from_title(title),
@@ -48,7 +49,7 @@ async def for_you(
         )
         for title, item in ranked
     ]
-    return RecommendationSlateOut(items=items)
+    return RecommendationSlateOut(items=items, slate_id=slate_id)
 
 
 @router.get("/titles/search", response_model=list[TitleSummaryOut])

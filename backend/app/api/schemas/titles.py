@@ -136,6 +136,10 @@ class RecommendationItemOut(BaseModel):
 
 class RecommendationSlateOut(BaseModel):
     items: list[RecommendationItemOut]
+    slate_id: UUID | None = Field(
+        default=None,
+        description="Impression slate id when rec_log_impressions is enabled",
+    )
 
 
 class InteractionRequest(BaseModel):
