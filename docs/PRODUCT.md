@@ -154,7 +154,7 @@ These are valuable later; they do not prove product-market fit faster than the c
 ### Later (only with evidence)
 * Collaborative signals, sequential models, multi-profile households, streaming deep-links, mobile
 
-**Shipped recently:** History infinite scroll (respects reduced motion); Account taste export + open-snapshot preview.
+**Shipped recently (Phase 5 loop):** taste export/import merge + clear overlay; History pagination/infinite scroll; forced-colors; staging compose + `render.staging.yaml`; ConfirmDialog focus trap.
 
 ---
 

@@ -255,9 +255,10 @@ Use this before inviting real users beyond friends/family.
 4. Pass / Not interested → toast **Undo** restores card  
 5. Title detail → **Watched** opens rate strip; rating or skip-rating + Undo works; where-to-watch region works (or soft-empty without key)  
 6. Search finds a known title; open detail; Similar row loads  
-7. History filters + Clear; Account **Your taste** chips appear after ratings  
-8. Account: password reset flow (or log token in API logs)  
-9. Sign out → cannot hit For You without re-login  
+7. History filters + Clear + Load more / infinite scroll  
+8. Account **Your taste** chips; **Download JSON** → **Open snapshot** → confirm **Merge** → **Clear imported snapshot**  
+9. Account: password reset flow (or log token in API logs)  
+10. Sign out → cannot hit For You without re-login  
 
 ### Backups (host-managed)
 

@@ -50,21 +50,14 @@ cinetaste/
 
 ## Current status
 
-**Phase 2 — Core product loop (local MVP)**
+**Phase 5 — Soft-launch ready (local + blueprints)**
 
-- [x] Constitution, product, architecture docs
-- [x] Docker Compose: API, Postgres+pgvector, Redis
-- [x] Alembic initial schema (users, catalog, signals, taste vectors)
-- [x] Auth: register / login / refresh / logout + `/me`
-- [x] Frontend: auth shell, protected home, design system baseline
-- [x] Catalog ingest (TMDb) + offline demo seed
-- [x] Swipe onboarding + taste profile builder
-- [x] Recommendation pipeline (score + MMR diversity + explanations)
-- [x] For You feed, watchlist, interactions
-- [x] CI (GitHub Actions) + rate limits + security headers
-- [x] Deploy blueprints (Render prod + staging, Vercel) + local staging compose — see `docs/DEPLOY.md`
-- [x] httpOnly refresh cookies, Sentry optional, soft-launch checklist
-- [ ] Live hosted deploy (you click connect on Render/Vercel)
+- [x] Core loop: auth, onboarding, For You, search, watchlist, history, title detail
+- [x] Taste: signals policy, explainable recs, hidden gems / exploration, export/import
+- [x] Where-to-watch (TMDb/JustWatch), watched + rate-after-watch
+- [x] A11y: skip link, axe CI (guest + auth mocks), reduced motion, forced-colors
+- [x] Ops: CI integration tests, staging compose + `render.staging.yaml`, soft-launch checklist
+- [ ] Live hosted deploy (you connect Render/Vercel and run §6b smoke)
 
 ---
 
