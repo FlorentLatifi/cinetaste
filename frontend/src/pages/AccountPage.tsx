@@ -3,9 +3,11 @@ import { Link, useNavigate } from "react-router-dom";
 import { ApiError } from "../api/client";
 import * as authApi from "../api/auth";
 import { useAuth } from "../features/auth/AuthContext";
+import { useContrast } from "../features/theme/contrast";
 
 export function AccountPage() {
   const { user, accessToken, logout } = useAuth();
+  const { isHigh, setContrast } = useContrast();
   const navigate = useNavigate();
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -62,6 +64,25 @@ export function AccountPage() {
         </Link>
       </div>
 
+      <div className="account-card">
+        <h2>Display</h2>
+        <p className="lede" style={{ margin: 0 }}>
+          High contrast uses solid blacks, stronger borders, and brighter text.
+          Your choice is saved on this device.
+        </p>
+        <label className="contrast-choice">
+          <span>Contrast</span>
+          <select
+            value={isHigh ? "high" : "normal"}
+            onChange={(e) => setContrast(e.target.value === "high" ? "high" : "normal")}
+            aria-label="Contrast mode"
+          >
+            <option value="normal">Standard</option>
+            <option value="high">High contrast</option>
+          </select>
+        </label>
+      </div>
+
       <form className="account-card danger-zone" onSubmit={onDelete}>
         <h2>Delete account</h2>
         <p className="lede" style={{ margin: 0 }}>
@@ -89,7 +110,11 @@ export function AccountPage() {
             placeholder="DELETE"
           />
         </label>
-        {error && <p className="form-error">{error}</p>}
+        {error && (
+          <p className="form-error" role="alert">
+            {error}
+          </p>
+        )}
         <button className="btn danger" type="submit" disabled={submitting}>
           {submitting ? "Deleting…" : "Delete my account"}
         </button>

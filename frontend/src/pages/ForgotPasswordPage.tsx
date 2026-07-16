@@ -2,6 +2,7 @@ import { useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { ApiError } from "../api/client";
 import * as authApi from "../api/auth";
+import { ContrastToggle } from "../components/ContrastToggle";
 
 export function ForgotPasswordPage() {
   const [email, setEmail] = useState("");
@@ -67,7 +68,11 @@ export function ForgotPasswordPage() {
                 onChange={(e) => setEmail(e.target.value)}
               />
             </label>
-            {error && <p className="form-error">{error}</p>}
+            {error && (
+              <p className="form-error" role="alert">
+                {error}
+              </p>
+            )}
             <button className="btn primary" type="submit" disabled={submitting}>
               {submitting ? "Sending…" : "Send reset link"}
             </button>
@@ -76,6 +81,9 @@ export function ForgotPasswordPage() {
             </p>
           </>
         )}
+        <div className="auth-contrast">
+          <ContrastToggle compact />
+        </div>
       </form>
     </div>
   );

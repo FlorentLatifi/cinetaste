@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { Link, NavLink } from "react-router-dom";
 import { useAuth } from "../features/auth/AuthContext";
+import { ContrastToggle } from "./ContrastToggle";
 
 export function AppShell({ children }: { children: ReactNode }) {
   const { user, logout } = useAuth();
@@ -40,6 +41,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </NavLink>
         </nav>
         <div className="topbar-right">
+          <ContrastToggle compact />
           <span className="user-chip" title={user?.email || undefined}>
             <span className="sr-only">Signed in as </span>
             {user?.display_name || user?.email}

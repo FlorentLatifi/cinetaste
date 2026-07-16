@@ -42,10 +42,14 @@ export function WatchlistPage() {
           Back to For you
         </Link>
       </div>
-      {error && <p className="form-error">{error}</p>}
+      {error && (
+        <p className="form-error" role="alert">
+          {error}
+        </p>
+      )}
       {loading && (
         <div className="center-inline">
-          <div className="spinner" />
+          <div className="spinner" aria-label="Loading" />
         </div>
       )}
       {!loading && !items.length && (

@@ -101,3 +101,11 @@ jobs:
         run: npm run build
         env:
           VITE_API_BASE_URL: /api/v1
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Accessibility (axe on guest routes)
+        run: npm run test:a11y
+        env:
+          CI: true

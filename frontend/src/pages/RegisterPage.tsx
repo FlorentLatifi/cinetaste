@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { ApiError } from "../api/client";
+import { ContrastToggle } from "../components/ContrastToggle";
 import { useAuth } from "../features/auth/AuthContext";
 
 export function RegisterPage() {
@@ -68,13 +69,20 @@ export function RegisterPage() {
             onChange={(e) => setPassword(e.target.value)}
           />
         </label>
-        {error && <p className="form-error">{error}</p>}
+        {error && (
+          <p className="form-error" role="alert">
+            {error}
+          </p>
+        )}
         <button className="btn primary" type="submit" disabled={submitting}>
           {submitting ? "Creating…" : "Create account"}
         </button>
         <p className="auth-switch">
           Already have an account? <Link to="/login">Sign in</Link>
         </p>
+        <div className="auth-contrast">
+          <ContrastToggle compact />
+        </div>
       </form>
     </div>
   );

@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:a11y": "playwright test",
+    "test:a11y:ui": "playwright test --ui"
   },
   "dependencies": {
     "@sentry/react": "^9.47.1",
@@ -15,6 +17,8 @@
     "react-router-dom": "^7.5.0"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.12.1",
+    "@playwright/test": "^1.61.1",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "@vitejs/plugin-react": "^4.4.0",

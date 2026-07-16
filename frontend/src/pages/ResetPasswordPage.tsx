@@ -2,6 +2,7 @@ import { useMemo, useState, type FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { ApiError } from "../api/client";
 import * as authApi from "../api/auth";
+import { ContrastToggle } from "../components/ContrastToggle";
 
 export function ResetPasswordPage() {
   const [params] = useSearchParams();
@@ -44,7 +45,7 @@ export function ResetPasswordPage() {
       <form className="auth-card" onSubmit={onSubmit}>
         <h2>Reset password</h2>
         {!token && (
-          <p className="form-error">
+          <p className="form-error" role="alert">
             No token in URL. Request a new link from{" "}
             <Link to="/forgot-password">forgot password</Link>.
           </p>
@@ -71,13 +72,20 @@ export function ResetPasswordPage() {
             onChange={(e) => setConfirm(e.target.value)}
           />
         </label>
-        {error && <p className="form-error">{error}</p>}
+        {error && (
+          <p className="form-error" role="alert">
+            {error}
+          </p>
+        )}
         <button className="btn primary" type="submit" disabled={submitting || !token}>
           {submitting ? "Saving…" : "Update password"}
         </button>
         <p className="auth-switch">
           <Link to="/login">Back to sign in</Link>
         </p>
+        <div className="auth-contrast">
+          <ContrastToggle compact />
+        </div>
       </form>
     </div>
   );
