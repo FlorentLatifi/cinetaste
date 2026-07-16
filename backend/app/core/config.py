@@ -67,6 +67,14 @@ class Settings(BaseSettings):
     # Public frontend origin used to build reset links in logs (dev/staging).
     public_app_url: str = "http://localhost:5173"
 
+    # Optional SMTP — if smtp_host is empty, password-reset emails are log-only.
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""
+    smtp_use_tls: bool = True
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def strip_cors(cls, value: str) -> str:

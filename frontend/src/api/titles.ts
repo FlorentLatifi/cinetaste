@@ -55,6 +55,10 @@ export function getForYou(accessToken: string, limit = 20) {
   );
 }
 
+export function getTitle(accessToken: string, titleId: string) {
+  return apiFetch<Title>(`/titles/${titleId}`, {}, accessToken);
+}
+
 export function getOnboardingCards(
   accessToken: string,
   opts?: { limit?: number; exclude?: string[] },

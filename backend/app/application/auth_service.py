@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import secrets
+import uuid
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
@@ -18,14 +19,21 @@ from app.core.security import (
 )
 from app.domain.exceptions import AppError, ConflictError, UnauthorizedError
 from app.infrastructure.db.models.user import PasswordResetToken, RefreshToken, User
+from app.infrastructure.email import EmailSender, get_email_sender
 
 logger = logging.getLogger(__name__)
 
 
 class AuthService:
-    def __init__(self, session: AsyncSession, settings: Settings) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        settings: Settings,
+        email: EmailSender | None = None,
+    ) -> None:
         self._session = session
         self._settings = settings
+        self._email = email or get_email_sender(settings)
 
     async def register(
         self, *, email: str, password: str, display_name: str | None = None
@@ -60,23 +68,38 @@ class AuthService:
         stored = await self._session.scalar(
             select(RefreshToken).where(RefreshToken.token_hash == token_hash)
         )
-        if stored is None or stored.revoked_at is not None:
+        if stored is None:
             raise UnauthorizedError("Invalid refresh token", code="invalid_refresh")
 
         now = datetime.now(UTC)
+
+        # Reuse of a revoked token → compromise signal: kill the whole family.
+        if stored.revoked_at is not None:
+            await self._revoke_family(stored.family_id, stored.user_id, now=now)
+            logger.warning(
+                "refresh_token_reuse family_id=%s user_id=%s",
+                stored.family_id,
+                stored.user_id,
+            )
+            raise UnauthorizedError(
+                "Session revoked due to refresh token reuse",
+                code="refresh_reuse",
+            )
+
         expires = stored.expires_at
         if expires.tzinfo is None:
             expires = expires.replace(tzinfo=UTC)
         if expires < now:
+            stored.revoked_at = now
             raise UnauthorizedError("Refresh token expired", code="refresh_expired")
 
         user = await self._session.get(User, stored.user_id)
         if user is None:
             raise UnauthorizedError("User not found", code="invalid_refresh")
 
-        # Rotate refresh token
+        # Rotate within the same family
         stored.revoked_at = now
-        access, new_refresh = await self._issue_tokens(user)
+        access, new_refresh = await self._issue_tokens(user, family_id=stored.family_id)
         return user, access, new_refresh
 
     async def logout(self, *, refresh_token: str) -> None:
@@ -91,15 +114,13 @@ class AuthService:
         """Create a one-time reset token if the account exists.
 
         Always safe for callers to return a generic success to the client.
-        Returns the raw token only for non-production logging / dev UX — never
-        required by the HTTP API response.
+        Returns the raw token only for non-production (dev UX) when email is log-only.
         """
         normalized = email.strip().lower()
         user = await self._session.scalar(select(User).where(User.email == normalized))
         if user is None:
             return None
 
-        # Invalidate prior unused tokens for this user
         await self._session.execute(
             update(PasswordResetToken)
             .where(
@@ -119,16 +140,34 @@ class AuthService:
         self._session.add(row)
         await self._session.flush()
 
-        # No outbound email provider in MVP — log a reset path for ops/dev.
         link = f"{self._settings.public_app_url.rstrip('/')}/reset-password?token={raw}"
+        subject = "Reset your CineTaste password"
+        body = (
+            f"Hi,\n\n"
+            f"We received a request to reset the password for {user.email}.\n"
+            f"Open this link within {self._settings.password_reset_ttl_minutes} minutes:\n\n"
+            f"{link}\n\n"
+            f"If you did not request this, you can ignore this email.\n"
+        )
+        try:
+            await self._email.send(to=user.email, subject=subject, text_body=body)
+        except Exception:
+            logger.exception("password_reset_email_failed user_id=%s", user.id)
+            # Still keep the token so ops can recover via logs in non-prod
+            if self._settings.is_production:
+                raise AppError(
+                    "Could not send reset email. Try again later.",
+                    status_code=503,
+                    code="email_unavailable",
+                )
+
         logger.info(
-            "password_reset_issued user_id=%s email=%s expires_minutes=%s link=%s",
+            "password_reset_issued user_id=%s email=%s",
             user.id,
             user.email,
-            self._settings.password_reset_ttl_minutes,
-            link if not self._settings.is_production else "[redacted]",
         )
-        if not self._settings.is_production:
+        # Dev convenience: expose token when using log-only email
+        if not self._settings.is_production and not (self._settings.smtp_host or "").strip():
             return raw
         return None
 
@@ -154,7 +193,6 @@ class AuthService:
         user.password_hash = hash_password(new_password)
         stored.used_at = now
 
-        # Revoke all sessions after password change
         await self._session.execute(
             update(RefreshToken)
             .where(RefreshToken.user_id == user.id, RefreshToken.revoked_at.is_(None))
@@ -167,7 +205,6 @@ class AuthService:
         if not verify_password(password, user.password_hash):
             raise UnauthorizedError("Password is incorrect", code="invalid_credentials")
 
-        # Explicit cleanup for tables that may not cascade from ORM alone
         await self._session.execute(delete(RefreshToken).where(RefreshToken.user_id == user.id))
         await self._session.execute(
             delete(PasswordResetToken).where(PasswordResetToken.user_id == user.id)
@@ -179,11 +216,30 @@ class AuthService:
     async def get_user(self, user_id: UUID) -> User | None:
         return await self._session.get(User, user_id)
 
-    async def _issue_tokens(self, user: User) -> tuple[str, str]:
+    async def _revoke_family(self, family_id: UUID, user_id: UUID, *, now: datetime) -> None:
+        await self._session.execute(
+            update(RefreshToken)
+            .where(
+                RefreshToken.family_id == family_id,
+                RefreshToken.user_id == user_id,
+                RefreshToken.revoked_at.is_(None),
+            )
+            .values(revoked_at=now)
+        )
+        await self._session.flush()
+
+    async def _issue_tokens(
+        self,
+        user: User,
+        *,
+        family_id: UUID | None = None,
+    ) -> tuple[str, str]:
         access = create_access_token(user_id=user.id, settings=self._settings)
         raw_refresh = generate_refresh_token()
+        fid = family_id or uuid.uuid4()
         refresh_row = RefreshToken(
             user_id=user.id,
+            family_id=fid,
             token_hash=hash_token(raw_refresh),
             expires_at=datetime.now(UTC)
             + timedelta(days=self._settings.jwt_refresh_ttl_days),

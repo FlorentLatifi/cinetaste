@@ -147,19 +147,25 @@ export function HomePage() {
       <div className="rec-grid">
         {items.map((item) => (
           <article key={item.title.id} className="rec-card">
-            <div className="rec-poster">
-              {item.title.poster_url ? (
-                <img
-                  src={item.title.poster_url}
-                  alt={item.title.name}
-                  loading="lazy"
-                />
-              ) : (
-                <div className="poster-fallback">{item.title.name}</div>
-              )}
-            </div>
+            <Link to={`/titles/${item.title.id}`} className="rec-poster-link">
+              <div className="rec-poster">
+                {item.title.poster_url ? (
+                  <img
+                    src={item.title.poster_url}
+                    alt={item.title.name}
+                    loading="lazy"
+                  />
+                ) : (
+                  <div className="poster-fallback">{item.title.name}</div>
+                )}
+              </div>
+            </Link>
             <div className="rec-body">
-              <h3>{item.title.name}</h3>
+              <h3>
+                <Link to={`/titles/${item.title.id}`} className="rec-title-link">
+                  {item.title.name}
+                </Link>
+              </h3>
               <p className="meta-line">
                 {item.title.media_type.toUpperCase()}
                 {item.title.release_date

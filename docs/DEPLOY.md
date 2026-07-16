@@ -79,11 +79,15 @@ Request logs already emit `method path status duration_ms request_id` — pair w
 
 | Feature | Endpoint | Notes |
 |---------|----------|--------|
-| Forgot password | `POST /auth/forgot-password` | Always generic success (no email enumeration). MVP logs reset link in **non-prod**; wire SES/Postmark later. |
+| Forgot password | `POST /auth/forgot-password` | Always generic success (no email enumeration). Sends via SMTP if configured, else log-only. |
 | Reset password | `POST /auth/reset-password` | One-time token; revokes all sessions. |
 | Delete account | `DELETE /me` | Requires password + confirm `DELETE`; cascades taste/interactions via FKs. |
+| Refresh reuse | `POST /auth/refresh` | Reusing a rotated refresh token revokes the **whole family** (`refresh_reuse`). |
 
-Set `PUBLIC_APP_URL` to your SPA origin so reset links in logs are correct.
+Set `PUBLIC_APP_URL` to your SPA origin so reset links are correct.
+
+**SMTP (optional):** `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`, `SMTP_USE_TLS`.  
+If `SMTP_HOST` is empty, password-reset messages go to application logs only.
 
 ### Auth cookies (SPA)
 

@@ -8,6 +8,7 @@ import { LoginPage } from "./pages/LoginPage";
 import { OnboardingPage } from "./pages/OnboardingPage";
 import { RegisterPage } from "./pages/RegisterPage";
 import { ResetPasswordPage } from "./pages/ResetPasswordPage";
+import { TitleDetailPage } from "./pages/TitleDetailPage";
 import { WatchlistPage } from "./pages/WatchlistPage";
 
 function Protected({ children }: { children: React.ReactNode }) {
@@ -97,6 +98,16 @@ export default function App() {
           <Protected>
             <AppShell>
               <AccountPage />
+            </AppShell>
+          </Protected>
+        }
+      />
+      <Route
+        path="/titles/:titleId"
+        element={
+          <Protected>
+            <AppShell>
+              <TitleDetailPage />
             </AppShell>
           </Protected>
         }
