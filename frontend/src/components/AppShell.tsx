@@ -36,6 +36,9 @@ export function AppShell({ children }: { children: ReactNode }) {
           <NavLink className="nav-link" to="/watchlist">
             Watchlist
           </NavLink>
+          <NavLink className="nav-link" to="/history">
+            History
+          </NavLink>
           <NavLink className="nav-link" to="/account">
             Account
           </NavLink>

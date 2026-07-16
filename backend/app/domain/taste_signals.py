@@ -366,6 +366,35 @@ def weight_for(event_type: str) -> float:
     return get_policy(event_type).weight
 
 
+# Durable title states shown on the History page (excludes transient / empty).
+HISTORY_VISIBLE_STATES: frozenset[str] = frozenset(
+    {
+        "like",
+        "dislike",
+        "watchlist",
+        "not_interested",
+        "rated",
+        "watched",
+    }
+)
+
+# Human labels for UserTitleState.state values (not always 1:1 with event_type).
+STATE_LABELS: dict[str, str] = {
+    "like": "Liked",
+    "dislike": "Passed",
+    "watchlist": "Watchlist",
+    "not_interested": "Not interested",
+    "rated": "Rated",
+    "watched": "Watched",
+    "haven't_seen": "Haven't seen",
+    "none": "None",
+}
+
+
+def label_for_state(state: str) -> str:
+    return STATE_LABELS.get(state, state.replace("_", " ").title())
+
+
 def last_clear_timestamps(
     events: Iterable[tuple[UUID, str, datetime]],
 ) -> dict[UUID, datetime]:

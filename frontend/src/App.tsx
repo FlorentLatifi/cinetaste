@@ -10,6 +10,7 @@ import { RegisterPage } from "./pages/RegisterPage";
 import { ResetPasswordPage } from "./pages/ResetPasswordPage";
 import { SearchPage } from "./pages/SearchPage";
 import { TitleDetailPage } from "./pages/TitleDetailPage";
+import { HistoryPage } from "./pages/HistoryPage";
 import { WatchlistPage } from "./pages/WatchlistPage";
 
 function Protected({ children }: { children: React.ReactNode }) {
@@ -89,6 +90,16 @@ export default function App() {
           <Protected>
             <AppShell>
               <WatchlistPage />
+            </AppShell>
+          </Protected>
+        }
+      />
+      <Route
+        path="/history"
+        element={
+          <Protected>
+            <AppShell>
+              <HistoryPage />
             </AppShell>
           </Protected>
         }

@@ -15,6 +15,7 @@ from app.domain.taste_signals import (
     EXPLAIN_ANCHOR_MIN_WEIGHT,
     FEED_EXCLUDE_STATES,
     FUTURE_INTERACTION_EVENT_TYPES,
+    HISTORY_VISIBLE_STATES,
     POSITIVE_RATING_EVENT_TYPES,
     RATING_EVENT_TYPES,
     SIGNAL_POLICIES,
@@ -24,6 +25,7 @@ from app.domain.taste_signals import (
     affects_taste,
     get_policy,
     is_superseded_by_clear,
+    label_for_state,
     last_clear_timestamps,
     policy_table_markdown,
     weight_for,
@@ -53,6 +55,16 @@ def test_not_interested_is_mild_negative() -> None:
     assert p.exclude_from_feed is True
     assert STATE_FROM_EVENT["not_interested"] == "not_interested"
     assert "not_interested" in FEED_EXCLUDE_STATES
+
+
+def test_history_states_and_labels() -> None:
+    assert "like" in HISTORY_VISIBLE_STATES
+    assert "watched" in HISTORY_VISIBLE_STATES
+    assert "none" not in HISTORY_VISIBLE_STATES
+    assert "haven't_seen" not in HISTORY_VISIBLE_STATES
+    assert label_for_state("like") == "Liked"
+    assert label_for_state("not_interested") == "Not interested"
+    assert label_for_state("custom_x") == "Custom X"
 
 
 def test_clear_is_zero_signal_and_active_api() -> None:

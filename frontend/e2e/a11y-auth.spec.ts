@@ -20,6 +20,10 @@ const authRoutes: { path: string; ready: string | RegExp; setup?: "search" }[] =
     ready: "role=heading[name='Watchlist']",
   },
   {
+    path: "/history",
+    ready: "role=heading[name='History']",
+  },
+  {
     path: "/account",
     ready: "role=heading[name='Your profile']",
   },

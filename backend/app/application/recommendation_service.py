@@ -362,6 +362,39 @@ class RecommendationService:
         by_id = {t.id: t for t in titles}
         return [by_id[i] for i in ids if i in by_id]
 
+    async def history(
+        self,
+        user_id: UUID,
+        *,
+        limit: int = 50,
+    ) -> list[tuple[Title, UserTitleState]]:
+        """Current user–title relationships (liked, watched, saved, …), newest first."""
+        from app.domain.taste_signals import HISTORY_VISIBLE_STATES
+
+        states = (
+            await self._session.scalars(
+                select(UserTitleState)
+                .where(
+                    UserTitleState.user_id == user_id,
+                    UserTitleState.state.in_(list(HISTORY_VISIBLE_STATES)),
+                )
+                .order_by(UserTitleState.updated_at.desc())
+                .limit(limit)
+            )
+        ).all()
+        if not states:
+            return []
+        ids = [s.title_id for s in states]
+        titles = (
+            await self._session.scalars(
+                select(Title)
+                .where(Title.id.in_(ids))
+                .options(selectinload(Title.genres))
+            )
+        ).all()
+        by_id = {t.id: t for t in titles}
+        return [(by_id[s.title_id], s) for s in states if s.title_id in by_id]
+
     async def _hydrate(self, payload: list[dict[str, Any]]) -> list[tuple[Title, RankedItem]]:
         from app.recommendation.pipeline import Reason
 

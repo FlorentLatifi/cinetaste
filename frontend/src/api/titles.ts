@@ -189,6 +189,21 @@ export function getWatchlist(accessToken: string) {
   return apiFetch<Title[]>("/watchlist", {}, accessToken);
 }
 
+export type HistoryItem = {
+  title: Title;
+  state: string;
+  label: string;
+  updated_at: string;
+};
+
+export function getHistory(accessToken: string, limit = 50) {
+  return apiFetch<HistoryItem[]>(
+    `/me/history?limit=${limit}`,
+    {},
+    accessToken,
+  );
+}
+
 export function getCatalogStatus(accessToken: string) {
   return apiFetch<{
     title_count: number;

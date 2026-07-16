@@ -113,6 +113,20 @@ export async function installApiMock(
       return;
     }
 
+    if (method === "GET" && path.startsWith("/me/history")) {
+      await route.fulfill(
+        json([
+          {
+            title: mockTitle,
+            state: "like",
+            label: "Liked",
+            updated_at: "2026-01-15T12:00:00.000Z",
+          },
+        ]),
+      );
+      return;
+    }
+
     if (method === "GET" && path.startsWith("/titles/search")) {
       await route.fulfill(json([mockTitle]));
       return;

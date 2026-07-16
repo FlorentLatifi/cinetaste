@@ -1,0 +1,151 @@
+import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
+import { ApiError } from "../api/client";
+import * as titlesApi from "../api/titles";
+import type { HistoryItem } from "../api/titles";
+import { useAuth } from "../features/auth/AuthContext";
+
+function formatWhen(iso: string): string {
+  try {
+    const d = new Date(iso);
+    return d.toLocaleDateString(undefined, {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    });
+  } catch {
+    return iso.slice(0, 10);
+  }
+}
+
+export function HistoryPage() {
+  const { accessToken } = useAuth();
+  const [items, setItems] = useState<HistoryItem[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!accessToken) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await titlesApi.getHistory(accessToken);
+        if (!cancelled) setItems(data);
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof ApiError ? err.message : "Could not load history");
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [accessToken]);
+
+  async function clearItem(titleId: string) {
+    if (!accessToken) return;
+    setBusyId(titleId);
+    setError(null);
+    try {
+      await titlesApi.interact(accessToken, titleId, "clear");
+      setItems((prev) => prev.filter((i) => i.title.id !== titleId));
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not clear");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  return (
+    <section className="feed" aria-labelledby="history-heading">
+      <div className="feed-header">
+        <div>
+          <p className="eyebrow">Your activity</p>
+          <h1 id="history-heading">History</h1>
+          <p className="lede">
+            Titles you&apos;ve liked, rated, saved, passed, or marked watched.
+            Clearing a row undoes that relationship for taste and For You.
+          </p>
+        </div>
+        <Link className="btn ghost" to="/">
+          For You
+        </Link>
+      </div>
+
+      {error && (
+        <p className="form-error" role="alert">
+          {error}
+        </p>
+      )}
+
+      {loading && (
+        <div className="center-inline">
+          <div className="spinner" aria-label="Loading" />
+        </div>
+      )}
+
+      {!loading && !items.length && (
+        <div className="callout" role="status">
+          No history yet. Rate or save titles from For You or search.
+        </div>
+      )}
+
+      {!loading && items.length > 0 && (
+        <ul className="history-list" aria-label="Title history">
+          {items.map((item) => {
+            const name = item.title.name;
+            const busy = busyId === item.title.id;
+            return (
+              <li key={item.title.id} className="history-row">
+                <Link
+                  to={`/titles/${item.title.id}`}
+                  className="history-poster-link"
+                  tabIndex={-1}
+                  aria-hidden="true"
+                >
+                  <div className="history-poster" aria-hidden="true">
+                    {item.title.poster_url ? (
+                      <img src={item.title.poster_url} alt="" loading="lazy" />
+                    ) : (
+                      <div className="poster-fallback">{name.slice(0, 1)}</div>
+                    )}
+                  </div>
+                </Link>
+                <div className="history-body">
+                  <h2 className="history-title">
+                    <Link to={`/titles/${item.title.id}`} className="rec-title-link">
+                      {name}
+                    </Link>
+                  </h2>
+                  <p className="meta-line">
+                    <span className={`history-badge state-${item.state}`}>
+                      {item.label}
+                    </span>
+                    <span> · {formatWhen(item.updated_at)}</span>
+                    {item.title.release_date
+                      ? ` · ${item.title.release_date.slice(0, 4)}`
+                      : ""}
+                  </p>
+                </div>
+                <div className="history-actions">
+                  <button
+                    type="button"
+                    className="btn ghost"
+                    disabled={busy}
+                    aria-label={`Clear status for ${name}`}
+                    onClick={() => void clearItem(item.title.id)}
+                  >
+                    {busy ? "Clearing…" : "Clear"}
+                  </button>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </section>
+  );
+}

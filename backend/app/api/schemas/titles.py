@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -192,6 +192,15 @@ class CatalogStatusOut(BaseModel):
     title_count: int
     with_embeddings: int
     ready_for_onboarding: bool
+
+
+class HistoryItemOut(BaseModel):
+    """One durable user–title relationship for the History page."""
+
+    title: TitleSummaryOut
+    state: str
+    label: str
+    updated_at: datetime
 
 
 class ProviderOfferOut(BaseModel):

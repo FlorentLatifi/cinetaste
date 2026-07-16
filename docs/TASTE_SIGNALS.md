@@ -49,6 +49,13 @@ User action
 | **Watched + liked** | `watched_liked` | **+1.10** | positive | Yes | `like` | Yes | Convenience; slightly above Good. |
 | **Watched + disliked** | `watched_disliked` | **−0.95** | negative | Yes | `dislike` | Yes | Strong negative — they invested time. |
 
+### History page
+
+`GET /me/history` returns current `UserTitleState` rows in  
+`like | dislike | watchlist | not_interested | rated | watched`  
+(newest `updated_at` first). **Clear** on a row sends `clear` so the title can
+return to For You and prior events for that title are superseded on recompute.
+
 ### Post-watch UI (title detail)
 
 1. User taps **Watched** → rate panel (Bad / It's ok / Good / Favorite).  
