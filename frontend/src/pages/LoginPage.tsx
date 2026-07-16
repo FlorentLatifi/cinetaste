@@ -1,11 +1,15 @@
 import { useState, type FormEvent } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { ApiError } from "../api/client";
 import { useAuth } from "../features/auth/AuthContext";
 
 export function LoginPage() {
   const { login } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+  const passwordResetOk = Boolean(
+    (location.state as { passwordReset?: boolean } | null)?.passwordReset,
+  );
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -36,6 +40,11 @@ export function LoginPage() {
       </div>
       <form className="auth-card" onSubmit={onSubmit}>
         <h2>Welcome back</h2>
+        {passwordResetOk && (
+          <p className="callout" style={{ margin: 0 }}>
+            Password updated. Sign in with your new password.
+          </p>
+        )}
         <label>
           Email
           <input
@@ -61,6 +70,9 @@ export function LoginPage() {
         <button className="btn primary" type="submit" disabled={submitting}>
           {submitting ? "Signing in…" : "Sign in"}
         </button>
+        <p className="auth-switch">
+          <Link to="/forgot-password">Forgot password?</Link>
+        </p>
         <p className="auth-switch">
           New here? <Link to="/register">Create an account</Link>
         </p>

@@ -51,3 +51,31 @@ export function logout() {
 export function getMe(accessToken: string) {
   return apiFetch<User>("/me", {}, accessToken);
 }
+
+export function forgotPassword(email: string) {
+  return apiFetch<{ message: string; dev_reset_token?: string | null }>(
+    "/auth/forgot-password",
+    {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    },
+  );
+}
+
+export function resetPassword(token: string, new_password: string) {
+  return apiFetch<void>("/auth/reset-password", {
+    method: "POST",
+    body: JSON.stringify({ token, new_password }),
+  });
+}
+
+export function deleteAccount(accessToken: string, password: string) {
+  return apiFetch<void>(
+    "/me",
+    {
+      method: "DELETE",
+      body: JSON.stringify({ password, confirm: "DELETE" }),
+    },
+    accessToken,
+  );
+}

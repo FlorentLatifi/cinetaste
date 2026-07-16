@@ -62,6 +62,11 @@ class Settings(BaseSettings):
     sentry_traces_sample_rate: float = 0.1
     sentry_release: str = ""
 
+    # Password reset (token TTL). Real email delivery is optional for MVP.
+    password_reset_ttl_minutes: int = 60
+    # Public frontend origin used to build reset links in logs (dev/staging).
+    public_app_url: str = "http://localhost:5173"
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def strip_cors(cls, value: str) -> str:

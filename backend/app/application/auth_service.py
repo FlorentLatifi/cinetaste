@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import logging
+import secrets
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
@@ -14,8 +16,10 @@ from app.core.security import (
     hash_token,
     verify_password,
 )
-from app.domain.exceptions import ConflictError, UnauthorizedError
-from app.infrastructure.db.models.user import RefreshToken, User
+from app.domain.exceptions import AppError, ConflictError, UnauthorizedError
+from app.infrastructure.db.models.user import PasswordResetToken, RefreshToken, User
+
+logger = logging.getLogger(__name__)
 
 
 class AuthService:
@@ -82,6 +86,95 @@ class AuthService:
         )
         if stored and stored.revoked_at is None:
             stored.revoked_at = datetime.now(UTC)
+
+    async def request_password_reset(self, *, email: str) -> str | None:
+        """Create a one-time reset token if the account exists.
+
+        Always safe for callers to return a generic success to the client.
+        Returns the raw token only for non-production logging / dev UX — never
+        required by the HTTP API response.
+        """
+        normalized = email.strip().lower()
+        user = await self._session.scalar(select(User).where(User.email == normalized))
+        if user is None:
+            return None
+
+        # Invalidate prior unused tokens for this user
+        await self._session.execute(
+            update(PasswordResetToken)
+            .where(
+                PasswordResetToken.user_id == user.id,
+                PasswordResetToken.used_at.is_(None),
+            )
+            .values(used_at=datetime.now(UTC))
+        )
+
+        raw = secrets.token_urlsafe(32)
+        row = PasswordResetToken(
+            user_id=user.id,
+            token_hash=hash_token(raw),
+            expires_at=datetime.now(UTC)
+            + timedelta(minutes=self._settings.password_reset_ttl_minutes),
+        )
+        self._session.add(row)
+        await self._session.flush()
+
+        # No outbound email provider in MVP — log a reset path for ops/dev.
+        link = f"{self._settings.public_app_url.rstrip('/')}/reset-password?token={raw}"
+        logger.info(
+            "password_reset_issued user_id=%s email=%s expires_minutes=%s link=%s",
+            user.id,
+            user.email,
+            self._settings.password_reset_ttl_minutes,
+            link if not self._settings.is_production else "[redacted]",
+        )
+        if not self._settings.is_production:
+            return raw
+        return None
+
+    async def reset_password(self, *, token: str, new_password: str) -> None:
+        token_hash = hash_token(token.strip())
+        stored = await self._session.scalar(
+            select(PasswordResetToken).where(PasswordResetToken.token_hash == token_hash)
+        )
+        if stored is None or stored.used_at is not None:
+            raise AppError("Invalid or expired reset link", status_code=400, code="invalid_reset_token")
+
+        now = datetime.now(UTC)
+        expires = stored.expires_at
+        if expires.tzinfo is None:
+            expires = expires.replace(tzinfo=UTC)
+        if expires < now:
+            raise AppError("Invalid or expired reset link", status_code=400, code="invalid_reset_token")
+
+        user = await self._session.get(User, stored.user_id)
+        if user is None:
+            raise AppError("Invalid or expired reset link", status_code=400, code="invalid_reset_token")
+
+        user.password_hash = hash_password(new_password)
+        stored.used_at = now
+
+        # Revoke all sessions after password change
+        await self._session.execute(
+            update(RefreshToken)
+            .where(RefreshToken.user_id == user.id, RefreshToken.revoked_at.is_(None))
+            .values(revoked_at=now)
+        )
+        await self._session.flush()
+
+    async def delete_account(self, *, user: User, password: str) -> None:
+        """Permanently delete the user and cascaded data (taste, interactions, tokens)."""
+        if not verify_password(password, user.password_hash):
+            raise UnauthorizedError("Password is incorrect", code="invalid_credentials")
+
+        # Explicit cleanup for tables that may not cascade from ORM alone
+        await self._session.execute(delete(RefreshToken).where(RefreshToken.user_id == user.id))
+        await self._session.execute(
+            delete(PasswordResetToken).where(PasswordResetToken.user_id == user.id)
+        )
+        await self._session.delete(user)
+        await self._session.flush()
+        logger.info("account_deleted user_id=%s email=%s", user.id, user.email)
 
     async def get_user(self, user_id: UUID) -> User | None:
         return await self._session.get(User, user_id)

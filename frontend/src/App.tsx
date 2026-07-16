@@ -1,10 +1,13 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { useAuth } from "./features/auth/AuthContext";
 import { AppShell } from "./components/AppShell";
+import { AccountPage } from "./pages/AccountPage";
+import { ForgotPasswordPage } from "./pages/ForgotPasswordPage";
 import { HomePage } from "./pages/HomePage";
 import { LoginPage } from "./pages/LoginPage";
 import { OnboardingPage } from "./pages/OnboardingPage";
 import { RegisterPage } from "./pages/RegisterPage";
+import { ResetPasswordPage } from "./pages/ResetPasswordPage";
 import { WatchlistPage } from "./pages/WatchlistPage";
 
 function Protected({ children }: { children: React.ReactNode }) {
@@ -53,6 +56,22 @@ export default function App() {
         }
       />
       <Route
+        path="/forgot-password"
+        element={
+          <GuestOnly>
+            <ForgotPasswordPage />
+          </GuestOnly>
+        }
+      />
+      <Route
+        path="/reset-password"
+        element={
+          <GuestOnly>
+            <ResetPasswordPage />
+          </GuestOnly>
+        }
+      />
+      <Route
         path="/onboarding"
         element={
           <Protected>
@@ -68,6 +87,16 @@ export default function App() {
           <Protected>
             <AppShell>
               <WatchlistPage />
+            </AppShell>
+          </Protected>
+        }
+      />
+      <Route
+        path="/account"
+        element={
+          <Protected>
+            <AppShell>
+              <AccountPage />
             </AppShell>
           </Protected>
         }

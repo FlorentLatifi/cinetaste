@@ -4,10 +4,13 @@ from fastapi import APIRouter, Depends, Request, Response, status
 
 from app.api.deps import get_auth_service, get_settings_dep
 from app.api.schemas.auth import (
+    ForgotPasswordRequest,
+    ForgotPasswordResponse,
     LoginRequest,
     LogoutRequest,
     RefreshRequest,
     RegisterRequest,
+    ResetPasswordRequest,
     TokenResponse,
     UserResponse,
 )
@@ -96,3 +99,21 @@ async def logout(
         return
     await auth.logout(refresh_token=raw)
     clear_refresh_cookie(response, settings)
+
+
+@router.post("/forgot-password", response_model=ForgotPasswordResponse)
+async def forgot_password(
+    body: ForgotPasswordRequest,
+    auth: Annotated[AuthService, Depends(get_auth_service)],
+) -> ForgotPasswordResponse:
+    """Always 200 with a generic message (anti-enumeration)."""
+    dev_token = await auth.request_password_reset(email=body.email)
+    return ForgotPasswordResponse(dev_reset_token=dev_token)
+
+
+@router.post("/reset-password", status_code=status.HTTP_204_NO_CONTENT)
+async def reset_password(
+    body: ResetPasswordRequest,
+    auth: Annotated[AuthService, Depends(get_auth_service)],
+) -> None:
+    await auth.reset_password(token=body.token, new_password=body.new_password)

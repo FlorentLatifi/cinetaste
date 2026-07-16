@@ -75,6 +75,16 @@ Optional but recommended for public beta.
 
 Request logs already emit `method path status duration_ms request_id` — pair with Render log drains or a metrics scraper for basic RED signals when Sentry is off.
 
+### Account lifecycle
+
+| Feature | Endpoint | Notes |
+|---------|----------|--------|
+| Forgot password | `POST /auth/forgot-password` | Always generic success (no email enumeration). MVP logs reset link in **non-prod**; wire SES/Postmark later. |
+| Reset password | `POST /auth/reset-password` | One-time token; revokes all sessions. |
+| Delete account | `DELETE /me` | Requires password + confirm `DELETE`; cascades taste/interactions via FKs. |
+
+Set `PUBLIC_APP_URL` to your SPA origin so reset links in logs are correct.
+
 ### Auth cookies (SPA)
 
 | Item | Value |

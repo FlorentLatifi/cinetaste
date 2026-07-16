@@ -139,6 +139,50 @@ p {
   font-size: 0.9rem;
 }
 
+.account-page {
+  max-width: 40rem;
+}
+
+.account-card {
+  margin-top: 1.25rem;
+  padding: 1.25rem 1.35rem;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.account-card h2 {
+  margin: 0;
+  font-size: 1.45rem;
+}
+
+.account-card.danger-zone {
+  border-color: rgba(240, 113, 120, 0.35);
+  background: rgba(240, 113, 120, 0.06);
+}
+
+.account-card label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.account-card input {
+  appearance: none;
+  border: 1px solid var(--border);
+  background: var(--bg-soft);
+  color: var(--text);
+  border-radius: 12px;
+  padding: 0.7rem 0.85rem;
+  font: inherit;
+}
+
 .main {
   width: min(1100px, calc(100% - 2rem));
   margin: 0 auto;

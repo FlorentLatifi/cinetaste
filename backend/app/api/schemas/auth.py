@@ -43,3 +43,34 @@ class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     user: UserResponse
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ForgotPasswordResponse(BaseModel):
+    """Always the same message — does not reveal whether the email exists.
+
+    ``dev_reset_token`` is only populated outside production for local testing
+    (no email provider in MVP).
+    """
+
+    message: str = (
+        "If an account exists for that email, password reset instructions have been issued."
+    )
+    dev_reset_token: str | None = None
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str = Field(min_length=10, max_length=200)
+    new_password: str = Field(min_length=8, max_length=128)
+
+
+class DeleteAccountRequest(BaseModel):
+    password: str = Field(min_length=1, max_length=128)
+    confirm: str = Field(
+        description='Must be the literal string "DELETE"',
+        min_length=6,
+        max_length=16,
+    )
