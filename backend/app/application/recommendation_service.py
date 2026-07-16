@@ -267,13 +267,15 @@ class RecommendationService:
         )
 
     async def get_title(self, title_id: UUID) -> Title | None:
+        from app.infrastructure.db.models.catalog import Credit
+
         return await self._session.scalar(
             select(Title)
             .where(Title.id == title_id)
             .options(
                 selectinload(Title.genres),
                 selectinload(Title.keywords),
-                selectinload(Title.credits),
+                selectinload(Title.credits).selectinload(Credit.person),
             )
         )
 

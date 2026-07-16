@@ -10,6 +10,7 @@ from app.api.schemas.titles import (
     ReasonOut,
     RecommendationItemOut,
     RecommendationSlateOut,
+    TitleDetailOut,
     TitleSummaryOut,
 )
 from app.application.recommendation_service import RecommendationService
@@ -60,18 +61,18 @@ async def search_titles(
     return [TitleSummaryOut.from_title(t) for t in titles]
 
 
-@router.get("/titles/{title_id}", response_model=TitleSummaryOut)
+@router.get("/titles/{title_id}", response_model=TitleDetailOut)
 async def get_title(
     title_id: UUID,
     user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_db)],
     settings: Annotated[Settings, Depends(get_settings_dep)],
-) -> TitleSummaryOut:
+) -> TitleDetailOut:
     service = _rec_service(session, settings)
     title = await service.get_title(title_id)
     if title is None:
         raise NotFoundError("Title not found")
-    return TitleSummaryOut.from_title(title)
+    return TitleDetailOut.from_title_detail(title)
 
 
 @router.post("/titles/{title_id}/interactions", status_code=204)

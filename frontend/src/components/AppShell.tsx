@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Link } from "react-router-dom";
+import { Link, NavLink } from "react-router-dom";
 import { useAuth } from "../features/auth/AuthContext";
 
 export function AppShell({ children }: { children: ReactNode }) {
@@ -15,13 +15,21 @@ export function AppShell({ children }: { children: ReactNode }) {
             <div className="brand-tag">Taste-first discovery</div>
           </div>
         </Link>
-        <div className="topbar-right">
-          <Link className="btn ghost" to="/watchlist">
+        <nav className="topbar-nav" aria-label="Main">
+          <NavLink className="nav-link" to="/" end>
+            For You
+          </NavLink>
+          <NavLink className="nav-link" to="/search">
+            Search
+          </NavLink>
+          <NavLink className="nav-link" to="/watchlist">
             Watchlist
-          </Link>
-          <Link className="btn ghost" to="/account">
+          </NavLink>
+          <NavLink className="nav-link" to="/account">
             Account
-          </Link>
+          </NavLink>
+        </nav>
+        <div className="topbar-right">
           <span className="user-chip">{user?.display_name || user?.email}</span>
           <button type="button" className="btn ghost" onClick={() => void logout()}>
             Sign out

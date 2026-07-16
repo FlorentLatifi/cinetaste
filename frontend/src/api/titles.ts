@@ -2,6 +2,15 @@ import { apiFetch } from "./client";
 
 export type Genre = { id: string; name: string };
 
+export type Credit = {
+  name: string;
+  credit_type: string;
+  job: string | null;
+  character: string | null;
+  billing_order: number | null;
+  profile_url: string | null;
+};
+
 export type Title = {
   id: string;
   media_type: string;
@@ -16,6 +25,11 @@ export type Title = {
   original_language: string | null;
   genres: Genre[];
   poster_url: string | null;
+};
+
+export type TitleDetail = Title & {
+  credits: Credit[];
+  keywords: string[];
 };
 
 export type Reason = {
@@ -56,7 +70,7 @@ export function getForYou(accessToken: string, limit = 20) {
 }
 
 export function getTitle(accessToken: string, titleId: string) {
-  return apiFetch<Title>(`/titles/${titleId}`, {}, accessToken);
+  return apiFetch<TitleDetail>(`/titles/${titleId}`, {}, accessToken);
 }
 
 export function getOnboardingCards(
@@ -116,8 +130,12 @@ export function interact(
   );
 }
 
-export function searchTitles(accessToken: string, q: string) {
-  return apiFetch<Title[]>(`/titles/search?q=${encodeURIComponent(q)}`, {}, accessToken);
+export function searchTitles(accessToken: string, q: string, limit = 24) {
+  return apiFetch<Title[]>(
+    `/titles/search?q=${encodeURIComponent(q)}&limit=${limit}`,
+    {},
+    accessToken,
+  );
 }
 
 export function getWatchlist(accessToken: string) {

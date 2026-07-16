@@ -76,6 +76,58 @@ class TitleSummaryOut(TitleSummary):
         return cls(**data.model_dump(), poster_url=poster)
 
 
+class CreditOut(BaseModel):
+    name: str
+    credit_type: str  # cast | crew
+    job: str | None = None
+    character: str | None = None
+    billing_order: int | None = None
+    profile_url: str | None = None
+
+
+class TitleDetailOut(TitleSummaryOut):
+    """Full title card with ordered cast/crew for the detail page."""
+
+    credits: list[CreditOut] = Field(default_factory=list)
+    keywords: list[str] = Field(default_factory=list)
+
+    @classmethod
+    def from_title_detail(cls, title) -> TitleDetailOut:
+        base = TitleSummaryOut.from_title(title)
+        credits: list[CreditOut] = []
+        for c in title.credits or []:
+            person = getattr(c, "person", None)
+            name = person.name if person is not None else "Unknown"
+            profile = None
+            if person is not None and person.profile_path:
+                path = person.profile_path
+                profile = (
+                    path
+                    if path.startswith("http")
+                    else f"https://image.tmdb.org/t/p/w185{path}"
+                )
+            credits.append(
+                CreditOut(
+                    name=name,
+                    credit_type=c.credit_type,
+                    job=c.job,
+                    character=c.character,
+                    billing_order=c.billing_order,
+                    profile_url=profile,
+                )
+            )
+        # Cast by billing, then crew directors/writers first
+        credits.sort(
+            key=lambda x: (
+                0 if x.credit_type == "cast" else 1,
+                x.billing_order if x.billing_order is not None else 999,
+                x.name.lower(),
+            )
+        )
+        keywords = [k.name for k in (title.keywords or [])][:20]
+        return cls(**base.model_dump(), credits=credits, keywords=keywords)
+
+
 class RecommendationItemOut(BaseModel):
     title: TitleSummaryOut
     score: float

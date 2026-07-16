@@ -9,6 +9,7 @@ export function WatchlistPage() {
   const { accessToken } = useAuth();
   const [items, setItems] = useState<Title[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!accessToken) return;
@@ -21,6 +22,8 @@ export function WatchlistPage() {
         if (!cancelled) {
           setError(err instanceof ApiError ? err.message : "Could not load watchlist");
         }
+      } finally {
+        if (!cancelled) setLoading(false);
       }
     })();
     return () => {
@@ -40,20 +43,37 @@ export function WatchlistPage() {
         </Link>
       </div>
       {error && <p className="form-error">{error}</p>}
-      {!items.length && <div className="callout">Nothing saved yet. Hit Save on a recommendation.</div>}
+      {loading && (
+        <div className="center-inline">
+          <div className="spinner" />
+        </div>
+      )}
+      {!loading && !items.length && (
+        <div className="callout">
+          Nothing saved yet. Hit Save on a recommendation or title page.
+        </div>
+      )}
       <div className="rec-grid">
         {items.map((title) => (
           <article key={title.id} className="rec-card compact">
-            <div className="rec-poster">
-              {title.poster_url ? (
-                <img src={title.poster_url} alt={title.name} />
-              ) : (
-                <div className="poster-fallback">{title.name}</div>
-              )}
-            </div>
+            <Link to={`/titles/${title.id}`} className="rec-poster-link">
+              <div className="rec-poster">
+                {title.poster_url ? (
+                  <img src={title.poster_url} alt={title.name} />
+                ) : (
+                  <div className="poster-fallback">{title.name}</div>
+                )}
+              </div>
+            </Link>
             <div className="rec-body">
-              <h3>{title.name}</h3>
-              <p className="genres">{title.genres.map((g) => g.name).join(" · ")}</p>
+              <h3>
+                <Link to={`/titles/${title.id}`} className="rec-title-link">
+                  {title.name}
+                </Link>
+              </h3>
+              <p className="genres">
+                {title.genres.map((g) => g.name).join(" · ") || "—"}
+              </p>
             </div>
           </article>
         ))}

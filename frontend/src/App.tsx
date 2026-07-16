@@ -8,6 +8,7 @@ import { LoginPage } from "./pages/LoginPage";
 import { OnboardingPage } from "./pages/OnboardingPage";
 import { RegisterPage } from "./pages/RegisterPage";
 import { ResetPasswordPage } from "./pages/ResetPasswordPage";
+import { SearchPage } from "./pages/SearchPage";
 import { TitleDetailPage } from "./pages/TitleDetailPage";
 import { WatchlistPage } from "./pages/WatchlistPage";
 
@@ -88,6 +89,16 @@ export default function App() {
           <Protected>
             <AppShell>
               <WatchlistPage />
+            </AppShell>
+          </Protected>
+        }
+      />
+      <Route
+        path="/search"
+        element={
+          <Protected>
+            <AppShell>
+              <SearchPage />
             </AppShell>
           </Protected>
         }
