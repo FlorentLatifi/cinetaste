@@ -1,4 +1,5 @@
 import * as authApi from "./auth";
+import { captureFrontendError } from "../observability";
 import { clearLegacyTokenStorage, getAccessToken, setAccessToken } from "./tokenStore";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "/api/v1";
@@ -74,11 +75,16 @@ export async function apiFetch<T>(
   const data = await response.json().catch(() => ({}));
 
   if (!response.ok) {
-    throw new ApiError(
+    const err = new ApiError(
       response.status,
       typeof data.code === "string" ? data.code : "error",
       typeof data.message === "string" ? data.message : "Request failed",
     );
+    // Report server failures (not 401/404 noise)
+    if (response.status >= 500) {
+      captureFrontendError(err, { path, status: response.status, code: err.code });
+    }
+    throw err;
   }
 
   return data as T;

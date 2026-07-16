@@ -10,6 +10,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
 from app.core.config import Settings
+from app.core.observability import set_request_context
 from app.infrastructure.db.redis import get_redis
 
 logger = logging.getLogger("cinetaste.request")
@@ -21,6 +22,7 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
         request_id = request.headers.get("x-request-id") or str(uuid.uuid4())
         request.state.request_id = request_id
+        set_request_context(request_id=request_id, path=request.url.path)
         started = time.perf_counter()
         try:
             response = await call_next(request)
@@ -37,6 +39,7 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
 
         duration_ms = (time.perf_counter() - started) * 1000
         response.headers["X-Request-ID"] = request_id
+        # Structured access line — scrapeable for basic RED metrics in log drains
         logger.info(
             "method=%s path=%s status=%s duration_ms=%.1f request_id=%s",
             request.method,

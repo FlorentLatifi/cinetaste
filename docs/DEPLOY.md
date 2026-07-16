@@ -61,6 +61,20 @@ SELECT indexname FROM pg_indexes WHERE tablename = 'titles' AND indexname LIKE '
 | Taste onboarding | Reactions validated first; profile recomputed **once** after all events. |
 | Proxy headers | Set `FORWARDED_ALLOW_IPS` to your LB/proxy IPs (not `*` in hostile networks). |
 
+### Observability (Sentry)
+
+Optional but recommended for public beta.
+
+| Surface | Env var | Notes |
+|---------|---------|--------|
+| API | `SENTRY_DSN` | Leave empty to disable. `sentry-sdk` no-ops without DSN. |
+| API | `SENTRY_TRACES_SAMPLE_RATE` | Default `0.1` (10% of requests) |
+| API | `SENTRY_RELEASE` | Optional git SHA / version tag |
+| SPA (Vercel) | `VITE_SENTRY_DSN` | Build-time; baked into the bundle |
+| SPA | `VITE_SENTRY_TRACES_SAMPLE_RATE` | Default `0.1` |
+
+Request logs already emit `method path status duration_ms request_id` — pair with Render log drains or a metrics scraper for basic RED signals when Sentry is off.
+
 ### Auth cookies (SPA)
 
 | Item | Value |

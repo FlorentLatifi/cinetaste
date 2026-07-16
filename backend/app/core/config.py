@@ -57,6 +57,11 @@ class Settings(BaseSettings):
     # Force Secure cookies even outside production (e.g. https:// local tunnels)
     cookie_secure: bool = False
 
+    # Observability (optional — leave empty to disable)
+    sentry_dsn: str = ""
+    sentry_traces_sample_rate: float = 0.1
+    sentry_release: str = ""
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def strip_cors(cls, value: str) -> str:

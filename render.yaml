@@ -39,6 +39,10 @@ services:
         value: "1"
       - key: APP_NAME
         value: CineTaste
+      - key: SENTRY_DSN
+        sync: false
+      - key: SENTRY_TRACES_SAMPLE_RATE
+        value: "0.1"
 
   - type: redis
     name: cinetaste-redis

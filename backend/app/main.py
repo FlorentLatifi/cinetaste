@@ -13,6 +13,7 @@ from app.core.middleware import (
     RequestContextMiddleware,
     SecurityHeadersMiddleware,
 )
+from app.core.observability import capture_exception, init_observability
 from app.domain.exceptions import AppError
 from app.infrastructure.db.redis import close_redis, get_redis
 
@@ -21,6 +22,7 @@ from app.infrastructure.db.redis import close_redis, get_redis
 async def lifespan(_app: FastAPI):
     settings = get_settings()
     configure_logging(debug=settings.app_debug)
+    init_observability(settings)
     try:
         await get_redis()
     except Exception:
@@ -31,6 +33,9 @@ async def lifespan(_app: FastAPI):
 
 def create_app() -> FastAPI:
     settings = get_settings()
+    # Init early so FastAPI/Starlette integrations wrap the app.
+    configure_logging(debug=settings.app_debug)
+    init_observability(settings)
     app = FastAPI(
         title=settings.app_name,
         version="0.2.0",
@@ -66,8 +71,14 @@ def create_app() -> FastAPI:
     if not settings.app_debug:
 
         @app.exception_handler(Exception)
-        async def unhandled_error_handler(request: Request, _exc: Exception) -> JSONResponse:
+        async def unhandled_error_handler(request: Request, exc: Exception) -> JSONResponse:
             request_id = getattr(request.state, "request_id", None)
+            capture_exception(
+                exc,
+                request_id=request_id,
+                path=str(request.url.path),
+                method=request.method,
+            )
             return JSONResponse(
                 status_code=500,
                 content={
