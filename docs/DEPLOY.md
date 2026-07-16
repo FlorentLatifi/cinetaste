@@ -220,11 +220,8 @@ Then:
 **Already documented:**
 
 - Staging stack: `docker-compose.staging.yml` + `.env.staging.example` (see §9)  
-- Authenticated axe + interaction smokes in CI (`npm run test:a11y`)  
-
-**Already documented:**
-
 - Hosted staging blueprint: `render.staging.yaml` (see §9d)  
+- Authenticated axe + interaction smokes in CI (`npm run test:a11y`)  
 
 **Still recommended before a large launch:**
 
