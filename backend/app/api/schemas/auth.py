@@ -37,6 +37,26 @@ class UserResponse(BaseModel):
     created_at: datetime
 
 
+class TasteFeatureOut(BaseModel):
+    key: str
+    family: str
+    label: str
+    weight: float
+
+
+class TasteSummaryOut(BaseModel):
+    """Interpretable slice of the user's taste profile for the Account page."""
+
+    version: int
+    updated_at: datetime | None = None
+    has_vector: bool = False
+    feature_count: int = 0
+    anchor_count: int = 0
+    likes: list[TasteFeatureOut] = Field(default_factory=list)
+    dislikes: list[TasteFeatureOut] = Field(default_factory=list)
+    ready: bool = False
+
+
 class TokenResponse(BaseModel):
     """Access JWT + user. Refresh token is httpOnly cookie only (not in body)."""
 

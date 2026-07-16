@@ -81,6 +81,42 @@ export async function installApiMock(
       return;
     }
 
+    if (method === "GET" && path === "/me/taste") {
+      await route.fulfill(
+        json({
+          version: 3,
+          updated_at: "2026-01-15T12:00:00.000Z",
+          has_vector: true,
+          feature_count: 4,
+          anchor_count: 1,
+          ready: true,
+          likes: [
+            {
+              key: "genre:drama",
+              family: "genre",
+              label: "Drama",
+              weight: 2.1,
+            },
+            {
+              key: "person:director:ava voss",
+              family: "person:director",
+              label: "Director: Ava Voss",
+              weight: 1.6,
+            },
+          ],
+          dislikes: [
+            {
+              key: "genre:horror",
+              family: "genre",
+              label: "Horror",
+              weight: -1.2,
+            },
+          ],
+        }),
+      );
+      return;
+    }
+
     if (method === "GET" && path.startsWith("/recommendations/for-you")) {
       await route.fulfill(
         json({

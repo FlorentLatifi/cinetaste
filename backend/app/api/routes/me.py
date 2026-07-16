@@ -4,10 +4,12 @@ from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUser, get_auth_service, get_settings_dep
-from app.api.schemas.auth import DeleteAccountRequest, UserResponse
+from app.api.schemas.auth import DeleteAccountRequest, TasteFeatureOut, TasteSummaryOut, UserResponse
 from app.api.schemas.titles import HistoryItemOut, TitleSummaryOut
 from app.application.auth_service import AuthService
 from app.application.recommendation_service import RecommendationService
+from app.application.taste_service import TasteService
+from app.application.taste_summary import summarize_profile_features
 from app.core.config import Settings
 from app.core.cookies import clear_refresh_cookie
 from app.domain.exceptions import AppError
@@ -20,6 +22,44 @@ router = APIRouter()
 @router.get("/me", response_model=UserResponse)
 async def me(user: CurrentUser) -> UserResponse:
     return UserResponse.model_validate(user)
+
+
+@router.get("/me/taste", response_model=TasteSummaryOut)
+async def my_taste(
+    user: CurrentUser,
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> TasteSummaryOut:
+    """Top positive/negative taste features for the Account profile card."""
+    taste = TasteService(session)
+    profile = await taste.get_profile(user.id)
+    if profile is None:
+        return TasteSummaryOut(version=0, ready=False)
+
+    summary = summarize_profile_features(profile.features, limit=8)
+    has_vector = profile.vector is not None and len(list(profile.vector)) > 0
+    ready = summary["feature_count"] > 0 or has_vector
+
+    def map_chips(rows: list) -> list[TasteFeatureOut]:
+        return [
+            TasteFeatureOut(
+                key=c.key,
+                family=c.family,
+                label=c.label,
+                weight=c.weight,
+            )
+            for c in rows
+        ]
+
+    return TasteSummaryOut(
+        version=int(profile.version or 1),
+        updated_at=profile.updated_at,
+        has_vector=has_vector,
+        feature_count=summary["feature_count"],
+        anchor_count=summary["anchor_count"],
+        likes=map_chips(summary["likes"]),
+        dislikes=map_chips(summary["dislikes"]),
+        ready=ready,
+    )
 
 
 @router.get("/me/history", response_model=list[HistoryItemOut])

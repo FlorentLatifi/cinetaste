@@ -153,7 +153,7 @@ These are valuable later; they do not prove product-market fit faster than the c
 ### Later (only with evidence)
 * Collaborative signals, sequential models, multi-profile households, streaming deep-links, mobile
 
-**Shipped recently:** post-watch rating on title detail (`watched` + `rate_1`–`rate_4`).
+**Shipped recently:** post-watch rating on title detail; History with filters; Account taste summary chips.
 
 ---
 

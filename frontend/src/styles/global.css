@@ -534,6 +534,58 @@ p {
   max-width: 16rem;
 }
 
+.account-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.taste-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.taste-subhead {
+  margin: 0;
+  font-size: 0.85rem;
+  font-family: inherit;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.taste-chips {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.taste-chip {
+  font-size: 0.85rem;
+  font-weight: 600;
+  padding: 0.3rem 0.65rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.taste-chip.positive {
+  color: var(--accent-strong);
+  border-color: rgba(232, 194, 122, 0.35);
+  background: rgba(232, 194, 122, 0.08);
+}
+
+.taste-chip.negative {
+  color: var(--danger);
+  border-color: rgba(240, 113, 120, 0.35);
+  background: rgba(240, 113, 120, 0.08);
+}
+
 .rec-poster-link {
   display: block;
   color: inherit;

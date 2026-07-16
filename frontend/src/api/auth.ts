@@ -79,3 +79,25 @@ export function deleteAccount(accessToken: string, password: string) {
     accessToken,
   );
 }
+
+export type TasteFeature = {
+  key: string;
+  family: string;
+  label: string;
+  weight: number;
+};
+
+export type TasteSummary = {
+  version: number;
+  updated_at: string | null;
+  has_vector: boolean;
+  feature_count: number;
+  anchor_count: number;
+  likes: TasteFeature[];
+  dislikes: TasteFeature[];
+  ready: boolean;
+};
+
+export function getTasteSummary(accessToken: string) {
+  return apiFetch<TasteSummary>("/me/taste", {}, accessToken);
+}
