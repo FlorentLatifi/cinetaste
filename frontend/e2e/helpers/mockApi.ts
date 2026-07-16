@@ -44,7 +44,13 @@ function json(data: unknown, status = 200) {
  */
 export async function installApiMock(
   page: Page,
-  opts: { onboardingComplete?: boolean } = {},
+  opts: {
+    onboardingComplete?: boolean;
+    /** Empty For You slate (items: []). */
+    forYouEmpty?: boolean;
+    /** Force For You GET to 500. */
+    forYouError?: boolean;
+  } = {},
 ): Promise<void> {
   const onboardingComplete = opts.onboardingComplete !== false;
   const user = onboardingComplete ? mockUserComplete : mockUserNeedsOnboarding;
@@ -214,6 +220,16 @@ export async function installApiMock(
     }
 
     if (method === "GET" && path.startsWith("/recommendations/for-you")) {
+      if (opts.forYouError) {
+        await route.fulfill(
+          json({ detail: "Recommendation service unavailable" }, 500),
+        );
+        return;
+      }
+      if (opts.forYouEmpty) {
+        await route.fulfill(json({ items: [] }));
+        return;
+      }
       await route.fulfill(
         json({
           items: [

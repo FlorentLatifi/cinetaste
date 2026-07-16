@@ -20,6 +20,20 @@ test("For You: Pass removes card and Undo restores it", async ({ page }) => {
   await expect(page.getByRole("heading", { name: mockTitle.name })).toBeVisible();
 });
 
+test("For You: empty slate shows recovery CTAs", async ({ page }) => {
+  await installApiMock(page, { onboardingComplete: true, forYouEmpty: true });
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: /No more picks/i })).toBeVisible();
+  await expect(page.getByRole("link", { name: /Browse search/i })).toBeVisible();
+});
+
+test("For You: load error offers Try again", async ({ page }) => {
+  await installApiMock(page, { onboardingComplete: true, forYouError: true });
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: /Something went wrong/i })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Try again/i })).toBeVisible();
+});
+
 test("History: Clear removes row after mock interaction", async ({ page }) => {
   await installApiMock(page, { onboardingComplete: true });
   await page.goto("/history");
