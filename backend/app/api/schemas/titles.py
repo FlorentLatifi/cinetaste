@@ -189,3 +189,25 @@ class CatalogStatusOut(BaseModel):
     title_count: int
     with_embeddings: int
     ready_for_onboarding: bool
+
+
+class ProviderOfferOut(BaseModel):
+    provider_id: int
+    name: str
+    logo_url: str | None = None
+    display_priority: int = 999
+
+
+class WhereToWatchOut(BaseModel):
+    """Streaming / purchase availability for one country (TMDb JustWatch data)."""
+
+    region: str
+    link: str | None = None
+    flatrate: list[ProviderOfferOut] = Field(default_factory=list)
+    free: list[ProviderOfferOut] = Field(default_factory=list)
+    ads: list[ProviderOfferOut] = Field(default_factory=list)
+    rent: list[ProviderOfferOut] = Field(default_factory=list)
+    buy: list[ProviderOfferOut] = Field(default_factory=list)
+    available: bool = False
+    attribution: str = "Streaming data by JustWatch via TMDb"
+    source: str = "tmdb"

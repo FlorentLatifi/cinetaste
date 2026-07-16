@@ -72,3 +72,13 @@ class TmdbClient:
             f"/tv/{tmdb_id}",
             {"append_to_response": "credits,keywords"},
         )
+
+    async def get_watch_providers(self, media_type: str, tmdb_id: int) -> dict[str, Any]:
+        """Availability by country from TMDb (JustWatch-sourced).
+
+        ``media_type`` must be ``movie`` or ``tv``.
+        """
+        if media_type not in {"movie", "tv"}:
+            raise ValueError(f"Unsupported media_type for watch providers: {media_type}")
+        return await self._get(f"/{media_type}/{tmdb_id}/watch/providers")
+

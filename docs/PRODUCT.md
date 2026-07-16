@@ -184,7 +184,7 @@ If it doesn’t improve the loop or remove friction, defer.
 1. **Brand name** — CineTaste is placeholder.
 2. **Movies only first vs Movies+TV day one** — recommendation: both in schema, TV in UI if ingest cost is low; else movies-first UI.
 3. **Auth providers** — email first; Google OAuth after MVP if signup friction shows up.
-4. **Where-to-watch** — high value for retention; candidate for Phase 4 if API rights/cost OK.
+4. **Where-to-watch** — shipped on title detail via TMDb/JustWatch (region selector; not deep-link into every app).
 5. **Primary market language** — English catalog UX first unless you specify otherwise.
 
 ---

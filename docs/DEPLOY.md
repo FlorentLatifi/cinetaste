@@ -53,6 +53,17 @@ SELECT indexname FROM pg_indexes WHERE tablename = 'titles' AND indexname LIKE '
 6. Liveness: `https://<api-host>/api/v1/health` (process up)  
 7. Readiness: `https://<api-host>/api/v1/ready` — returns **503** if DB (or Redis in production) is down; use this for load balancers  
 
+### Where to watch
+
+| Item | Notes |
+|------|--------|
+| Endpoint | `GET /titles/{id}/where-to-watch?region=US` |
+| Source | TMDb watch providers (JustWatch-sourced); SPA shows Stream / Free / Rent / Buy |
+| Config | `TMDB_API_KEY` required for live data; `WATCH_PROVIDER_REGION` default country |
+| Cache | Redis key `watch_providers:{movie\|tv}:{tmdb_id}:{region}` (default TTL 12h) |
+| Failure mode | Empty `available=false` if key missing or TMDb down — title detail still loads |
+| Attribution | UI shows “Streaming data by JustWatch via TMDb” |
+
 ### Resilience notes (production)
 
 | Concern | Behavior |

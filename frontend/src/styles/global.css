@@ -592,6 +592,96 @@ p {
   max-width: 40rem;
 }
 
+.watch-section {
+  margin-top: 1.25rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.watch-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.watch-header h2 {
+  margin: 0;
+  font-size: 1.45rem;
+}
+
+.watch-region select {
+  appearance: none;
+  border: 1px solid var(--border);
+  background: var(--bg-soft);
+  color: var(--text);
+  border-radius: 999px;
+  padding: 0.45rem 0.9rem;
+  font: inherit;
+  font-size: 0.9rem;
+}
+
+.watch-row-label {
+  margin: 0 0 0.4rem;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  font-family: inherit;
+  font-weight: 600;
+}
+
+.watch-provider-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.watch-provider {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.35rem 0.65rem 0.35rem 0.35rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.watch-logo {
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 0.45rem;
+  object-fit: cover;
+  background: var(--bg-soft);
+}
+
+.watch-logo.fallback {
+  display: grid;
+  place-items: center;
+  color: var(--accent);
+  font-size: 0.85rem;
+}
+
+.watch-more {
+  margin: 0.25rem 0 0;
+  font-size: 0.9rem;
+}
+
+.watch-attribution {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
 @media (max-width: 720px) {
   .title-detail-grid {
     grid-template-columns: 1fr;

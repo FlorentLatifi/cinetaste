@@ -36,6 +36,10 @@ class Settings(BaseSettings):
     tmdb_api_key: str = ""
     tmdb_base_url: str = "https://api.themoviedb.org/3"
 
+    # Where-to-watch (TMDb / JustWatch). ISO-3166-1 alpha-2 default region.
+    watch_provider_region: str = "US"
+    watch_provider_cache_ttl_seconds: int = 43_200  # 12h
+
     rec_slate_size: int = 20
     rec_cache_ttl_seconds: int = 600
     rec_mmr_lambda: float = 0.7

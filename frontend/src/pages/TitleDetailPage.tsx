@@ -2,8 +2,63 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { ApiError } from "../api/client";
 import * as titlesApi from "../api/titles";
-import type { Credit, Title, TitleDetail } from "../api/titles";
+import type { Credit, ProviderOffer, Title, TitleDetail, WhereToWatch } from "../api/titles";
 import { useAuth } from "../features/auth/AuthContext";
+
+const WATCH_REGIONS = [
+  { code: "US", label: "United States" },
+  { code: "GB", label: "United Kingdom" },
+  { code: "CA", label: "Canada" },
+  { code: "AU", label: "Australia" },
+  { code: "DE", label: "Germany" },
+  { code: "FR", label: "France" },
+  { code: "ES", label: "Spain" },
+  { code: "IT", label: "Italy" },
+  { code: "BR", label: "Brazil" },
+  { code: "IN", label: "India" },
+  { code: "JP", label: "Japan" },
+] as const;
+
+const REGION_STORAGE_KEY = "ct_watch_region";
+
+function loadWatchRegion(): string {
+  try {
+    const stored = localStorage.getItem(REGION_STORAGE_KEY);
+    if (stored && /^[A-Z]{2}$/.test(stored)) return stored;
+  } catch {
+    // ignore
+  }
+  return "US";
+}
+
+function ProviderRow({
+  label,
+  offers,
+}: {
+  label: string;
+  offers: ProviderOffer[];
+}) {
+  if (!offers.length) return null;
+  return (
+    <div className="watch-row">
+      <h3 className="watch-row-label">{label}</h3>
+      <ul className="watch-provider-list">
+        {offers.map((p) => (
+          <li key={`${label}-${p.provider_id}`} className="watch-provider">
+            {p.logo_url ? (
+              <img src={p.logo_url} alt="" className="watch-logo" loading="lazy" />
+            ) : (
+              <span className="watch-logo fallback" aria-hidden="true">
+                {p.name.slice(0, 1)}
+              </span>
+            )}
+            <span className="watch-name">{p.name}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
 
 function yearOf(title: TitleDetail): string | null {
   return title.release_date ? title.release_date.slice(0, 4) : null;
@@ -37,6 +92,9 @@ export function TitleDetailPage() {
   const navigate = useNavigate();
   const [title, setTitle] = useState<TitleDetail | null>(null);
   const [similar, setSimilar] = useState<Title[]>([]);
+  const [watch, setWatch] = useState<WhereToWatch | null>(null);
+  const [watchRegion, setWatchRegion] = useState(loadWatchRegion);
+  const [watchLoading, setWatchLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -47,6 +105,7 @@ export function TitleDetailPage() {
     let cancelled = false;
     setLoading(true);
     setSimilar([]);
+    setWatch(null);
     (async () => {
       try {
         const data = await titlesApi.getTitle(accessToken, titleId);
@@ -71,6 +130,39 @@ export function TitleDetailPage() {
       cancelled = true;
     };
   }, [accessToken, titleId]);
+
+  useEffect(() => {
+    if (!accessToken || !titleId) return;
+    let cancelled = false;
+    setWatchLoading(true);
+    (async () => {
+      try {
+        const data = await titlesApi.getWhereToWatch(
+          accessToken,
+          titleId,
+          watchRegion,
+        );
+        if (!cancelled) setWatch(data);
+      } catch {
+        if (!cancelled) setWatch(null);
+      } finally {
+        if (!cancelled) setWatchLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [accessToken, titleId, watchRegion]);
+
+  function onRegionChange(code: string) {
+    const next = code.toUpperCase();
+    setWatchRegion(next);
+    try {
+      localStorage.setItem(REGION_STORAGE_KEY, next);
+    } catch {
+      // ignore
+    }
+  }
 
   const people = useMemo(
     () => splitCredits(title?.credits || []),
@@ -234,6 +326,61 @@ export function TitleDetailPage() {
               ))}
             </div>
           )}
+
+          <section className="watch-section" aria-labelledby="watch-heading">
+            <div className="watch-header">
+              <h2 id="watch-heading">Where to watch</h2>
+              <label className="watch-region">
+                <span className="sr-only">Region</span>
+                <select
+                  value={watchRegion}
+                  onChange={(e) => onRegionChange(e.target.value)}
+                  aria-label="Watch region"
+                >
+                  {WATCH_REGIONS.map((r) => (
+                    <option key={r.code} value={r.code}>
+                      {r.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            {watchLoading && (
+              <p className="meta-line" role="status">
+                Checking availability…
+              </p>
+            )}
+            {!watchLoading && watch && watch.available && (
+              <>
+                <ProviderRow label="Stream" offers={watch.flatrate} />
+                <ProviderRow label="Free" offers={watch.free} />
+                <ProviderRow label="With ads" offers={watch.ads} />
+                <ProviderRow label="Rent" offers={watch.rent} />
+                <ProviderRow label="Buy" offers={watch.buy} />
+                {watch.link && (
+                  <p className="watch-more">
+                    <a href={watch.link} target="_blank" rel="noreferrer">
+                      More options on TMDb
+                    </a>
+                  </p>
+                )}
+                <p className="watch-attribution">{watch.attribution}</p>
+              </>
+            )}
+            {!watchLoading && watch && !watch.available && (
+              <>
+                <p className="meta-line">
+                  No streaming or purchase options listed for {watch.region}.
+                </p>
+                <p className="watch-attribution">{watch.attribution}</p>
+              </>
+            )}
+            {!watchLoading && !watch && (
+              <p className="meta-line">
+                Availability unavailable right now (check TMDb configuration).
+              </p>
+            )}
+          </section>
         </div>
       </div>
 

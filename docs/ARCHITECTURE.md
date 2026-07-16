@@ -243,6 +243,7 @@ Swap implementations without rewriting the API.
 | POST | `/onboarding/complete` | Submit likes/dislikes |
 | GET | `/recommendations/for-you` | Main slate + reasons |
 | GET | `/titles/{id}` | Detail |
+| GET | `/titles/{id}/where-to-watch` | Stream/rent/buy by region (TMDb/JustWatch, Redis-cached) |
 | POST | `/titles/{id}/interactions` | like/dislike/watchlist/… |
 | GET | `/watchlist` | Saved titles |
 | GET | `/search?q=` | Title search |

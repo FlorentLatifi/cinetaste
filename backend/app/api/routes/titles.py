@@ -7,14 +7,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import CurrentUser, get_settings_dep
 from app.api.schemas.titles import (
     InteractionRequest,
+    ProviderOfferOut,
     ReasonOut,
     RecommendationItemOut,
     RecommendationSlateOut,
     TitleDetailOut,
     TitleSummaryOut,
+    WhereToWatchOut,
 )
 from app.application.recommendation_service import RecommendationService
 from app.application.taste_service import TasteService
+from app.application.watch_providers import WatchProvidersService
 from app.core.config import Settings
 from app.domain.exceptions import NotFoundError
 from app.infrastructure.db.session import get_db
@@ -89,6 +92,52 @@ async def get_title(
     if title is None:
         raise NotFoundError("Title not found")
     return TitleDetailOut.from_title_detail(title)
+
+
+@router.get("/titles/{title_id}/where-to-watch", response_model=WhereToWatchOut)
+async def where_to_watch(
+    title_id: UUID,
+    user: CurrentUser,
+    session: Annotated[AsyncSession, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_settings_dep)],
+    region: str | None = Query(
+        default=None,
+        min_length=2,
+        max_length=2,
+        description="ISO-3166-1 alpha-2 country code (e.g. US, GB, DE)",
+    ),
+) -> WhereToWatchOut:
+    """Streaming / rent / buy options for a title in one region.
+
+    Data from TMDb (JustWatch). Soft-fails to ``available=false`` when TMDb
+    is unconfigured or unreachable so the detail page still works.
+    """
+    service = WatchProvidersService(session, settings)
+    result = await service.for_title(title_id, region=region)
+
+    def map_offers(rows: list) -> list[ProviderOfferOut]:
+        return [
+            ProviderOfferOut(
+                provider_id=p.provider_id,
+                name=p.name,
+                logo_url=p.logo_url,
+                display_priority=p.display_priority,
+            )
+            for p in rows
+        ]
+
+    return WhereToWatchOut(
+        region=result.region,
+        link=result.link,
+        flatrate=map_offers(result.flatrate),
+        free=map_offers(result.free),
+        ads=map_offers(result.ads),
+        rent=map_offers(result.rent),
+        buy=map_offers(result.buy),
+        available=result.available,
+        attribution=result.attribution,
+        source=result.source,
+    )
 
 
 @router.post("/titles/{title_id}/interactions", status_code=204)

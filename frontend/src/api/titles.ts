@@ -32,6 +32,26 @@ export type TitleDetail = Title & {
   keywords: string[];
 };
 
+export type ProviderOffer = {
+  provider_id: number;
+  name: string;
+  logo_url: string | null;
+  display_priority: number;
+};
+
+export type WhereToWatch = {
+  region: string;
+  link: string | null;
+  flatrate: ProviderOffer[];
+  free: ProviderOffer[];
+  ads: ProviderOffer[];
+  rent: ProviderOffer[];
+  buy: ProviderOffer[];
+  available: boolean;
+  attribution: string;
+  source: string;
+};
+
 export type Reason = {
   /** Stable reason kind (because_you_liked, taste_blend, same_director, …). */
   code: string;
@@ -76,6 +96,19 @@ export function getTitle(accessToken: string, titleId: string) {
 export function getSimilarTitles(accessToken: string, titleId: string, limit = 12) {
   return apiFetch<Title[]>(
     `/titles/${titleId}/similar?limit=${limit}`,
+    {},
+    accessToken,
+  );
+}
+
+export function getWhereToWatch(
+  accessToken: string,
+  titleId: string,
+  region?: string,
+) {
+  const qs = region ? `?region=${encodeURIComponent(region)}` : "";
+  return apiFetch<WhereToWatch>(
+    `/titles/${titleId}/where-to-watch${qs}`,
     {},
     accessToken,
   );
