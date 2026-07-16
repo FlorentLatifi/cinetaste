@@ -34,6 +34,11 @@ Focus: **fast, deterministic unit tests** for the ranking brain. Integration tes
 - Near-duplicate high-score titles lose to a diverse lower-score title at mid λ.
 - Genre soft-cap path still returns `slate_size` items when pool is large enough.
 
+### 3b. Hidden gems & exploration
+- `gem_boost` rewards high `vote_average` + low popularity.
+- Exploration slots inject stretch picks with `discovery` reasons.
+- Hidden gems surface `hidden_gem` reasons (and For You badges).
+
 ### 4. Explanations
 - Strong favorites + shared director → `because_you_liked` citing title names.
 - Memory key stripped from scoring features.

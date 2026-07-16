@@ -43,6 +43,8 @@ class Settings(BaseSettings):
     rec_slate_size: int = 20
     rec_cache_ttl_seconds: int = 600
     rec_mmr_lambda: float = 0.7
+    # Soft quota of exploration / stretch picks reserved in each For You slate
+    rec_exploration_slots: int = 3
     # Candidate generation (pgvector ANN + popularity exploration pool)
     rec_ann_candidates: int = 250
     rec_popular_candidates: int = 120

@@ -11,7 +11,15 @@ from app.recommendation.explanations import (
 )
 
 # Re-export for callers/tests that import Reason from pipeline.
-__all__ = ["Reason", "RankedItem", "explain", "mmr_select", "rank_titles"]
+__all__ = [
+    "Reason",
+    "RankedItem",
+    "annotate_discovery_reasons",
+    "explain",
+    "gem_boost",
+    "mmr_select",
+    "rank_titles",
+]
 
 
 # Blend of dense similarity vs sparse explainable features.
@@ -20,6 +28,75 @@ W_POS = 0.40
 W_NEG = 0.12
 W_GEM = 1.0
 W_COLD = 1.0
+
+
+def gem_boost(vote_average: float, popularity: float) -> float:
+    """Quality-vs-popularity bonus for under-the-radar titles (hidden gems)."""
+    if vote_average >= 7.2 and popularity < 40:
+        return 0.08
+    if vote_average >= 7.5 and popularity < 80:
+        return 0.04
+    return 0.0
+
+
+def annotate_discovery_reasons(
+    reasons: list[Reason],
+    *,
+    is_hidden_gem: bool,
+    is_exploration: bool,
+    vote_average: float,
+    popularity: float,
+    title_name: str | None = None,
+    max_reasons: int = 3,
+) -> list[Reason]:
+    """Ensure exploration / hidden-gem picks get explicit, user-facing reasons."""
+    codes = {r.code for r in reasons}
+    extra: list[Reason] = []
+
+    if is_hidden_gem and "hidden_gem" not in codes:
+        extra.append(
+            Reason(
+                code="hidden_gem",
+                message=(
+                    f"Highly rated (★{vote_average:.1f}) but not a chart-topper "
+                    "— a hidden gem"
+                ),
+                evidence={
+                    "vote_average": round(float(vote_average), 2),
+                    "popularity": round(float(popularity), 2),
+                },
+            )
+        )
+
+    if is_exploration and "discovery" not in codes:
+        extra.append(
+            Reason(
+                code="discovery",
+                message="An exploration pick to stretch beyond your usual favorites",
+                evidence={"candidate": title_name, "slot": "exploration"},
+            )
+        )
+
+    if not extra:
+        return reasons[:max_reasons]
+
+    # Prefer primary taste reason first, then discovery annotations.
+    if reasons:
+        primary, rest = reasons[0], reasons[1:]
+        merged = [primary, *extra, *rest]
+    else:
+        merged = [*extra]
+    # De-dupe by code order-preserving
+    seen: set[str] = set()
+    out: list[Reason] = []
+    for r in merged:
+        if r.code in seen and r.code not in {"because_you_liked", "thematic_bridge"}:
+            continue
+        seen.add(r.code)
+        out.append(r)
+        if len(out) >= max_reasons:
+            break
+    return out
 
 
 class RankedItem:
@@ -126,11 +203,7 @@ def rank_titles(
         title_features = _feature_snapshot(title.extra)
         pos_sparse, neg_sparse = sparse_channel_scores(scoring_features, title_features)
 
-        gem = 0.0
-        if title.vote_average >= 7.2 and title.popularity < 40:
-            gem = 0.08
-        elif title.vote_average >= 7.5 and title.popularity < 80:
-            gem = 0.04
+        gem = gem_boost(float(title.vote_average), float(title.popularity))
 
         pop_prior = 0.0
         if cold:
@@ -148,17 +221,18 @@ def rank_titles(
     scored.sort(key=lambda x: x[1], reverse=True)
     head = scored[: max(slate_size * 4, 40)]
 
+    slots = max(int(exploration_slots), 0)
     exploration_pool = [
         t
-        for t, s in scored[slate_size : slate_size * 5]
+        for t, _s in scored[slate_size : slate_size * 5]
         if t.vote_average >= 6.8
-    ][: exploration_slots * 3]
+    ][: max(slots * 3, 0)]
 
     mmr_input = [
         (t.id, s, list(t.embedding) if t.embedding is not None else None)  # noqa: SIM223
         for t, s in head
     ]
-    core_k = max(slate_size - exploration_slots, 1)
+    core_k = max(slate_size - slots, 1) if slots else slate_size
     selected_ids = mmr_select(mmr_input, k=core_k, lambda_mult=mmr_lambda)
 
     by_id = {t.id: (t, s) for t, s in scored}
@@ -172,10 +246,12 @@ def rank_titles(
         genre_counts[primary] = genre_counts.get(primary, 0) + 1
         final_ids.append(tid)
 
+    exploration_ids: set[UUID] = set()
     for title in exploration_pool:
         if title.id in final_ids or title.id in exclude_ids:
             continue
         final_ids.append(title.id)
+        exploration_ids.add(title.id)
         if len(final_ids) >= slate_size:
             break
 
@@ -191,13 +267,23 @@ def rank_titles(
         emb = list(title.embedding) if title.embedding is not None else None
         sim = cosine(user_vector, emb) if user_vector is not None and emb is not None else 0.0
         genre_names = [g.name for g in title.genres]
+        title_name = getattr(title, "name", None)
         reasons = build_reasons(
             user_features=scoring_features,
             explain_memory=memory,
-            title_name=getattr(title, "name", None),
+            title_name=title_name,
             title_extra=title.extra,
             title_genres=genre_names,
             similarity=sim,
+        )
+        is_gem = gem_boost(float(title.vote_average), float(title.popularity)) > 0
+        reasons = annotate_discovery_reasons(
+            reasons,
+            is_hidden_gem=is_gem,
+            is_exploration=tid in exploration_ids,
+            vote_average=float(title.vote_average),
+            popularity=float(title.popularity),
+            title_name=title_name,
         )
         results.append(RankedItem(title_id=tid, score=score, reasons=reasons))
 

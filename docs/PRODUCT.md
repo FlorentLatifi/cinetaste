@@ -141,8 +141,8 @@ These are valuable later; they do not prove product-market fit faster than the c
 
 ### Phase 4 — Discovery quality
 * MMR / diversity re-ranker
-* Hidden-gems boost (quality vs popularity)
-* Exploration slots (ε or soft quota)
+* Hidden-gems boost (quality vs popularity) — scored + explained + UI badge
+* Exploration slots (soft quota via `REC_EXPLORATION_SLOTS`) — `discovery` reasons
 * Offline eval harness
 
 ### Phase 5 — Production hardening

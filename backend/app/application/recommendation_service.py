@@ -152,6 +152,7 @@ class RecommendationService:
             exclude_ids=exclude_ids,
             slate_size=slate_size,
             mmr_lambda=self._settings.rec_mmr_lambda,
+            exploration_slots=self._settings.rec_exploration_slots,
             explain_memory=explain_memory,
         )
 

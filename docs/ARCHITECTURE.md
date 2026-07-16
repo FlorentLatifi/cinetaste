@@ -136,7 +136,8 @@ See migration `20260717_0002_titles_embedding_hnsw` and settings `REC_ANN_CANDID
 **3. Diversify**
 * MMR (λ tunable) on embedding space
 * Soft caps: max N per primary genre per slate; franchise de-dupe
-* Reserve K slots for exploration / hidden gems
+* Reserve K slots for exploration (`REC_EXPLORATION_SLOTS`, default 3) with explicit `discovery` reasons
+* Hidden-gem score boost (high rating, lower popularity) → `hidden_gem` reason + For You badge
 
 **4. Explain**
 * Compare user top features vs title features

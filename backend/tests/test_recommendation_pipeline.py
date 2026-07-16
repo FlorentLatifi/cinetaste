@@ -11,7 +11,13 @@ from app.recommendation.embeddings import (
     cosine,
     sparse_channel_scores,
 )
-from app.recommendation.pipeline import mmr_select, rank_titles
+from app.recommendation.pipeline import (
+    annotate_discovery_reasons,
+    gem_boost,
+    mmr_select,
+    rank_titles,
+)
+from app.recommendation.explanations import Reason
 from tests.conftest import FakeTitle, accumulate_features
 
 
@@ -293,6 +299,82 @@ def test_rank_mmr_reduces_same_director_cluster(thriller_catalog: list[FakeTitle
         by_id[item.title_id].name in {"Laugh Factory", "Slapstick City"} for item in ranked
     )
     assert not jokes_only or len(ranked) < 4
+
+
+# ---------------------------------------------------------------------------
+# Hidden gems + exploration annotations
+# ---------------------------------------------------------------------------
+
+
+def test_gem_boost_thresholds() -> None:
+    assert gem_boost(7.5, 20) == 0.08
+    assert gem_boost(7.6, 50) == 0.04
+    assert gem_boost(6.5, 10) == 0.0
+    assert gem_boost(8.0, 200) == 0.0
+
+
+def test_annotate_discovery_reasons_adds_gem_and_exploration() -> None:
+    base = [
+        Reason(
+            code="shared_genre",
+            message="Fits the thriller side of your taste",
+            evidence={"genres": ["Thriller"]},
+        )
+    ]
+    out = annotate_discovery_reasons(
+        base,
+        is_hidden_gem=True,
+        is_exploration=True,
+        vote_average=7.8,
+        popularity=12.0,
+        title_name="Quiet Masterpiece",
+        max_reasons=3,
+    )
+    codes = [r.code for r in out]
+    assert codes[0] == "shared_genre"
+    assert "hidden_gem" in codes
+    assert "discovery" in codes
+    gem = next(r for r in out if r.code == "hidden_gem")
+    assert "★7.8" in gem.message
+
+
+def test_rank_includes_hidden_gem_reason_for_quality_underdog() -> None:
+    """A high-rating low-popularity title should carry a hidden_gem reason when ranked."""
+    gem = FakeTitle(
+        name="Quiet Masterpiece",
+        genres=["Drama"],
+        keywords=["intimate"],
+        popularity=8.0,
+        vote_average=8.1,
+    )
+    blockbuster = FakeTitle(
+        name="Summer Blast",
+        genres=["Action"],
+        popularity=180.0,
+        vote_average=6.5,
+    )
+    filler = [
+        FakeTitle(
+            name=f"Filler {i}",
+            genres=["Drama" if i % 2 == 0 else "Comedy"],
+            popularity=25.0 + i,
+            vote_average=7.0,
+        )
+        for i in range(8)
+    ]
+    ranked = rank_titles(
+        user_vector=list(gem.embedding),
+        user_features={"genre:drama": 2.0},
+        titles=[gem, blockbuster, *filler],
+        exclude_ids=set(),
+        slate_size=6,
+        mmr_lambda=0.7,
+        exploration_slots=2,
+    )
+    by_id = {item.title_id: item for item in ranked}
+    assert gem.id in by_id
+    codes = {r.code for r in by_id[gem.id].reasons}
+    assert "hidden_gem" in codes
 
 
 # ---------------------------------------------------------------------------

@@ -25,7 +25,7 @@ class ReasonOut(BaseModel):
             "Reason kind: because_you_liked | taste_blend | similar_style | "
             "same_director | similar_cast | similar_themes | similar_origin | "
             "similar_language | similar_era | shared_genre | taste_similarity | "
-            "genre_fit | discovery"
+            "genre_fit | discovery | hidden_gem"
         )
     )
     message: str = Field(description="Thoughtful, specific sentence shown to the user")

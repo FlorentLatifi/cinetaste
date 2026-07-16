@@ -190,6 +190,17 @@ export function HomePage() {
                     : ""}
                   {` · ★ ${item.title.vote_average.toFixed(1)}`}
                 </p>
+                {(item.reasons.some((r) => r.code === "hidden_gem") ||
+                  item.reasons.some((r) => r.code === "discovery")) && (
+                  <div className="rec-badges" aria-label="Pick type">
+                    {item.reasons.some((r) => r.code === "hidden_gem") && (
+                      <span className="rec-badge gem">Hidden gem</span>
+                    )}
+                    {item.reasons.some((r) => r.code === "discovery") && (
+                      <span className="rec-badge discovery">Discovery</span>
+                    )}
+                  </div>
+                )}
                 {item.reasons.length > 0 && (
                   <div className="why-block">
                     <p className="why-label" id={`why-${item.title.id}`}>
@@ -199,7 +210,13 @@ export function HomePage() {
                       {item.reasons.map((r, idx) => (
                         <li
                           key={`${r.code}-${idx}`}
-                          className={idx === 0 ? "reason-primary" : undefined}
+                          className={
+                            idx === 0
+                              ? "reason-primary"
+                              : r.code === "hidden_gem" || r.code === "discovery"
+                                ? `reason-${r.code}`
+                                : undefined
+                          }
                         >
                           {r.message}
                         </li>
