@@ -292,6 +292,22 @@ class TasteService:
         await self._session.flush()
         return await self.recompute_profile(user_id)
 
+    async def clear_import_overlay(self, user_id: UUID) -> TasteProfile:
+        """Remove durable snapshot overlay and recompute from live events only."""
+        profile = await self._session.get(TasteProfile, user_id)
+        if profile is None:
+            profile = TasteProfile(user_id=user_id, version=1, features={}, vector=None)
+            self._session.add(profile)
+            await self._session.flush()
+            return profile
+
+        features = dict(profile.features or {})
+        if IMPORT_OVERLAY_KEY in features:
+            features.pop(IMPORT_OVERLAY_KEY, None)
+            profile.features = features
+            await self._session.flush()
+        return await self.recompute_profile(user_id)
+
     async def get_profile(self, user_id: UUID) -> TasteProfile | None:
         return await self._session.get(TasteProfile, user_id)
 

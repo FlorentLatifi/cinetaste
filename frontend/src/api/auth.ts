@@ -93,6 +93,8 @@ export type TasteSummary = {
   has_vector: boolean;
   feature_count: number;
   anchor_count: number;
+  has_import_overlay?: boolean;
+  import_overlay_count?: number;
   likes: TasteFeature[];
   dislikes: TasteFeature[];
   ready: boolean;
@@ -140,6 +142,14 @@ export function importTaste(
       method: "POST",
       body: JSON.stringify(body),
     },
+    accessToken,
+  );
+}
+
+export function clearTasteImport(accessToken: string) {
+  return apiFetch<TasteSummary>(
+    "/me/taste/import",
+    { method: "DELETE" },
     accessToken,
   );
 }

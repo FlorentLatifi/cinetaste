@@ -110,6 +110,9 @@ test("Account: open snapshot previews export JSON", async ({ page }) => {
   await expect(preview.getByText("Horror", { exact: true })).toBeVisible();
   await preview.getByRole("button", { name: /merge into my profile/i }).click();
   await expect(page.getByText(/Merged 2 signals/i)).toBeVisible();
+  await expect(page.getByRole("button", { name: /clear imported snapshot/i })).toBeVisible();
+  await page.getByRole("button", { name: /clear imported snapshot/i }).click();
+  await expect(page.getByText(/Cleared merged snapshot overlay/i)).toBeVisible();
 });
 
 test("Title detail: Watched opens rate panel", async ({ page }) => {

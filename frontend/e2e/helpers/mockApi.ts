@@ -89,6 +89,8 @@ export async function installApiMock(
           has_vector: true,
           feature_count: 4,
           anchor_count: 1,
+          has_import_overlay: false,
+          import_overlay_count: 0,
           ready: true,
           likes: [
             {
@@ -161,6 +163,8 @@ export async function installApiMock(
             has_vector: true,
             feature_count: 5,
             anchor_count: 1,
+            has_import_overlay: true,
+            import_overlay_count: 2,
             ready: true,
             likes: [
               {
@@ -179,6 +183,31 @@ export async function installApiMock(
               },
             ],
           },
+        }),
+      );
+      return;
+    }
+
+    if (method === "DELETE" && path === "/me/taste/import") {
+      await route.fulfill(
+        json({
+          version: 5,
+          updated_at: "2026-01-16T13:00:00.000Z",
+          has_vector: true,
+          feature_count: 3,
+          anchor_count: 1,
+          has_import_overlay: false,
+          import_overlay_count: 0,
+          ready: true,
+          likes: [
+            {
+              key: "genre:drama",
+              family: "genre",
+              label: "Drama",
+              weight: 2.0,
+            },
+          ],
+          dislikes: [],
         }),
       );
       return;

@@ -33,19 +33,7 @@ from app.infrastructure.db.session import get_db
 router = APIRouter()
 
 
-@router.get("/me", response_model=UserResponse)
-async def me(user: CurrentUser) -> UserResponse:
-    return UserResponse.model_validate(user)
-
-
-@router.get("/me/taste", response_model=TasteSummaryOut)
-async def my_taste(
-    user: CurrentUser,
-    session: Annotated[AsyncSession, Depends(get_db)],
-) -> TasteSummaryOut:
-    """Top positive/negative taste features for the Account profile card."""
-    taste = TasteService(session)
-    profile = await taste.get_profile(user.id)
+def _taste_summary_out(profile) -> TasteSummaryOut:
     if profile is None:
         return TasteSummaryOut(version=0, ready=False)
 
@@ -70,10 +58,28 @@ async def my_taste(
         has_vector=has_vector,
         feature_count=summary["feature_count"],
         anchor_count=summary["anchor_count"],
+        has_import_overlay=bool(summary.get("has_import_overlay")),
+        import_overlay_count=int(summary.get("import_overlay_count") or 0),
         likes=map_chips(summary["likes"]),
         dislikes=map_chips(summary["dislikes"]),
         ready=ready,
     )
+
+
+@router.get("/me", response_model=UserResponse)
+async def me(user: CurrentUser) -> UserResponse:
+    return UserResponse.model_validate(user)
+
+
+@router.get("/me/taste", response_model=TasteSummaryOut)
+async def my_taste(
+    user: CurrentUser,
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> TasteSummaryOut:
+    """Top positive/negative taste features for the Account profile card."""
+    taste = TasteService(session)
+    profile = await taste.get_profile(user.id)
+    return _taste_summary_out(profile)
 
 
 @router.get("/me/taste/export", response_model=TasteExportOut)
@@ -174,34 +180,25 @@ async def import_taste(
     rec = RecommendationService(session, settings)
     await rec.invalidate_user(user.id)
 
-    summary = summarize_profile_features(profile.features, limit=8)
-    has_vector = profile.vector is not None and len(list(profile.vector)) > 0
-
-    def map_chips(rows: list) -> list[TasteFeatureOut]:
-        return [
-            TasteFeatureOut(
-                key=c.key,
-                family=c.family,
-                label=c.label,
-                weight=c.weight,
-            )
-            for c in rows
-        ]
-
     return TasteImportResultOut(
         merged_features=len(body.likes) + len(body.dislikes),
         profile_version=int(profile.version or 1),
-        summary=TasteSummaryOut(
-            version=int(profile.version or 1),
-            updated_at=profile.updated_at,
-            has_vector=has_vector,
-            feature_count=summary["feature_count"],
-            anchor_count=summary["anchor_count"],
-            likes=map_chips(summary["likes"]),
-            dislikes=map_chips(summary["dislikes"]),
-            ready=summary["feature_count"] > 0 or has_vector,
-        ),
+        summary=_taste_summary_out(profile),
     )
+
+
+@router.delete("/me/taste/import", response_model=TasteSummaryOut)
+async def clear_taste_import(
+    user: CurrentUser,
+    session: Annotated[AsyncSession, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_settings_dep)],
+) -> TasteSummaryOut:
+    """Remove merged snapshot overlay; recompute from live interactions only."""
+    taste = TasteService(session)
+    profile = await taste.clear_import_overlay(user.id)
+    rec = RecommendationService(session, settings)
+    await rec.invalidate_user(user.id)
+    return _taste_summary_out(profile)
 
 
 @router.get("/me/history", response_model=HistoryPageOut)

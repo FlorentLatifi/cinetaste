@@ -138,6 +138,23 @@ export function AccountPage() {
     }
   }
 
+  async function clearImportOverlay() {
+    if (!accessToken) return;
+    setImportBusy(true);
+    setImportError(null);
+    try {
+      const summary = await authApi.clearTasteImport(accessToken);
+      setTaste(summary);
+      setExportStatus("Cleared merged snapshot overlay. Profile uses live ratings only.");
+    } catch (err) {
+      setImportError(
+        err instanceof ApiError ? err.message : "Could not clear import overlay",
+      );
+    } finally {
+      setImportBusy(false);
+    }
+  }
+
   async function onDelete(e: FormEvent) {
     e.preventDefault();
     setError(null);
@@ -222,6 +239,9 @@ export function AccountPage() {
               {taste.anchor_count
                 ? ` · ${taste.anchor_count} “because you liked” anchors`
                 : ""}
+              {taste.has_import_overlay
+                ? ` · ${taste.import_overlay_count ?? 0} imported`
+                : ""}
             </p>
             {taste.likes.length > 0 && (
               <div className="taste-block">
@@ -252,6 +272,18 @@ export function AccountPage() {
                 Dense taste vector is ready, but sparse features are thin. Keep
                 rating to unlock clearer labels.
               </p>
+            )}
+            {taste.has_import_overlay && (
+              <div className="taste-export">
+                <button
+                  type="button"
+                  className="btn ghost"
+                  disabled={importBusy}
+                  onClick={() => void clearImportOverlay()}
+                >
+                  {importBusy ? "Working…" : "Clear imported snapshot"}
+                </button>
+              </div>
             )}
           </>
         )}

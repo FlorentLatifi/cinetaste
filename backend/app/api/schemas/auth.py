@@ -52,6 +52,8 @@ class TasteSummaryOut(BaseModel):
     has_vector: bool = False
     feature_count: int = 0
     anchor_count: int = 0
+    has_import_overlay: bool = False
+    import_overlay_count: int = 0
     likes: list[TasteFeatureOut] = Field(default_factory=list)
     dislikes: list[TasteFeatureOut] = Field(default_factory=list)
     ready: bool = False

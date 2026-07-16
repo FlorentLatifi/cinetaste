@@ -55,10 +55,12 @@ User action
 |--------|----------|----------|
 | Export | `GET /me/taste/export` | Human-readable likes/dislikes + anchor names; **no** dense embedding |
 | Import merge | `POST /me/taste/import` | Soft-scales chips into `__import_overlay__` (survives recompute), then recomputes |
+| Clear import | `DELETE /me/taste/import` | Drops overlay and recomputes from live events only |
 
 Import does **not** rewrite interaction history. Overlay weights are capped and
 scaled (`IMPORT_MERGE_SCALE`) so live ratings still dominate. For You slate cache
-is invalidated after merge.
+is invalidated after merge/clear. Account shows **Clear imported snapshot** when
+an overlay is present.
 
 ### History page
 

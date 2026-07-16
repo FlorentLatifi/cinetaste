@@ -138,6 +138,11 @@ def summarize_profile_features(
     dislikes = rank_features(scoring, positive=False, limit=limit)
     anchors = memory.get("anchors") if isinstance(memory, dict) else None
     anchor_count = len(anchors) if isinstance(anchors, list) else 0
+    overlay = {}
+    if isinstance(raw_features, dict):
+        raw_overlay = raw_features.get(IMPORT_OVERLAY_KEY)
+        if isinstance(raw_overlay, dict):
+            overlay = raw_overlay
     return {
         "likes": likes,
         "dislikes": dislikes,
@@ -145,6 +150,8 @@ def summarize_profile_features(
         "feature_count": len(scoring),
         "has_explain_memory": bool(memory) or EXPLAIN_MEMORY_KEY in (raw_features or {}),
         "anchors": anchors if isinstance(anchors, list) else [],
+        "has_import_overlay": bool(overlay),
+        "import_overlay_count": len(overlay),
     }
 
 
