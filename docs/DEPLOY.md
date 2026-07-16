@@ -28,9 +28,12 @@ python -c "import secrets; print(secrets.token_urlsafe(48))"
 
 ## 1. Backend on Render (blueprint)
 
+**Production:** `render.yaml` → services `cinetaste-api`, `cinetaste-db`, `cinetaste-redis`  
+**Staging:** `render.staging.yaml` → services `*-staging` (see §9d)
+
 1. Open [Render](https://render.com) → **New** → **Blueprint**
 2. Connect `FlorentLatifi/cinetaste`
-3. Apply `render.yaml`
+3. Apply `render.yaml` for production (or `render.staging.yaml` for staging)
 4. Set secrets in the dashboard:
    - `CORS_ORIGINS` = your Vercel URL (e.g. `https://cinetaste.vercel.app`)
    - `TMDB_API_KEY` (optional at first)
@@ -219,11 +222,14 @@ Then:
 - Staging stack: `docker-compose.staging.yml` + `.env.staging.example` (see §9)  
 - Authenticated axe + interaction smokes in CI (`npm run test:a11y`)  
 
+**Already documented:**
+
+- Hosted staging blueprint: `render.staging.yaml` (see §9d)  
+
 **Still recommended before a large launch:**
 
 - WAF / CDN in front of API  
 - Automated DB backups verification (host-managed snapshots)  
-- Hosted staging twin on Render/Vercel (optional; local compose is enough for many betas)  
 
 ---
 
@@ -365,18 +371,33 @@ docker compose -p cinetaste-staging -f docker-compose.staging.yml --env-file .en
 docker compose -p cinetaste-staging -f docker-compose.staging.yml down -v
 ```
 
-### 9d. Hosted staging (Render + Vercel Preview)
+### 9d. Hosted staging (Render + Vercel)
 
-1. **Render:** duplicate the production blueprint with distinct names  
-   (`cinetaste-api-staging`, `cinetaste-db-staging`, `cinetaste-redis-staging`)  
-   or create a second Blueprint branch. Set `APP_ENV=staging`, a unique `JWT_SECRET`,  
-   and `CORS_ORIGINS` to your Vercel Preview origin.  
-2. **Vercel:** Preview deployments get unique URLs — either allow  
-   `https://*.vercel.app` is **not** valid CORS; set each preview origin explicitly  
-   or use a fixed staging domain (`staging.yourapp.com`).  
-3. **SPA env:** `VITE_API_BASE_URL=https://cinetaste-api-staging.onrender.com/api/v1`  
-4. **Sentry:** separate project or `environment=staging` so noise does not mix with prod.  
-5. **Never** share the production `DATABASE_URL` or `JWT_SECRET` with staging.
+Repo file: **`render.staging.yaml`** (distinct service names from production `render.yaml`).
+
+| Resource | Staging name |
+|----------|----------------|
+| Web | `cinetaste-api-staging` |
+| Postgres | `cinetaste-db-staging` |
+| Redis | `cinetaste-redis-staging` |
+
+1. **Render → New → Blueprint** → connect this repo → apply **`render.staging.yaml`**  
+   (do **not** re-apply production `render.yaml` into the same staging stack).  
+2. Dashboard secrets after first deploy:  
+   - `CORS_ORIGINS` = fixed staging SPA origin (see Vercel below)  
+   - `PUBLIC_APP_URL` = same origin  
+   - `TMDB_API_KEY` (optional)  
+   - `SENTRY_DSN` (optional; prefer a staging project)  
+   - `JWT_SECRET` is auto-generated — keep it distinct from production  
+3. On the staging DB shell: `CREATE EXTENSION IF NOT EXISTS vector;`  
+4. **Vercel:** create a **second project** or a production branch alias  
+   (e.g. `cinetaste-staging` → `https://cinetaste-staging.vercel.app`).  
+   Avoid relying on one-off Preview URLs for CORS (`https://*.vercel.app` is not valid).  
+5. Vercel env for that project:  
+   `VITE_API_BASE_URL=https://cinetaste-api-staging.onrender.com/api/v1`  
+   (adjust host to whatever Render assigned).  
+6. Smoke the soft-launch path (§6b) against staging before promoting to production.  
+7. **Never** share production `DATABASE_URL` or `JWT_SECRET` with staging.
 
 ### 9e. Staging vs production checklist
 

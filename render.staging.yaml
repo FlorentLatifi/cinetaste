@@ -1,0 +1,72 @@
+# Render Blueprint — STAGING only
+# https://render.com/docs/blueprint-spec
+#
+# Apply SEPARATELY from production `render.yaml` so names never collide:
+#   Render → New → Blueprint → select this file (or branch) → cinetaste-*-staging
+#
+# After first deploy:
+#   1. Set TMDB_API_KEY (optional) and CORS_ORIGINS to your Vercel staging / preview URL
+#   2. SQL on staging DB: CREATE EXTENSION IF NOT EXISTS vector;
+#   3. SPA: VITE_API_BASE_URL=https://cinetaste-api-staging.onrender.com/api/v1
+#
+# Never reuse production DATABASE_URL / JWT_SECRET here.
+
+services:
+  - type: web
+    name: cinetaste-api-staging
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    plan: starter
+    healthCheckPath: /api/v1/ready
+    # Auto-deploy from master is fine for a personal beta; pin a staging branch if preferred.
+    envVars:
+      - key: APP_ENV
+        value: staging
+      - key: APP_DEBUG
+        value: "false"
+      - key: API_PREFIX
+        value: /api/v1
+      - key: APP_NAME
+        value: CineTaste Staging
+      # Update after Vercel staging / preview domain is known
+      - key: CORS_ORIGINS
+        value: https://cinetaste-staging.vercel.app
+      - key: PUBLIC_APP_URL
+        value: https://cinetaste-staging.vercel.app
+      - key: JWT_SECRET
+        generateValue: true
+      - key: DATABASE_URL
+        fromDatabase:
+          name: cinetaste-db-staging
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: cinetaste-redis-staging
+          type: redis
+          property: connectionString
+      - key: TMDB_API_KEY
+        sync: false
+      - key: WATCH_PROVIDER_REGION
+        value: "US"
+      - key: RATE_LIMIT_ENABLED
+        value: "true"
+      - key: WEB_CONCURRENCY
+        value: "1"
+      - key: SENTRY_DSN
+        sync: false
+      - key: SENTRY_TRACES_SAMPLE_RATE
+        value: "0.2"
+      - key: SENTRY_RELEASE
+        value: staging
+
+  - type: redis
+    name: cinetaste-redis-staging
+    plan: starter
+    maxmemoryPolicy: allkeys-lru
+
+databases:
+  - name: cinetaste-db-staging
+    plan: starter
+    postgresMajorVersion: "16"
+    # Enable pgvector: CREATE EXTENSION IF NOT EXISTS vector;

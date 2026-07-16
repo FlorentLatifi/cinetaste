@@ -1,5 +1,7 @@
-# Render Blueprint — https://render.com/docs/blueprint-spec
+# Render Blueprint — PRODUCTION
+# https://render.com/docs/blueprint-spec
 # Connect this repo in Render and apply the blueprint, then set secrets in the dashboard.
+# Staging twin (separate names/DB): see render.staging.yaml
 
 services:
   - type: web

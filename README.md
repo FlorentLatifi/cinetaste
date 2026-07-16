@@ -62,7 +62,7 @@ cinetaste/
 - [x] Recommendation pipeline (score + MMR diversity + explanations)
 - [x] For You feed, watchlist, interactions
 - [x] CI (GitHub Actions) + rate limits + security headers
-- [x] Deploy blueprints (Render + Vercel) + staging compose — see `docs/DEPLOY.md`
+- [x] Deploy blueprints (Render prod + staging, Vercel) + local staging compose — see `docs/DEPLOY.md`
 - [x] httpOnly refresh cookies, Sentry optional, soft-launch checklist
 - [ ] Live hosted deploy (you click connect on Render/Vercel)
 

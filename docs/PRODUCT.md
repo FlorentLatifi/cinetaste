@@ -147,7 +147,7 @@ These are valuable later; they do not prove product-market fit faster than the c
 
 ### Phase 5 — Production hardening
 * CI/CD, rate limits, monitoring (Sentry optional), soft-launch checklist in `docs/DEPLOY.md`
-* Staging compose blueprint (`docker-compose.staging.yml`) + promote path
+* Staging compose + hosted `render.staging.yaml` + promote path
 * Host-managed DB backups + smoke path before invites
 * Soft launch with real users
 
