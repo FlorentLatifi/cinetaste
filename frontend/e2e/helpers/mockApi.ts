@@ -151,19 +151,39 @@ export async function installApiMock(
 
     if (method === "GET" && path.startsWith("/me/history")) {
       const stateFilter = url.searchParams.get("state");
-      const all = [
-        {
-          title: mockTitle,
-          state: "like",
-          label: "Liked",
-          updated_at: "2026-01-15T12:00:00.000Z",
-        },
-      ];
-      const rows =
-        !stateFilter || stateFilter === "like"
-          ? all
-          : [];
-      await route.fulfill(json(rows));
+      const cursor = url.searchParams.get("cursor");
+      const page1 = {
+        title: mockTitle,
+        state: "like",
+        label: "Liked",
+        updated_at: "2026-01-15T12:00:00.000Z",
+      };
+      const page2Title = {
+        ...mockTitle,
+        id: "55555555-5555-4555-8555-555555555555",
+        name: "Mock Classic II",
+      };
+      const page2 = {
+        title: page2Title,
+        state: "like",
+        label: "Liked",
+        updated_at: "2026-01-10T12:00:00.000Z",
+      };
+      const all = !stateFilter || stateFilter === "like" ? [page1, page2] : [];
+      if (cursor === "page2") {
+        await route.fulfill(
+          json({ items: all.slice(1), next_cursor: null, has_more: false }),
+        );
+        return;
+      }
+      const hasMore = all.length > 1;
+      await route.fulfill(
+        json({
+          items: all.slice(0, 1),
+          next_cursor: hasMore ? "page2" : null,
+          has_more: hasMore,
+        }),
+      );
       return;
     }
 

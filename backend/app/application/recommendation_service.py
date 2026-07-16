@@ -368,30 +368,63 @@ class RecommendationService:
         *,
         limit: int = 50,
         state: str | None = None,
-    ) -> list[tuple[Title, UserTitleState]]:
-        """Current user–title relationships (liked, watched, saved, …), newest first."""
+        cursor: str | None = None,
+    ) -> tuple[list[tuple[Title, UserTitleState]], str | None]:
+        """Current user–title relationships, newest first, keyset-paginated.
+
+        Returns ``(rows, next_cursor)``. ``next_cursor`` is None when no more pages.
+        """
+        from sqlalchemy import and_, or_
+
+        from app.application.history_cursor import CursorError, decode_history_cursor, encode_history_cursor
         from app.domain.taste_signals import HISTORY_VISIBLE_STATES
 
         allowed = list(HISTORY_VISIBLE_STATES)
         if state is not None:
             if state not in HISTORY_VISIBLE_STATES:
-                return []
+                return [], None
             allowed = [state]
+
+        page_size = max(1, min(int(limit), 100))
+        filters = [
+            UserTitleState.user_id == user_id,
+            UserTitleState.state.in_(allowed),
+        ]
+        if cursor:
+            try:
+                cursor_ts, cursor_title_id = decode_history_cursor(cursor)
+            except CursorError as exc:
+                from app.domain.exceptions import AppError
+
+                raise AppError(str(exc), status_code=400, code="invalid_cursor") from exc
+            # updated_at DESC, title_id DESC keyset
+            filters.append(
+                or_(
+                    UserTitleState.updated_at < cursor_ts,
+                    and_(
+                        UserTitleState.updated_at == cursor_ts,
+                        UserTitleState.title_id < cursor_title_id,
+                    ),
+                )
+            )
 
         states = (
             await self._session.scalars(
                 select(UserTitleState)
-                .where(
-                    UserTitleState.user_id == user_id,
-                    UserTitleState.state.in_(allowed),
+                .where(*filters)
+                .order_by(
+                    UserTitleState.updated_at.desc(),
+                    UserTitleState.title_id.desc(),
                 )
-                .order_by(UserTitleState.updated_at.desc())
-                .limit(limit)
+                .limit(page_size + 1)
             )
         ).all()
-        if not states:
-            return []
-        ids = [s.title_id for s in states]
+        has_more = len(states) > page_size
+        page = list(states[:page_size])
+        if not page:
+            return [], None
+
+        ids = [s.title_id for s in page]
         titles = (
             await self._session.scalars(
                 select(Title)
@@ -400,7 +433,13 @@ class RecommendationService:
             )
         ).all()
         by_id = {t.id: t for t in titles}
-        return [(by_id[s.title_id], s) for s in states if s.title_id in by_id]
+        rows = [(by_id[s.title_id], s) for s in page if s.title_id in by_id]
+
+        next_cursor = None
+        if has_more and page:
+            last = page[-1]
+            next_cursor = encode_history_cursor(last.updated_at, last.title_id)
+        return rows, next_cursor
 
     async def _hydrate(self, payload: list[dict[str, Any]]) -> list[tuple[Title, RankedItem]]:
         from app.recommendation.pipeline import Reason

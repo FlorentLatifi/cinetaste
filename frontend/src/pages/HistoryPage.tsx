@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { ApiError } from "../api/client";
 import * as titlesApi from "../api/titles";
 import type { HistoryItem } from "../api/titles";
 import { useAuth } from "../features/auth/AuthContext";
+
+const PAGE_SIZE = 20;
 
 const FILTERS: { id: string; label: string; state?: string }[] = [
   { id: "all", label: "All" },
@@ -41,33 +43,41 @@ export function HistoryPage() {
     [params],
   );
   const [items, setItems] = useState<HistoryItem[]>([]);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!accessToken) return;
-    let cancelled = false;
-    setLoading(true);
-    (async () => {
+  const loadPage = useCallback(
+    async (opts: { cursor?: string | null; append: boolean }) => {
+      if (!accessToken) return;
+      if (opts.append) setLoadingMore(true);
+      else setLoading(true);
+      setError(null);
       try {
         const data = await titlesApi.getHistory(accessToken, {
           state: filter.state,
+          limit: PAGE_SIZE,
+          cursor: opts.cursor ?? undefined,
         });
-        if (!cancelled) setItems(data);
+        setItems((prev) => (opts.append ? [...prev, ...data.items] : data.items));
+        setNextCursor(data.next_cursor);
       } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof ApiError ? err.message : "Could not load history");
-          setItems([]);
-        }
+        setError(err instanceof ApiError ? err.message : "Could not load history");
+        if (!opts.append) setItems([]);
+        setNextCursor(null);
       } finally {
-        if (!cancelled) setLoading(false);
+        setLoading(false);
+        setLoadingMore(false);
       }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [accessToken, filter.state]);
+    },
+    [accessToken, filter.state],
+  );
+
+  useEffect(() => {
+    void loadPage({ append: false });
+  }, [loadPage]);
 
   function setFilter(next: (typeof FILTERS)[number]) {
     if (next.id === "all") {
@@ -149,57 +159,72 @@ export function HistoryPage() {
       )}
 
       {!loading && items.length > 0 && (
-        <ul className="history-list" aria-label="Title history">
-          {items.map((item) => {
-            const name = item.title.name;
-            const busy = busyId === item.title.id;
-            return (
-              <li key={item.title.id} className="history-row">
-                <Link
-                  to={`/titles/${item.title.id}`}
-                  className="history-poster-link"
-                  tabIndex={-1}
-                  aria-hidden="true"
-                >
-                  <div className="history-poster" aria-hidden="true">
-                    {item.title.poster_url ? (
-                      <img src={item.title.poster_url} alt="" loading="lazy" />
-                    ) : (
-                      <div className="poster-fallback">{name.slice(0, 1)}</div>
-                    )}
-                  </div>
-                </Link>
-                <div className="history-body">
-                  <h2 className="history-title">
-                    <Link to={`/titles/${item.title.id}`} className="rec-title-link">
-                      {name}
-                    </Link>
-                  </h2>
-                  <p className="meta-line">
-                    <span className={`history-badge state-${item.state}`}>
-                      {item.label}
-                    </span>
-                    <span> · {formatWhen(item.updated_at)}</span>
-                    {item.title.release_date
-                      ? ` · ${item.title.release_date.slice(0, 4)}`
-                      : ""}
-                  </p>
-                </div>
-                <div className="history-actions">
-                  <button
-                    type="button"
-                    className="btn ghost"
-                    disabled={busy}
-                    aria-label={`Clear status for ${name}`}
-                    onClick={() => void clearItem(item.title.id)}
+        <>
+          <ul className="history-list" aria-label="Title history">
+            {items.map((item) => {
+              const name = item.title.name;
+              const busy = busyId === item.title.id;
+              return (
+                <li key={item.title.id} className="history-row">
+                  <Link
+                    to={`/titles/${item.title.id}`}
+                    className="history-poster-link"
+                    tabIndex={-1}
+                    aria-hidden="true"
                   >
-                    {busy ? "Clearing…" : "Clear"}
-                  </button>
-                </div>
-              </li>
-            );
-          })}
-        </ul>
+                    <div className="history-poster" aria-hidden="true">
+                      {item.title.poster_url ? (
+                        <img src={item.title.poster_url} alt="" loading="lazy" />
+                      ) : (
+                        <div className="poster-fallback">{name.slice(0, 1)}</div>
+                      )}
+                    </div>
+                  </Link>
+                  <div className="history-body">
+                    <h2 className="history-title">
+                      <Link to={`/titles/${item.title.id}`} className="rec-title-link">
+                        {name}
+                      </Link>
+                    </h2>
+                    <p className="meta-line">
+                      <span className={`history-badge state-${item.state}`}>
+                        {item.label}
+                      </span>
+                      <span> · {formatWhen(item.updated_at)}</span>
+                      {item.title.release_date
+                        ? ` · ${item.title.release_date.slice(0, 4)}`
+                        : ""}
+                    </p>
+                  </div>
+                  <div className="history-actions">
+                    <button
+                      type="button"
+                      className="btn ghost"
+                      disabled={busy}
+                      aria-label={`Clear status for ${name}`}
+                      onClick={() => void clearItem(item.title.id)}
+                    >
+                      {busy ? "Clearing…" : "Clear"}
+                    </button>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+
+          {nextCursor && (
+            <div className="history-more">
+              <button
+                type="button"
+                className="btn ghost"
+                disabled={loadingMore}
+                onClick={() => void loadPage({ cursor: nextCursor, append: true })}
+              >
+                {loadingMore ? "Loading…" : "Load more"}
+              </button>
+            </div>
+          )}
+        </>
       )}
     </section>
   );

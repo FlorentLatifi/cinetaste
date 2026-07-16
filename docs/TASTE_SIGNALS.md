@@ -51,12 +51,19 @@ User action
 
 ### History page
 
-`GET /me/history` returns current `UserTitleState` rows in  
+`GET /me/history` returns a page of current `UserTitleState` rows in  
 `like | dislike | watchlist | not_interested | rated | watched`  
-(newest `updated_at` first). Optional `?state=` filters to one of those values.  
-SPA History chips sync to the query string. **Clear** on a row sends `clear` so
-the title can return to For You and prior events for that title are superseded
-on recompute.
+(newest `updated_at`, then `title_id` DESC).  
+
+| Query | Meaning |
+|-------|---------|
+| `limit` | Page size (default 20, max 100) |
+| `state` | Optional filter to one history state |
+| `cursor` | Opaque keyset cursor from previous `next_cursor` |
+
+Response: `{ items, next_cursor, has_more }`. SPA **Load more** appends pages;
+filter chips reset the cursor. **Clear** on a row sends `clear` so the title can
+return to For You and prior events for that title are superseded on recompute.
 
 ### Post-watch UI (title detail)
 

@@ -50,6 +50,19 @@ test("History: filter chips update URL and list", async ({ page }) => {
   await expect(page.getByRole("heading", { name: mockTitle.name })).toBeVisible();
 });
 
+test("History: Load more appends next page", async ({ page }) => {
+  await installApiMock(page, { onboardingComplete: true });
+  await page.goto("/history");
+  await page.getByRole("heading", { name: "History" }).waitFor();
+
+  await expect(page.getByRole("heading", { name: mockTitle.name })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Mock Classic II" })).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Load more" }).click();
+  await expect(page.getByRole("heading", { name: "Mock Classic II" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Load more" })).toHaveCount(0);
+});
+
 test("Title detail: Watched opens rate panel", async ({ page }) => {
   await installApiMock(page, { onboardingComplete: true });
   await page.goto(`/titles/${mockTitle.id}`);

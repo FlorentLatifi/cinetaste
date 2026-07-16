@@ -1346,6 +1346,12 @@ html[data-contrast="high"] .history-filter.active {
   gap: 0.35rem;
 }
 
+.history-more {
+  display: flex;
+  justify-content: center;
+  margin-top: 1.25rem;
+}
+
 @media (max-width: 560px) {
   .history-row {
     grid-template-columns: 3.5rem 1fr;

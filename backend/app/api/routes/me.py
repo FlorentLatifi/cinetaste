@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUser, get_auth_service, get_settings_dep
 from app.api.schemas.auth import DeleteAccountRequest, TasteFeatureOut, TasteSummaryOut, UserResponse
-from app.api.schemas.titles import HistoryItemOut, TitleSummaryOut
+from app.api.schemas.titles import HistoryItemOut, HistoryPageOut, TitleSummaryOut
 from app.application.auth_service import AuthService
 from app.application.recommendation_service import RecommendationService
 from app.application.taste_service import TasteService
@@ -62,12 +62,12 @@ async def my_taste(
     )
 
 
-@router.get("/me/history", response_model=list[HistoryItemOut])
+@router.get("/me/history", response_model=HistoryPageOut)
 async def my_history(
     user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_db)],
     settings: Annotated[Settings, Depends(get_settings_dep)],
-    limit: int = Query(default=50, ge=1, le=100),
+    limit: int = Query(default=20, ge=1, le=100),
     state: str | None = Query(
         default=None,
         description=(
@@ -75,8 +75,12 @@ async def my_history(
             "rated | watched"
         ),
     ),
-) -> list[HistoryItemOut]:
-    """Current likes, ratings, watchlist, passes — newest first."""
+    cursor: str | None = Query(
+        default=None,
+        description="Opaque keyset cursor from a previous page's next_cursor",
+    ),
+) -> HistoryPageOut:
+    """Current likes, ratings, watchlist, passes — newest first (paginated)."""
     from app.domain.taste_signals import HISTORY_VISIBLE_STATES
 
     if state is not None and state not in HISTORY_VISIBLE_STATES:
@@ -87,8 +91,10 @@ async def my_history(
         )
 
     service = RecommendationService(session, settings)
-    rows = await service.history(user.id, limit=limit, state=state)
-    return [
+    rows, next_cursor = await service.history(
+        user.id, limit=limit, state=state, cursor=cursor
+    )
+    items = [
         HistoryItemOut(
             title=TitleSummaryOut.from_title(title),
             state=state_row.state,
@@ -97,6 +103,11 @@ async def my_history(
         )
         for title, state_row in rows
     ]
+    return HistoryPageOut(
+        items=items,
+        next_cursor=next_cursor,
+        has_more=next_cursor is not None,
+    )
 
 
 @router.delete("/me", status_code=status.HTTP_204_NO_CONTENT)

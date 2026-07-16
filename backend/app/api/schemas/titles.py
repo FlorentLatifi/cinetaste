@@ -203,6 +203,14 @@ class HistoryItemOut(BaseModel):
     updated_at: datetime
 
 
+class HistoryPageOut(BaseModel):
+    """Keyset-paginated history response."""
+
+    items: list[HistoryItemOut] = Field(default_factory=list)
+    next_cursor: str | None = None
+    has_more: bool = False
+
+
 class ProviderOfferOut(BaseModel):
     provider_id: int
     name: str

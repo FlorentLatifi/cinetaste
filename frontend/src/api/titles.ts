@@ -196,14 +196,21 @@ export type HistoryItem = {
   updated_at: string;
 };
 
+export type HistoryPage = {
+  items: HistoryItem[];
+  next_cursor: string | null;
+  has_more: boolean;
+};
+
 export function getHistory(
   accessToken: string,
-  opts?: { limit?: number; state?: string },
+  opts?: { limit?: number; state?: string; cursor?: string | null },
 ) {
   const params = new URLSearchParams();
-  params.set("limit", String(opts?.limit ?? 50));
+  params.set("limit", String(opts?.limit ?? 20));
   if (opts?.state) params.set("state", opts.state);
-  return apiFetch<HistoryItem[]>(
+  if (opts?.cursor) params.set("cursor", opts.cursor);
+  return apiFetch<HistoryPage>(
     `/me/history?${params.toString()}`,
     {},
     accessToken,
