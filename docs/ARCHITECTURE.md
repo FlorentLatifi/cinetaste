@@ -92,6 +92,7 @@ backend/
 * Per-user weighted feature vector + interpretable feature weights
 * Versioned: recompute on signal change (async or sync for MVP)
 * Stored as: dense vector (for ANN) + sparse feature map (for explanations)
+* **Signal policy (weights, zero-signal, feed exclusion):** [`docs/TASTE_SIGNALS.md`](TASTE_SIGNALS.md) · code: `app/domain/taste_signals.py`
 
 ### 5. Recommendations
 * Candidate generation → score → diversify → explain → cache slate

@@ -8,8 +8,8 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.application.taste_service import FEED_EXCLUDE_STATES
 from app.core.config import Settings
+from app.domain.taste_signals import FEED_EXCLUDE_STATES
 from app.infrastructure.db.models.catalog import Title
 from app.infrastructure.db.models.interaction import UserTitleState
 from app.infrastructure.db.models.taste import TasteProfile
@@ -18,6 +18,8 @@ from app.recommendation.pipeline import RankedItem, rank_titles
 
 
 class RecommendationService:
+    """Candidate generation + ranking. Taste *weights* live in domain.taste_signals."""
+
     def __init__(self, session: AsyncSession, settings: Settings) -> None:
         self._session = session
         self._settings = settings
@@ -34,6 +36,7 @@ class RecommendationService:
             payload = json.loads(cached)
             return await self._hydrate(payload)
 
+        # States derived from taste signal policy (haven't_seen is never excluded).
         exclude_states = (
             await self._session.scalars(
                 select(UserTitleState).where(
@@ -42,7 +45,6 @@ class RecommendationService:
                 )
             )
         ).all()
-        # Haven't-seen is NOT excluded — user may still want those recommended.
         exclude_ids = {row.title_id for row in exclude_states}
 
         titles = (

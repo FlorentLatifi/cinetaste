@@ -14,11 +14,13 @@ from uuid import UUID
 
 from app.recommendation.embeddings import top_feature_overlap
 
+from app.domain.taste_signals import EXPLAIN_ANCHOR_MIN_WEIGHT
+
 # Stored inside TasteProfile.features (stripped before scoring).
 EXPLAIN_MEMORY_KEY = "__explain_memory__"
 
-# Positive interactions strong enough to cite as "you liked X".
-_ANCHOR_MIN_WEIGHT = 0.85
+# Positive interactions strong enough to cite as "you liked X" (policy).
+_ANCHOR_MIN_WEIGHT = EXPLAIN_ANCHOR_MIN_WEIGHT
 _MAX_ANCHORS = 16
 
 

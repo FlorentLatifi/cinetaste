@@ -87,20 +87,32 @@ class RecommendationSlateOut(BaseModel):
 
 
 class InteractionRequest(BaseModel):
+    """Record a title interaction.
+
+    Weights and taste effects: ``docs/TASTE_SIGNALS.md`` and
+    ``app.domain.taste_signals``.
+    """
+
     event_type: str = Field(
         pattern=(
             "^(like|dislike|watchlist|not_interested|skip|view|"
             "haven't_seen|rate_1|rate_2|rate_3|rate_4)$"
-        )
+        ),
+        description=(
+            "Active signals only. "
+            "haven't_seen=0 taste; not_interested=mild−; "
+            "rate_1…rate_4=Bad…Favorite; watchlist=mild+; "
+            "like/dislike=feed shortcuts. See docs/TASTE_SIGNALS.md."
+        ),
     )
 
 
 class OnboardingReaction(BaseModel):
     """One card decision during onboarding.
 
-    Actions:
-    - haven't_seen — zero taste signal
-    - not_interested — mild negative signal
+    Policy (docs/TASTE_SIGNALS.md):
+    - haven't_seen — zero taste signal (does not count as a rating)
+    - not_interested — mild negative
     - rate_1 … rate_4 — Bad / It's ok / Good / Favorite
     - like / dislike — legacy aliases (mapped to rate_3 / rate_1)
     """

@@ -6,11 +6,11 @@ from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.recommendation_service import RecommendationService
-from app.application.taste_service import (
+from app.application.taste_service import TasteService
+from app.domain.taste_signals import (
     POSITIVE_RATING_EVENT_TYPES,
     RATING_EVENT_TYPES,
-    SIGNAL_WEIGHTS,
-    TasteService,
+    is_supported_event,
 )
 from app.domain.exceptions import AppError
 from app.infrastructure.db.models.user import User
@@ -20,16 +20,16 @@ MIN_ONBOARDING_RATINGS = 6
 # At least some positive affinity so the slate is not pure "avoid these".
 MIN_ONBOARDING_POSITIVE = 2
 
-# Actions accepted on /onboarding/complete.
+# Actions accepted on /onboarding/complete (see docs/TASTE_SIGNALS.md).
 ONBOARDING_ACTIONS = frozenset(
     {
-        "haven't_seen",
-        "not_interested",
-        "rate_1",
-        "rate_2",
-        "rate_3",
-        "rate_4",
-        # Legacy aliases (older clients)
+        "haven't_seen",  # zero taste signal
+        "not_interested",  # mild negative
+        "rate_1",  # Bad
+        "rate_2",  # It's ok
+        "rate_3",  # Good
+        "rate_4",  # Favorite
+        # Legacy aliases (older clients) → mapped below
         "like",
         "dislike",
     }
@@ -95,7 +95,7 @@ class OnboardingService:
             if action not in ONBOARDING_ACTIONS:
                 continue
             event_type = _LEGACY_ACTION_MAP.get(action, action)
-            if event_type not in SIGNAL_WEIGHTS:
+            if not is_supported_event(event_type):
                 continue
 
             await self._taste.record_interaction(

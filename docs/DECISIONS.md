@@ -4,6 +4,26 @@ Lightweight ADR-style log. Newest first.
 
 ---
 
+## 2026-07-17 — Taste signal policy as code
+
+### Decision
+Centralize all interaction → taste effects in `backend/app/domain/taste_signals.py`, with product documentation in `docs/TASTE_SIGNALS.md`.
+
+### Rules locked
+* **Haven't seen** = weight `0`, no taste update, not excluded from For You.
+* **Not interested** = mild negative (`−0.40`), excluded from For You.
+* **Ratings** Bad→Favorite = `rate_1`…`rate_4` with weights `−0.90 … +1.55`.
+* **Watchlist** = mild positive intent (`+0.45`), not a quality judgment.
+* Future **watched** family reserved in the same table.
+
+### Rationale
+One policy table prevents drift between onboarding, interactions API, recompute, feed filters, and explanations.
+
+### Status
+Active.
+
+---
+
 ## 2026-07-10 — Foundation lock
 
 ### Product name
