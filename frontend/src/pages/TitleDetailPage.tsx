@@ -105,11 +105,13 @@ export function TitleDetailPage() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [lastAction, setLastAction] = useState<FeedbackAction | null>(null);
+  const [rateOpen, setRateOpen] = useState(false);
   const [toast, setToast] = useState<{ action: FeedbackAction; message: string } | null>(
     null,
   );
   const [undoBusy, setUndoBusy] = useState(false);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const rateFirstRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     return () => {
@@ -124,6 +126,7 @@ export function TitleDetailPage() {
     setSimilar([]);
     setWatch(null);
     setLastAction(null);
+    setRateOpen(false);
     setToast(null);
     (async () => {
       try {
@@ -215,6 +218,7 @@ export function TitleDetailPage() {
     try {
       await titlesApi.interact(accessToken, title.id, event);
       setLastAction(event);
+      setRateOpen(false);
       showToast(event, title.name);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Action failed");
@@ -223,13 +227,20 @@ export function TitleDetailPage() {
     }
   }
 
+  function openRatePanel() {
+    setRateOpen(true);
+    setError(null);
+    requestAnimationFrame(() => rateFirstRef.current?.focus());
+  }
+
   async function undoLast() {
-    if (!accessToken || !title || !toast || undoBusy) return;
+    if (!accessToken || !title || !lastAction || undoBusy) return;
     setUndoBusy(true);
     setError(null);
     try {
       await titlesApi.interact(accessToken, title.id, "clear");
       setLastAction(null);
+      setRateOpen(false);
       dismissToast();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not undo");
@@ -356,7 +367,60 @@ export function TitleDetailPage() {
             >
               Like
             </button>
+            <button
+              type="button"
+              className="btn ghost"
+              disabled={busy || lastAction !== null}
+              aria-expanded={rateOpen}
+              aria-controls="detail-rate-panel"
+              aria-label={`Mark ${title.name} as watched and rate it`}
+              onClick={() => (rateOpen ? setRateOpen(false) : openRatePanel())}
+            >
+              Watched
+            </button>
           </div>
+
+          {rateOpen && !lastAction && (
+            <div
+              id="detail-rate-panel"
+              className="detail-rate-panel"
+              role="group"
+              aria-label={`Rate ${title.name} after watching`}
+            >
+              <p className="detail-rate-lead">How was it?</p>
+              <div className="detail-rate-row">
+                {(
+                  [
+                    { event: "rate_1" as const, label: "Bad" },
+                    { event: "rate_2" as const, label: "It's ok" },
+                    { event: "rate_3" as const, label: "Good" },
+                    { event: "rate_4" as const, label: "Favorite" },
+                  ] as const
+                ).map((opt, i) => (
+                  <button
+                    key={opt.event}
+                    ref={i === 0 ? rateFirstRef : undefined}
+                    type="button"
+                    className={`btn detail-rate-btn rate-${opt.event}`}
+                    disabled={busy}
+                    aria-label={`Rate ${title.name}: ${opt.label}`}
+                    onClick={() => void act(opt.event)}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+              <button
+                type="button"
+                className="text-btn detail-rate-skip"
+                disabled={busy}
+                onClick={() => void act("watched")}
+              >
+                Watched — skip rating
+              </button>
+            </div>
+          )}
+
           {lastAction && (
             <p className="toast-ok detail-action-status" role="status">
               {FEEDBACK_ACTION_LABELS[lastAction]}.{" "}

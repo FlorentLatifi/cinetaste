@@ -45,14 +45,16 @@ User action
 | **Undo / clear** | `clear` | **0.00** | zero | **No** | `none` | **No** | Soft undo: title can reappear; recompute ignores events for that title up to the clear. |
 | **Skip** | `skip` | **−0.15** | negative | **Yes** — tiny | *(no state)* | No | Soft dismiss; barely moves profile. |
 | **View** | `view` | **+0.05** | neutral | **Yes** — near-zero | *(no state)* | No | Impression analytics; never treat as a like. |
+| **Watched (no rating)** | `watched` | **+0.20** | positive | Yes — weak | `watched` | Yes | Prefer `rate_1`–`rate_4` after watch when possible. |
+| **Watched + liked** | `watched_liked` | **+1.10** | positive | Yes | `like` | Yes | Convenience; slightly above Good. |
+| **Watched + disliked** | `watched_disliked` | **−0.95** | negative | Yes | `dislike` | Yes | Strong negative — they invested time. |
 
-### Future actions (reserved in code; enable in API/UI when ready)
+### Post-watch UI (title detail)
 
-| Action | `event_type` | Weight | Polarity | Updates taste? | State | Exclude For You? | Notes |
-|--------|--------------|--------|----------|----------------|-------|------------------|-------|
-| Marked watched (no rating) | `watched` | **+0.20** | positive | Yes — weak | `watched` | Yes | Prefer prompting for `rate_1`–`rate_4` after watch. |
-| Watched + liked | `watched_liked` | **+1.10** | positive | Yes | `like` | Yes | Convenience; slightly above Good. |
-| Watched + disliked | `watched_disliked` | **−0.95** | negative | Yes | `dislike` | Yes | Strong negative — they invested time. |
+1. User taps **Watched** → rate panel (Bad / It's ok / Good / Favorite).  
+2. Choosing a rating records `rate_1`…`rate_4` (full learning + feed exclusion).  
+3. **Watched — skip rating** records `watched` only (weak positive, still excluded from For You).  
+4. Undo uses `clear` like other feed actions.
 
 ---
 

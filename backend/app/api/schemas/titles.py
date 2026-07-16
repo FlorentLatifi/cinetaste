@@ -148,13 +148,15 @@ class InteractionRequest(BaseModel):
     event_type: str = Field(
         pattern=(
             "^(like|dislike|watchlist|not_interested|clear|skip|view|"
-            "haven't_seen|rate_1|rate_2|rate_3|rate_4)$"
+            "haven't_seen|rate_1|rate_2|rate_3|rate_4|"
+            "watched|watched_liked|watched_disliked)$"
         ),
         description=(
             "Active signals only. "
             "haven't_seen=0 taste; not_interested=mild−; "
             "rate_1…rate_4=Bad…Favorite; watchlist=mild+; "
-            "like/dislike=feed shortcuts; clear=undo title state + prior taste. "
+            "like/dislike=feed shortcuts; clear=undo title state + prior taste; "
+            "watched / watched_liked / watched_disliked=post-watch completion. "
             "See docs/TASTE_SIGNALS.md."
         ),
     )

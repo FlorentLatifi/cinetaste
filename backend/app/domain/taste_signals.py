@@ -246,17 +246,17 @@ SIGNAL_POLICIES: dict[str, SignalPolicy] = {
         summary="Near-zero positive for analytics; almost no learning.",
         special_handling="Optional impression log; never treat as a real like.",
     ),
-    # --- Reserved future actions (API may enable later) ---------------------
+    # --- Post-watch completion (title detail “I watched this”) ---------------
     "watched": _p(
         "watched",
         0.20,
         "positive",
         state="watched",
         exclude_from_feed=True,
-        label="Watched (future)",
+        label="Watched (no rating)",
         summary="Marked as watched without a quality rating — weak positive completion signal.",
         special_handling=(
-            "Reserved. Prefer prompting for rate_1–4 after watch. "
+            "Prefer rate_1–4 after watch when the user will rate. "
             "Excludes from For You to avoid re-serving finished titles."
         ),
     ),
@@ -268,9 +268,9 @@ SIGNAL_POLICIES: dict[str, SignalPolicy] = {
         exclude_from_feed=True,
         counts_as_positive_rating=True,
         explain_anchor_eligible=True,
-        label="Watched + liked (future)",
+        label="Watched + liked",
         summary="Completed and enjoyed — slightly above Good.",
-        special_handling="Reserved convenience event; equivalent to a strong post-watch like.",
+        special_handling="Convenience shortcut; prefer explicit rate_3/rate_4 when on the rating strip.",
     ),
     "watched_disliked": _p(
         "watched_disliked",
@@ -278,9 +278,9 @@ SIGNAL_POLICIES: dict[str, SignalPolicy] = {
         "negative",
         state="dislike",
         exclude_from_feed=True,
-        label="Watched + disliked (future)",
+        label="Watched + disliked",
         summary="Completed and disliked — strong negative, similar to Bad.",
-        special_handling="Reserved. Stronger than not_interested because they invested time.",
+        special_handling="Stronger than not_interested because they invested time; prefer rate_1 when rating.",
     ),
 }
 
@@ -317,7 +317,7 @@ EXPLAIN_ANCHOR_EVENT_TYPES: frozenset[str] = frozenset(
     name for name, policy in SIGNAL_POLICIES.items() if policy.explain_anchor_eligible
 )
 
-# Events accepted by the public interactions API today (exclude pure "future" until UI ships).
+# Events accepted by the public interactions API today.
 ACTIVE_INTERACTION_EVENT_TYPES: frozenset[str] = frozenset(
     {
         "like",
@@ -332,13 +332,14 @@ ACTIVE_INTERACTION_EVENT_TYPES: frozenset[str] = frozenset(
         "rate_2",
         "rate_3",
         "rate_4",
+        "watched",
+        "watched_liked",
+        "watched_disliked",
     }
 )
 
-# Reserved names documented for future UI; still learnable if recorded.
-FUTURE_INTERACTION_EVENT_TYPES: frozenset[str] = frozenset(
-    {"watched", "watched_liked", "watched_disliked"}
-)
+# Kept for docs/tests: names that were staged before the post-watch UI shipped.
+FUTURE_INTERACTION_EVENT_TYPES: frozenset[str] = frozenset()
 
 
 def get_policy(event_type: str) -> SignalPolicy:

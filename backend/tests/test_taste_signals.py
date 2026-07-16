@@ -150,22 +150,20 @@ def test_rating_and_anchor_sets() -> None:
     assert EXPLAIN_ANCHOR_MIN_WEIGHT >= 0.85
 
 
-def test_future_watched_actions_reserved() -> None:
-    assert FUTURE_INTERACTION_EVENT_TYPES == {
-        "watched",
-        "watched_liked",
-        "watched_disliked",
-    }
-    for name in FUTURE_INTERACTION_EVENT_TYPES:
+def test_watched_actions_are_active_api() -> None:
+    assert FUTURE_INTERACTION_EVENT_TYPES == set()
+    for name in ("watched", "watched_liked", "watched_disliked"):
         p = get_policy(name)
         assert p.updates_taste
         assert name in SIGNAL_WEIGHTS
-        # Not exposed on the public interaction API yet
-        assert name not in ACTIVE_INTERACTION_EVENT_TYPES
+        assert name in ACTIVE_INTERACTION_EVENT_TYPES
+        assert p.exclude_from_feed is True
     assert weight_for("watched") > 0
     assert weight_for("watched") < weight_for("watchlist")
     assert weight_for("watched_liked") > weight_for("rate_3")
     assert weight_for("watched_disliked") < 0
+    assert STATE_FROM_EVENT["watched"] == "watched"
+    assert "watched" in FEED_EXCLUDE_STATES
 
 
 def test_feed_excludes_policy_states_not_unseen() -> None:

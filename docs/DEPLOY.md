@@ -246,7 +246,7 @@ Use this before inviting real users beyond friends/family.
 2. Complete onboarding (≥6 ratings, ≥2 positive)  
 3. For You shows cards with **Why this pick** (and optional Hidden gem / Discovery badges)  
 4. Pass / Not interested → toast **Undo** restores card  
-5. Title detail → where-to-watch region works (or soft-empty without key)  
+5. Title detail → **Watched** opens rate strip; rating or skip-rating + Undo works; where-to-watch region works (or soft-empty without key)  
 6. Search finds a known title; open detail; Similar row loads  
 7. Account: password reset flow (or log token in API logs)  
 8. Sign out → cannot hit For You without re-login  

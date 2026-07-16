@@ -145,22 +145,27 @@ export function completeOnboarding(
   );
 }
 
+export type InteractionEventType =
+  | "like"
+  | "dislike"
+  | "watchlist"
+  | "not_interested"
+  | "clear"
+  | "skip"
+  | "view"
+  | "haven't_seen"
+  | "rate_1"
+  | "rate_2"
+  | "rate_3"
+  | "rate_4"
+  | "watched"
+  | "watched_liked"
+  | "watched_disliked";
+
 export function interact(
   accessToken: string,
   titleId: string,
-  event_type:
-    | "like"
-    | "dislike"
-    | "watchlist"
-    | "not_interested"
-    | "clear"
-    | "skip"
-    | "view"
-    | "haven't_seen"
-    | "rate_1"
-    | "rate_2"
-    | "rate_3"
-    | "rate_4",
+  event_type: InteractionEventType,
 ) {
   return apiFetch<void>(
     `/titles/${titleId}/interactions`,
