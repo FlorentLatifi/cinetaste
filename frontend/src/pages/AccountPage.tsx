@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { ApiError } from "../api/client";
 import * as authApi from "../api/auth";
 import type { TasteSummary } from "../api/auth";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useAuth } from "../features/auth/AuthContext";
 import {
   parseTasteSnapshot,
@@ -26,6 +27,7 @@ export function AccountPage() {
   const [importPreview, setImportPreview] = useState<TasteSnapshotV1 | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
   const [importBusy, setImportBusy] = useState(false);
+  const [confirmMerge, setConfirmMerge] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -129,10 +131,12 @@ export function AccountPage() {
         `Merged ${result.merged_features} signals into your profile (v${result.profile_version}).`,
       );
       setImportPreview(null);
+      setConfirmMerge(false);
     } catch (err) {
       setImportError(
         err instanceof ApiError ? err.message : "Could not merge snapshot",
       );
+      setConfirmMerge(false);
     } finally {
       setImportBusy(false);
     }
@@ -383,9 +387,9 @@ export function AccountPage() {
                 type="button"
                 className="btn primary"
                 disabled={importBusy}
-                onClick={() => void mergeSnapshot()}
+                onClick={() => setConfirmMerge(true)}
               >
-                {importBusy ? "Merging…" : "Merge into my profile"}
+                Merge into my profile
               </button>
               <button
                 type="button"
@@ -394,6 +398,7 @@ export function AccountPage() {
                 onClick={() => {
                   setImportPreview(null);
                   setImportError(null);
+                  setConfirmMerge(false);
                 }}
               >
                 Dismiss
@@ -407,6 +412,19 @@ export function AccountPage() {
           merge.
         </p>
       </div>
+
+      <ConfirmDialog
+        open={confirmMerge}
+        title="Merge taste snapshot?"
+        description="This soft-blends the file’s likes and dislikes into your profile. Live ratings still dominate. You can clear the import later."
+        confirmLabel="Merge"
+        cancelLabel="Cancel"
+        busy={importBusy}
+        onConfirm={() => void mergeSnapshot()}
+        onCancel={() => {
+          if (!importBusy) setConfirmMerge(false);
+        }}
+      />
 
       <div className="account-card">
         <h2>Display</h2>
