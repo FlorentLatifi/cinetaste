@@ -1958,3 +1958,188 @@ html[data-contrast="high"] .history-filter.active {
     padding: 1.15rem 1.1rem 1.25rem;
   }
 }
+
+/* -------------------------------------------------------------------------- */
+/* Windows High Contrast / forced-colors (Edge, Firefox, Chromium)            */
+/* Use system color keywords so OS theme controls fg/bg; keep structure.      */
+/* https://developer.mozilla.org/en-US/docs/Web/CSS/@media/forced-colors      */
+/* -------------------------------------------------------------------------- */
+@media (forced-colors: active) {
+  :root,
+  html[data-contrast="high"],
+  html[data-contrast="normal"] {
+    --bg: Canvas;
+    --bg-elevated: Canvas;
+    --bg-soft: Canvas;
+    --border: ButtonBorder;
+    --text: CanvasText;
+    --muted: GrayText;
+    --accent: LinkText;
+    --accent-strong: LinkText;
+    --danger: Mark;
+    --shadow: none;
+    color-scheme: light dark;
+    color: CanvasText;
+    background: Canvas;
+  }
+
+  body,
+  #root,
+  .shell,
+  .main,
+  .feed,
+  .account-page,
+  .auth-layout,
+  .auth-aside,
+  .auth-card,
+  .topbar,
+  .rec-card,
+  .account-card,
+  .history-row,
+  .info-card,
+  .callout,
+  .welcome-banner,
+  .why-block,
+  .detail-rate-panel,
+  .taste-import-preview,
+  .feed-toast,
+  .ob-card,
+  .ob-body {
+    background: Canvas !important;
+    color: CanvasText;
+    box-shadow: none !important;
+    backdrop-filter: none !important;
+  }
+
+  .topbar {
+    border-bottom: 1px solid ButtonBorder;
+  }
+
+  a,
+  a:hover,
+  .rec-title-link,
+  .brand {
+    color: LinkText;
+    text-decoration: underline;
+    text-underline-offset: 0.15em;
+  }
+
+  .btn,
+  .history-filter,
+  .ob-btn,
+  .ob-rate-btn,
+  .ob-finish,
+  .detail-rate-btn,
+  .nav-link,
+  .contrast-toggle {
+    forced-color-adjust: none;
+    background: ButtonFace !important;
+    color: ButtonText !important;
+    border: 1px solid ButtonBorder !important;
+  }
+
+  .btn.primary,
+  .btn.danger,
+  .ob-finish,
+  .detail-rate-btn.rate-rate_4,
+  .rec-badge.gem,
+  .history-filter.active,
+  .nav-link.active {
+    background: Highlight !important;
+    color: HighlightText !important;
+    border: 1px solid ButtonBorder !important;
+  }
+
+  .btn:disabled,
+  .btn[disabled] {
+    opacity: 1;
+    color: GrayText !important;
+    border-color: GrayText !important;
+  }
+
+  input,
+  select,
+  textarea,
+  .search-bar input[type="search"],
+  .account-card input,
+  .account-card select,
+  .auth-card input {
+    forced-color-adjust: none;
+    background: Field !important;
+    color: FieldText !important;
+    border: 1px solid ButtonBorder !important;
+  }
+
+  :focus-visible,
+  .btn:focus-visible,
+  .nav-link:focus-visible,
+  input:focus-visible,
+  button:focus-visible,
+  a:focus-visible,
+  .skip-link:focus {
+    outline: 3px solid Highlight !important;
+    outline-offset: 2px;
+  }
+
+  .skip-link {
+    background: Highlight !important;
+    color: HighlightText !important;
+    border: 1px solid ButtonBorder;
+  }
+
+  .form-error,
+  .taste-chip.negative,
+  .history-badge.state-dislike,
+  .history-badge.state-not_interested {
+    color: Mark !important;
+    border-color: Mark !important;
+    background: Canvas !important;
+  }
+
+  .taste-chip,
+  .taste-chip.positive,
+  .rec-badge,
+  .history-badge,
+  .chip {
+    background: Canvas !important;
+    color: CanvasText !important;
+    border: 1px solid ButtonBorder !important;
+  }
+
+  .rec-poster,
+  .history-poster,
+  .similar-poster,
+  .title-detail-poster,
+  .cast-avatar,
+  .poster-fallback {
+    border: 1px solid ButtonBorder !important;
+    background: Canvas !important;
+    color: CanvasText !important;
+  }
+
+  .spinner {
+    border-color: ButtonBorder !important;
+    border-top-color: Highlight !important;
+  }
+
+  .sr-only {
+    /* Keep screen-reader-only content out of forced paint */
+  }
+
+  /* Decorative gradients must not hide text in forced colors */
+  .brand-mark,
+  .btn.primary,
+  .welcome-banner,
+  .ob-progress-fill {
+    background-image: none !important;
+  }
+
+  .ob-progress-bar {
+    border: 1px solid ButtonBorder;
+    background: Canvas !important;
+  }
+
+  .ob-progress-fill {
+    background: Highlight !important;
+  }
+}

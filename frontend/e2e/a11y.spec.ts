@@ -35,6 +35,15 @@ test("high contrast toggle updates document", async ({ page }) => {
   await expect(page.getByRole("button", { name: /standard contrast/i })).toBeVisible();
 });
 
+test("forced-colors mode keeps login usable", async ({ page }) => {
+  await page.emulateMedia({ forcedColors: "active" });
+  await page.goto("/login");
+  await page.getByRole("heading", { name: "Welcome back" }).waitFor();
+  await expect(page.getByLabel("Email")).toBeVisible();
+  await expect(page.getByRole("button", { name: /sign in/i })).toBeVisible();
+  await expect(page.getByRole("link", { name: /create an account/i })).toBeVisible();
+});
+
 function formatViolations(
   violations: { id: string; impact?: string | null; help: string; nodes: { target: unknown[] }[] }[],
 ): string {
