@@ -1,9 +1,13 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { ApiError } from "../api/client";
 import * as authApi from "../api/auth";
 import type { TasteSummary } from "../api/auth";
 import { useAuth } from "../features/auth/AuthContext";
+import {
+  parseTasteSnapshot,
+  type TasteSnapshotV1,
+} from "../features/taste/snapshot";
 import { useContrast } from "../features/theme/contrast";
 
 export function AccountPage() {
@@ -19,6 +23,9 @@ export function AccountPage() {
   const [tasteLoading, setTasteLoading] = useState(true);
   const [exportBusy, setExportBusy] = useState(false);
   const [exportStatus, setExportStatus] = useState<string | null>(null);
+  const [importPreview, setImportPreview] = useState<TasteSnapshotV1 | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!accessToken) return;
@@ -83,6 +90,26 @@ export function AccountPage() {
       );
     } finally {
       setExportBusy(false);
+    }
+  }
+
+  async function onImportFile(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setImportError(null);
+    setImportPreview(null);
+    try {
+      const text = await file.text();
+      const parsed = parseTasteSnapshot(text);
+      if (!parsed.ok) {
+        setImportError(parsed.error);
+        return;
+      }
+      setImportPreview(parsed.data);
+      setExportStatus(`Opened snapshot from ${file.name}.`);
+    } catch {
+      setImportError("Could not read that file.");
     }
   }
 
@@ -201,35 +228,114 @@ export function AccountPage() {
                 rating to unlock clearer labels.
               </p>
             )}
-            <div className="taste-export" role="group" aria-label="Export taste profile">
-              <button
-                type="button"
-                className="btn ghost"
-                disabled={exportBusy}
-                onClick={() => void downloadTasteJson()}
-              >
-                {exportBusy ? "Working…" : "Download JSON"}
-              </button>
-              <button
-                type="button"
-                className="btn ghost"
-                disabled={exportBusy}
-                onClick={() => void copyTasteText()}
-              >
-                Copy share text
-              </button>
-            </div>
-            {exportStatus && (
-              <p className="meta-line" role="status" aria-live="polite">
-                {exportStatus}
+          </>
+        )}
+
+        <div className="taste-export" role="group" aria-label="Export or open taste snapshot">
+          <button
+            type="button"
+            className="btn ghost"
+            disabled={exportBusy || !taste?.ready}
+            onClick={() => void downloadTasteJson()}
+          >
+            {exportBusy ? "Working…" : "Download JSON"}
+          </button>
+          <button
+            type="button"
+            className="btn ghost"
+            disabled={exportBusy || !taste?.ready}
+            onClick={() => void copyTasteText()}
+          >
+            Copy share text
+          </button>
+          <button
+            type="button"
+            className="btn ghost"
+            onClick={() => fileInputRef.current?.click()}
+          >
+            Open snapshot…
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="application/json,.json"
+            className="sr-only"
+            aria-label="Open taste snapshot JSON file"
+            onChange={(ev) => void onImportFile(ev)}
+          />
+        </div>
+        {exportStatus && (
+          <p className="meta-line" role="status" aria-live="polite">
+            {exportStatus}
+          </p>
+        )}
+        {importError && (
+          <p className="form-error" role="alert">
+            {importError}
+          </p>
+        )}
+        {importPreview && (
+          <div className="taste-import-preview" aria-label="Imported snapshot preview">
+            <h3 className="taste-subhead">Snapshot preview</h3>
+            <p className="meta-line">
+              Exported {importPreview.exported_at.slice(0, 10)}
+              {" · "}v{importPreview.profile_version}
+              {" · "}
+              {importPreview.likes.length} likes / {importPreview.dislikes.length}{" "}
+              dislikes
+            </p>
+            {importPreview.likes.length > 0 && (
+              <div className="taste-block">
+                <p className="taste-subhead">Lean toward (file)</p>
+                <ul className="taste-chips">
+                  {importPreview.likes.map((f) => (
+                    <li key={`imp-l-${f.key}`} className="taste-chip positive">
+                      {f.label}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {importPreview.dislikes.length > 0 && (
+              <div className="taste-block">
+                <p className="taste-subhead">Tend to avoid (file)</p>
+                <ul className="taste-chips">
+                  {importPreview.dislikes.map((f) => (
+                    <li key={`imp-d-${f.key}`} className="taste-chip negative">
+                      {f.label}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {importPreview.anchors.length > 0 && (
+              <p className="meta-line">
+                Anchors:{" "}
+                {importPreview.anchors
+                  .map((a) => (a.year ? `${a.name} (${a.year})` : a.name))
+                  .join(" · ")}
               </p>
             )}
             <p className="taste-export-note">
-              Export is private to you — no embedding vector, only readable signals
-              and title anchors used in explanations.
+              Preview only — opening a file does not change your live profile.
+              Rate titles to train taste; export is a private backup/share format.
             </p>
-          </>
+            <button
+              type="button"
+              className="btn ghost"
+              onClick={() => {
+                setImportPreview(null);
+                setImportError(null);
+              }}
+            >
+              Dismiss preview
+            </button>
+          </div>
         )}
+        <p className="taste-export-note">
+          Export is private to you — no embedding vector, only readable signals
+          and title anchors. Open a previously downloaded JSON to review it here.
+        </p>
       </div>
 
       <div className="account-card">

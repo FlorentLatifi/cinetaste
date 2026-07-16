@@ -74,6 +74,42 @@ test("History: infinite scroll / Load more appends next page", async ({ page }) 
   await expect(page.getByRole("button", { name: "Load more" })).toHaveCount(0);
 });
 
+test("Account: open snapshot previews export JSON", async ({ page }) => {
+  await installApiMock(page, { onboardingComplete: true });
+  await page.goto("/account");
+  await page.getByRole("heading", { name: "Your taste" }).waitFor();
+
+  const snapshot = {
+    schema: "cinetaste.taste_snapshot.v1",
+    exported_at: "2026-01-15T12:00:00.000Z",
+    profile_version: 2,
+    updated_at: null,
+    has_vector: true,
+    feature_count: 2,
+    anchor_count: 0,
+    likes: [
+      { key: "genre:drama", family: "genre", label: "Drama", weight: 1.5 },
+    ],
+    dislikes: [
+      { key: "genre:horror", family: "genre", label: "Horror", weight: -1 },
+    ],
+    anchors: [],
+  };
+
+  await page.getByLabel("Open taste snapshot JSON file").setInputFiles({
+    name: "taste.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(JSON.stringify(snapshot)),
+  });
+
+  const preview = page.getByLabel("Imported snapshot preview");
+  await expect(preview).toBeVisible();
+  await expect(preview.getByText("Snapshot preview")).toBeVisible();
+  await expect(preview.getByText("Lean toward (file)")).toBeVisible();
+  await expect(preview.getByText("Drama", { exact: true })).toBeVisible();
+  await expect(preview.getByText("Horror", { exact: true })).toBeVisible();
+});
+
 test("Title detail: Watched opens rate panel", async ({ page }) => {
   await installApiMock(page, { onboardingComplete: true });
   await page.goto(`/titles/${mockTitle.id}`);

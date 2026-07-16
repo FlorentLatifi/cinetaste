@@ -4,6 +4,7 @@ import { ApiError } from "../api/client";
 import * as titlesApi from "../api/titles";
 import type { HistoryItem } from "../api/titles";
 import { useAuth } from "../features/auth/AuthContext";
+import { prefersReducedMotion } from "../features/taste/snapshot";
 
 const PAGE_SIZE = 20;
 
@@ -100,9 +101,11 @@ export function HistoryPage() {
   }, [loadPage]);
 
   // Infinite scroll: when the sentinel enters the viewport, fetch next page.
+  // Honors prefers-reduced-motion — button-only pagination for those users.
   useEffect(() => {
     const node = sentinelRef.current;
     if (!node || !nextCursor) return;
+    if (prefersReducedMotion()) return;
 
     const observer = new IntersectionObserver(
       (entries) => {

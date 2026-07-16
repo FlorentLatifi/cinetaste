@@ -154,7 +154,7 @@ These are valuable later; they do not prove product-market fit faster than the c
 ### Later (only with evidence)
 * Collaborative signals, sequential models, multi-profile households, streaming deep-links, mobile
 
-**Shipped recently:** post-watch rating; History filters + pagination; Account taste summary + export snapshot.
+**Shipped recently:** History infinite scroll (respects reduced motion); Account taste export + open-snapshot preview.
 
 ---
 

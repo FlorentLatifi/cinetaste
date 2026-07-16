@@ -599,6 +599,17 @@ p {
   color: var(--muted);
 }
 
+.taste-import-preview {
+  margin-top: 0.5rem;
+  padding: 0.85rem 1rem;
+  border-radius: 14px;
+  border: 1px dashed var(--border);
+  background: var(--bg-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
 .rec-poster-link {
   display: block;
   color: inherit;
