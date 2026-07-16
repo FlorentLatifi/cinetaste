@@ -1,19 +1,43 @@
+import { lazy, Suspense, type ReactNode } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { useAuth } from "./features/auth/AuthContext";
 import { AppShell } from "./components/AppShell";
-import { AccountPage } from "./pages/AccountPage";
 import { ForgotPasswordPage } from "./pages/ForgotPasswordPage";
 import { HomePage } from "./pages/HomePage";
+import { LandingPage } from "./pages/LandingPage";
 import { LoginPage } from "./pages/LoginPage";
-import { OnboardingPage } from "./pages/OnboardingPage";
 import { RegisterPage } from "./pages/RegisterPage";
 import { ResetPasswordPage } from "./pages/ResetPasswordPage";
-import { SearchPage } from "./pages/SearchPage";
-import { TitleDetailPage } from "./pages/TitleDetailPage";
-import { HistoryPage } from "./pages/HistoryPage";
-import { WatchlistPage } from "./pages/WatchlistPage";
 
-function Protected({ children }: { children: React.ReactNode }) {
+/** Lazy-load heavier authenticated surfaces to shrink the initial guest bundle. */
+const AccountPage = lazy(() =>
+  import("./pages/AccountPage").then((m) => ({ default: m.AccountPage })),
+);
+const HistoryPage = lazy(() =>
+  import("./pages/HistoryPage").then((m) => ({ default: m.HistoryPage })),
+);
+const OnboardingPage = lazy(() =>
+  import("./pages/OnboardingPage").then((m) => ({ default: m.OnboardingPage })),
+);
+const SearchPage = lazy(() =>
+  import("./pages/SearchPage").then((m) => ({ default: m.SearchPage })),
+);
+const TitleDetailPage = lazy(() =>
+  import("./pages/TitleDetailPage").then((m) => ({ default: m.TitleDetailPage })),
+);
+const WatchlistPage = lazy(() =>
+  import("./pages/WatchlistPage").then((m) => ({ default: m.WatchlistPage })),
+);
+
+function RouteFallback() {
+  return (
+    <div className="center-screen">
+      <div className="spinner" aria-label="Loading" />
+    </div>
+  );
+}
+
+function Protected({ children }: { children: ReactNode }) {
   const { user, loading } = useAuth();
   if (loading) {
     return (
@@ -26,7 +50,7 @@ function Protected({ children }: { children: React.ReactNode }) {
   return children;
 }
 
-function GuestOnly({ children }: { children: React.ReactNode }) {
+function GuestOnly({ children }: { children: ReactNode }) {
   const { user, loading } = useAuth();
   if (loading) {
     return (
@@ -37,6 +61,34 @@ function GuestOnly({ children }: { children: React.ReactNode }) {
   }
   if (user) return <Navigate to="/" replace />;
   return children;
+}
+
+/** Guests see marketing landing; signed-in users see immersive For You. */
+function RootRoute() {
+  const { user, loading } = useAuth();
+  if (loading) {
+    return (
+      <div className="center-screen">
+        <div className="spinner" aria-label="Loading" />
+      </div>
+    );
+  }
+  if (!user) return <LandingPage />;
+  return (
+    <AppShell>
+      <HomePage />
+    </AppShell>
+  );
+}
+
+function LazyProtected({ children }: { children: ReactNode }) {
+  return (
+    <Protected>
+      <AppShell>
+        <Suspense fallback={<RouteFallback />}>{children}</Suspense>
+      </AppShell>
+    </Protected>
+  );
 }
 
 export default function App() {
@@ -77,73 +129,52 @@ export default function App() {
       <Route
         path="/onboarding"
         element={
-          <Protected>
-            <AppShell>
-              <OnboardingPage />
-            </AppShell>
-          </Protected>
+          <LazyProtected>
+            <OnboardingPage />
+          </LazyProtected>
         }
       />
       <Route
         path="/watchlist"
         element={
-          <Protected>
-            <AppShell>
-              <WatchlistPage />
-            </AppShell>
-          </Protected>
+          <LazyProtected>
+            <WatchlistPage />
+          </LazyProtected>
         }
       />
       <Route
         path="/history"
         element={
-          <Protected>
-            <AppShell>
-              <HistoryPage />
-            </AppShell>
-          </Protected>
+          <LazyProtected>
+            <HistoryPage />
+          </LazyProtected>
         }
       />
       <Route
         path="/search"
         element={
-          <Protected>
-            <AppShell>
-              <SearchPage />
-            </AppShell>
-          </Protected>
+          <LazyProtected>
+            <SearchPage />
+          </LazyProtected>
         }
       />
       <Route
         path="/account"
         element={
-          <Protected>
-            <AppShell>
-              <AccountPage />
-            </AppShell>
-          </Protected>
+          <LazyProtected>
+            <AccountPage />
+          </LazyProtected>
         }
       />
       <Route
         path="/titles/:titleId"
         element={
-          <Protected>
-            <AppShell>
-              <TitleDetailPage />
-            </AppShell>
-          </Protected>
+          <LazyProtected>
+            <TitleDetailPage />
+          </LazyProtected>
         }
       />
-      <Route
-        path="/"
-        element={
-          <Protected>
-            <AppShell>
-              <HomePage />
-            </AppShell>
-          </Protected>
-        }
-      />
+      <Route path="/" element={<RootRoute />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

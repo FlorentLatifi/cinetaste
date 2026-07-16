@@ -2,15 +2,15 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { ApiError } from "../api/client";
 import * as titlesApi from "../api/titles";
-import type { RecommendationItem, Title } from "../api/titles";
+import type { RecommendationItem } from "../api/titles";
 import {
   ActionToast,
   ACTION_TOAST_MS,
   FEEDBACK_ACTION_LABELS,
   type FeedbackAction,
 } from "../components/ActionToast";
-import { posterSrc, yearOf } from "../components/PosterCard";
 import { useAuth } from "../features/auth/AuthContext";
+import { heroPosterUrl, yearOf } from "../lib/poster";
 
 type LocationState = {
   fromOnboarding?: boolean;
@@ -23,18 +23,6 @@ type UndoToast = {
   message: string;
   index: number;
 };
-
-/** Prefer a larger TMDb size for the hero poster when possible. */
-function heroPosterUrl(title: Title): string | null {
-  const raw = title.poster_path || title.poster_url || "";
-  if (raw.startsWith("http") && raw.includes("/w500")) {
-    return raw.replace("/w500", "/w780");
-  }
-  if (raw.startsWith("/") && !raw.startsWith("http")) {
-    return `https://image.tmdb.org/t/p/w780${raw}`;
-  }
-  return posterSrc(title);
-}
 
 export function HomePage() {
   const { accessToken, user } = useAuth();

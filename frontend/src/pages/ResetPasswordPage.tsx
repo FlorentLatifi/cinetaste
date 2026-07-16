@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { ApiError } from "../api/client";
 import * as authApi from "../api/auth";
 import { ContrastToggle } from "../components/ContrastToggle";
+import { PasswordField } from "../components/PasswordField";
 
 export function ResetPasswordPage() {
   const [params] = useSearchParams();
@@ -50,28 +51,25 @@ export function ResetPasswordPage() {
             <Link to="/forgot-password">forgot password</Link>.
           </p>
         )}
-        <label>
-          New password
-          <input
-            type="password"
-            autoComplete="new-password"
-            required
-            minLength={8}
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-          />
-        </label>
-        <label>
-          Confirm password
-          <input
-            type="password"
-            autoComplete="new-password"
-            required
-            minLength={8}
-            value={confirm}
-            onChange={(e) => setConfirm(e.target.value)}
-          />
-        </label>
+        <PasswordField
+          label="New password"
+          value={password}
+          onChange={setPassword}
+          autoComplete="new-password"
+          required
+          minLength={8}
+          showStrength
+          disabled={!token}
+        />
+        <PasswordField
+          label="Confirm password"
+          value={confirm}
+          onChange={setConfirm}
+          autoComplete="new-password"
+          required
+          minLength={8}
+          disabled={!token}
+        />
         {error && (
           <p className="form-error" role="alert">
             {error}

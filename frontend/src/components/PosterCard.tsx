@@ -1,19 +1,9 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import type { Title } from "../api/titles";
+import { posterSrc, yearOf } from "../lib/poster";
 
-export function posterSrc(title: Pick<Title, "poster_url" | "poster_path">): string | null {
-  if (title.poster_url) return title.poster_url;
-  if (title.poster_path?.startsWith("http")) return title.poster_path;
-  if (title.poster_path?.startsWith("/")) {
-    return `https://image.tmdb.org/t/p/w500${title.poster_path}`;
-  }
-  return null;
-}
-
-export function yearOf(title: Pick<Title, "release_date">): string | null {
-  return title.release_date ? title.release_date.slice(0, 4) : null;
-}
+export { posterSrc, yearOf } from "../lib/poster";
 
 type Props = {
   title: Title;

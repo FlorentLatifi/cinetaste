@@ -2,6 +2,7 @@ import { useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { ApiError } from "../api/client";
 import { ContrastToggle } from "../components/ContrastToggle";
+import { PasswordField } from "../components/PasswordField";
 import { useAuth } from "../features/auth/AuthContext";
 
 export function RegisterPage() {
@@ -30,7 +31,11 @@ export function RegisterPage() {
   return (
     <div className="auth-layout">
       <div className="auth-aside">
-        <p className="eyebrow">Start in minutes</p>
+        <p className="eyebrow">
+          <Link to="/" className="auth-brand-link">
+            Start in minutes
+          </Link>
+        </p>
         <h1>Build a profile that gets you, not the algorithm’s average viewer.</h1>
         <p className="lede">
           Sign up, swipe a short onboarding set, and get explainable recommendations immediately.
@@ -58,17 +63,15 @@ export function RegisterPage() {
             onChange={(e) => setEmail(e.target.value)}
           />
         </label>
-        <label>
-          Password
-          <input
-            type="password"
-            autoComplete="new-password"
-            required
-            minLength={8}
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-          />
-        </label>
+        <PasswordField
+          label="Password"
+          value={password}
+          onChange={setPassword}
+          autoComplete="new-password"
+          required
+          minLength={8}
+          showStrength
+        />
         {error && (
           <p className="form-error" role="alert">
             {error}

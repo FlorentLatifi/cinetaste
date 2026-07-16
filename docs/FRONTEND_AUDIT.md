@@ -3,7 +3,7 @@
 **Date:** 2026-07-17  
 **Scope:** `frontend/` SPA (React 19 + Vite + React Router)  
 **Method:** Code inspection, architecture review, Playwright mocks (`e2e/*`), design critique against Netflix / Letterboxd / Apple TV / Spotify patterns.  
-**Immediate ship:** Immersive single-poster **For You** (see § Immediate improvements).
+**Shipped:** Immersive For You; guest **LandingPage**; password show/strength; lazy routes; `lib/poster.ts` (see § Immediate improvements).
 
 ---
 
@@ -33,9 +33,16 @@ It does **not** yet feel like a finished premium discovery product end-to-end. B
 
 ---
 
-## Immediate improvements (this pass)
+## Immediate improvements
 
-### For You → immersive single-poster stage
+### Wave 2 — Landing, auth UX, code splitting
+
+- Guest `/` → `LandingPage` (poster-first demo, How it works, Start free)
+- Auth `/` → immersive For You (`RootRoute` in `App.tsx`)
+- `PasswordField`: show/hide + strength (register/reset); show/hide (login)
+- `lib/poster.ts` shared helpers; authenticated routes lazy-loaded
+
+### Wave 1 — For You → immersive single-poster stage
 
 **Before:** `HomePage` rendered `ul.poster-grid.for-you` with many `PosterCard`s — dashboard of random cards.  
 **After:** One focused pick at a time:

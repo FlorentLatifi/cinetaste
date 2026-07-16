@@ -2,6 +2,7 @@ import { useState, type FormEvent } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { ApiError } from "../api/client";
 import { ContrastToggle } from "../components/ContrastToggle";
+import { PasswordField } from "../components/PasswordField";
 import { useAuth } from "../features/auth/AuthContext";
 
 export function LoginPage() {
@@ -33,7 +34,11 @@ export function LoginPage() {
   return (
     <div className="auth-layout">
       <div className="auth-aside">
-        <p className="eyebrow">CineTaste</p>
+        <p className="eyebrow">
+          <Link to="/" className="auth-brand-link">
+            CineTaste
+          </Link>
+        </p>
         <h1>Movies & TV that match how you actually watch.</h1>
         <p className="lede">
           Not another catalog browser. A living taste profile that explains every pick.
@@ -56,17 +61,14 @@ export function LoginPage() {
             onChange={(e) => setEmail(e.target.value)}
           />
         </label>
-        <label>
-          Password
-          <input
-            type="password"
-            autoComplete="current-password"
-            required
-            minLength={8}
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-          />
-        </label>
+        <PasswordField
+          label="Password"
+          value={password}
+          onChange={setPassword}
+          autoComplete="current-password"
+          required
+          minLength={8}
+        />
         {error && (
           <p className="form-error" role="alert">
             {error}

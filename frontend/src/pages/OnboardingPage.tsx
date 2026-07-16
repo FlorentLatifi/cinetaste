@@ -4,6 +4,7 @@ import { ApiError } from "../api/client";
 import * as titlesApi from "../api/titles";
 import type { OnboardingAction, OnboardingReaction, Title } from "../api/titles";
 import { useAuth } from "../features/auth/AuthContext";
+import { heroPosterUrl, yearOf } from "../lib/poster";
 
 /** Must match backend MIN_ONBOARDING_RATINGS / MIN_ONBOARDING_POSITIVE. */
 const MIN_RATINGS = 6;
@@ -53,23 +54,6 @@ function isRating(action: OnboardingAction): boolean {
 
 function isPositive(action: OnboardingAction): boolean {
   return action === "rate_2" || action === "rate_3" || action === "rate_4";
-}
-
-function yearOf(title: Title): string | null {
-  return title.release_date ? title.release_date.slice(0, 4) : null;
-}
-
-/** Prefer a larger TMDb size for the hero poster when possible. */
-function heroPosterUrl(title: Title): string | null {
-  if (!title.poster_url && !title.poster_path) return null;
-  const raw = title.poster_path || title.poster_url || "";
-  if (raw.startsWith("http") && raw.includes("/w500")) {
-    return raw.replace("/w500", "/w780");
-  }
-  if (raw.startsWith("/") && !raw.startsWith("http")) {
-    return `https://image.tmdb.org/t/p/w780${raw}`;
-  }
-  return title.poster_url;
 }
 
 export function OnboardingPage() {
