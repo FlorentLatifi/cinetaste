@@ -73,6 +73,14 @@ export function getTitle(accessToken: string, titleId: string) {
   return apiFetch<TitleDetail>(`/titles/${titleId}`, {}, accessToken);
 }
 
+export function getSimilarTitles(accessToken: string, titleId: string, limit = 12) {
+  return apiFetch<Title[]>(
+    `/titles/${titleId}/similar?limit=${limit}`,
+    {},
+    accessToken,
+  );
+}
+
 export function getOnboardingCards(
   accessToken: string,
   opts?: { limit?: number; exclude?: string[] },

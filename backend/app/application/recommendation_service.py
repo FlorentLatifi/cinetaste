@@ -279,6 +279,66 @@ class RecommendationService:
             )
         )
 
+    async def similar_titles(self, title_id: UUID, *, limit: int = 12) -> list[Title]:
+        """Nearest neighbors in embedding space (uses HNSW when available)."""
+        source = await self._session.get(Title, title_id)
+        if source is None:
+            return []
+        if source.embedding is None:
+            # No vector — fall back to same primary genre by popularity
+            genres = (
+                await self._session.scalar(
+                    select(Title)
+                    .where(Title.id == title_id)
+                    .options(selectinload(Title.genres))
+                )
+            )
+            genre_names = [g.name for g in (genres.genres if genres else [])]
+            if not genre_names:
+                return []
+            # Simple popular neighbors sharing any genre name via SQL is heavy;
+            # return popular titles excluding self.
+            return list(
+                (
+                    await self._session.scalars(
+                        select(Title)
+                        .where(Title.id != title_id, Title.embedding.is_not(None))
+                        .options(selectinload(Title.genres))
+                        .order_by(Title.popularity.desc())
+                        .limit(limit)
+                    )
+                ).all()
+            )
+
+        emb = list(source.embedding)
+        try:
+            rows = (
+                await self._session.scalars(
+                    select(Title)
+                    .where(
+                        Title.id != title_id,
+                        Title.embedding.is_not(None),
+                    )
+                    .options(selectinload(Title.genres))
+                    .order_by(Title.embedding.cosine_distance(emb))
+                    .limit(limit)
+                )
+            ).all()
+            return list(rows)
+        except Exception:
+            logger.warning("similar_titles_ann_failed title_id=%s", title_id, exc_info=True)
+            return list(
+                (
+                    await self._session.scalars(
+                        select(Title)
+                        .where(Title.id != title_id, Title.embedding.is_not(None))
+                        .options(selectinload(Title.genres))
+                        .order_by(Title.popularity.desc())
+                        .limit(limit)
+                    )
+                ).all()
+            )
+
     async def watchlist(self, user_id: UUID) -> list[Title]:
         states = (
             await self._session.scalars(

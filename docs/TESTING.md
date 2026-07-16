@@ -86,6 +86,8 @@ Integration tests live under `tests/integration/` and **auto-skip** if Postgres/
 | `tests/conftest.py` | Shared fakes |
 | `tests/integration/` | API flow vs Postgres + Redis |
 | `tests/test_candidate_generation.py` | ANN/popular pool settings |
+| `tests/test_eval.py` | Offline held-out hit-rate / precision@K |
+| `python -m app.scripts.eval_recommendations` | Synthetic offline eval smoke |
 
 ## Adding tests
 

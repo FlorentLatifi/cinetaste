@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { ApiError } from "../api/client";
 import * as titlesApi from "../api/titles";
-import type { Credit, TitleDetail } from "../api/titles";
+import type { Credit, Title, TitleDetail } from "../api/titles";
 import { useAuth } from "../features/auth/AuthContext";
 
 function yearOf(title: TitleDetail): string | null {
@@ -36,6 +36,7 @@ export function TitleDetailPage() {
   const { accessToken } = useAuth();
   const navigate = useNavigate();
   const [title, setTitle] = useState<TitleDetail | null>(null);
+  const [similar, setSimilar] = useState<Title[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -44,13 +45,23 @@ export function TitleDetailPage() {
   useEffect(() => {
     if (!accessToken || !titleId) return;
     let cancelled = false;
+    setLoading(true);
+    setSimilar([]);
     (async () => {
       try {
         const data = await titlesApi.getTitle(accessToken, titleId);
-        if (!cancelled) setTitle(data);
+        if (cancelled) return;
+        setTitle(data);
+        try {
+          const sims = await titlesApi.getSimilarTitles(accessToken, titleId, 10);
+          if (!cancelled) setSimilar(sims);
+        } catch {
+          if (!cancelled) setSimilar([]);
+        }
       } catch (err) {
         if (!cancelled) {
           setError(err instanceof ApiError ? err.message : "Could not load title");
+          setTitle(null);
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -230,6 +241,30 @@ export function TitleDetailPage() {
               </li>
             ))}
           </ul>
+        </section>
+      )}
+
+      {similar.length > 0 && (
+        <section className="similar-section">
+          <h2>More like this</h2>
+          <div className="similar-row">
+            {similar.map((t) => (
+              <Link key={t.id} to={`/titles/${t.id}`} className="similar-card">
+                <div className="similar-poster">
+                  {t.poster_url ? (
+                    <img src={t.poster_url} alt={t.name} loading="lazy" />
+                  ) : (
+                    <div className="poster-fallback">{t.name}</div>
+                  )}
+                </div>
+                <div className="similar-name">{t.name}</div>
+                <div className="similar-meta">
+                  {t.release_date ? t.release_date.slice(0, 4) : t.media_type}
+                  {t.vote_average ? ` · ★ ${t.vote_average.toFixed(1)}` : ""}
+                </div>
+              </Link>
+            ))}
+          </div>
         </section>
       )}
     </article>

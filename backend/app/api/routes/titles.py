@@ -61,6 +61,22 @@ async def search_titles(
     return [TitleSummaryOut.from_title(t) for t in titles]
 
 
+@router.get("/titles/{title_id}/similar", response_model=list[TitleSummaryOut])
+async def similar_titles(
+    title_id: UUID,
+    user: CurrentUser,
+    session: Annotated[AsyncSession, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_settings_dep)],
+    limit: int = Query(default=12, ge=1, le=30),
+) -> list[TitleSummaryOut]:
+    service = _rec_service(session, settings)
+    source = await service.get_title(title_id)
+    if source is None:
+        raise NotFoundError("Title not found")
+    titles = await service.similar_titles(title_id, limit=limit)
+    return [TitleSummaryOut.from_title(t) for t in titles]
+
+
 @router.get("/titles/{title_id}", response_model=TitleDetailOut)
 async def get_title(
     title_id: UUID,
