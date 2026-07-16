@@ -57,6 +57,33 @@ class TasteSummaryOut(BaseModel):
     ready: bool = False
 
 
+class TasteAnchorOut(BaseModel):
+    name: str
+    year: int | None = None
+
+
+class TasteExportOut(BaseModel):
+    """Downloadable taste snapshot (no dense embedding)."""
+
+    schema_version: str = Field(
+        default="cinetaste.taste_snapshot.v1",
+        alias="schema",
+        serialization_alias="schema",
+    )
+    exported_at: str
+    profile_version: int = 0
+    updated_at: str | None = None
+    has_vector: bool = False
+    feature_count: int = 0
+    anchor_count: int = 0
+    likes: list[TasteFeatureOut] = Field(default_factory=list)
+    dislikes: list[TasteFeatureOut] = Field(default_factory=list)
+    anchors: list[TasteAnchorOut] = Field(default_factory=list)
+    text: str = Field(description="Plain-text share format")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
 class TokenResponse(BaseModel):
     """Access JWT + user. Refresh token is httpOnly cookie only (not in body)."""
 

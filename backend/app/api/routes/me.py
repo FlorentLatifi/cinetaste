@@ -1,15 +1,27 @@
+from datetime import datetime, timezone
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUser, get_auth_service, get_settings_dep
-from app.api.schemas.auth import DeleteAccountRequest, TasteFeatureOut, TasteSummaryOut, UserResponse
+from app.api.schemas.auth import (
+    DeleteAccountRequest,
+    TasteAnchorOut,
+    TasteExportOut,
+    TasteFeatureOut,
+    TasteSummaryOut,
+    UserResponse,
+)
 from app.api.schemas.titles import HistoryItemOut, HistoryPageOut, TitleSummaryOut
 from app.application.auth_service import AuthService
 from app.application.recommendation_service import RecommendationService
 from app.application.taste_service import TasteService
-from app.application.taste_summary import summarize_profile_features
+from app.application.taste_summary import (
+    build_taste_export,
+    format_taste_export_text,
+    summarize_profile_features,
+)
 from app.core.config import Settings
 from app.core.cookies import clear_refresh_cookie
 from app.domain.exceptions import AppError
@@ -59,6 +71,68 @@ async def my_taste(
         likes=map_chips(summary["likes"]),
         dislikes=map_chips(summary["dislikes"]),
         ready=ready,
+    )
+
+
+@router.get("/me/taste/export", response_model=TasteExportOut)
+async def export_taste(
+    user: CurrentUser,
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> TasteExportOut:
+    """Downloadable taste snapshot (JSON fields + plain-text share body).
+
+    Omits the dense embedding — only human-interpretable signals and anchor titles.
+    """
+    taste = TasteService(session)
+    profile = await taste.get_profile(user.id)
+    exported_at = datetime.now(timezone.utc).isoformat()
+    if profile is None:
+        empty = build_taste_export(
+            profile_version=0,
+            updated_at=None,
+            has_vector=False,
+            raw_features=None,
+            exported_at=exported_at,
+        )
+        return TasteExportOut(
+            schema=empty["schema"],
+            exported_at=exported_at,
+            profile_version=0,
+            updated_at=None,
+            has_vector=False,
+            feature_count=0,
+            anchor_count=0,
+            likes=[],
+            dislikes=[],
+            anchors=[],
+            text=format_taste_export_text(empty),
+        )
+
+    has_vector = profile.vector is not None and len(list(profile.vector)) > 0
+    snapshot = build_taste_export(
+        profile_version=int(profile.version or 1),
+        updated_at=profile.updated_at,
+        has_vector=has_vector,
+        raw_features=profile.features,
+        exported_at=exported_at,
+        chip_limit=12,
+    )
+    return TasteExportOut(
+        schema=snapshot["schema"],
+        exported_at=snapshot["exported_at"],
+        profile_version=snapshot["profile_version"],
+        updated_at=snapshot.get("updated_at"),
+        has_vector=snapshot["has_vector"],
+        feature_count=snapshot["feature_count"],
+        anchor_count=snapshot["anchor_count"],
+        likes=[
+            TasteFeatureOut(**row) for row in snapshot["likes"]
+        ],
+        dislikes=[
+            TasteFeatureOut(**row) for row in snapshot["dislikes"]
+        ],
+        anchors=[TasteAnchorOut(**row) for row in snapshot["anchors"]],
+        text=format_taste_export_text(snapshot),
     )
 
 

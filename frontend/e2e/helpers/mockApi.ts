@@ -117,6 +117,39 @@ export async function installApiMock(
       return;
     }
 
+    if (method === "GET" && path === "/me/taste/export") {
+      await route.fulfill(
+        json({
+          schema: "cinetaste.taste_snapshot.v1",
+          exported_at: "2026-01-15T12:00:00.000Z",
+          profile_version: 3,
+          updated_at: "2026-01-15T12:00:00.000Z",
+          has_vector: true,
+          feature_count: 4,
+          anchor_count: 1,
+          likes: [
+            {
+              key: "genre:drama",
+              family: "genre",
+              label: "Drama",
+              weight: 2.1,
+            },
+          ],
+          dislikes: [
+            {
+              key: "genre:horror",
+              family: "genre",
+              label: "Horror",
+              weight: -1.2,
+            },
+          ],
+          anchors: [{ name: "Mock Classic", year: 2010 }],
+          text: "CineTaste — taste snapshot\nYou lean toward\n  · Drama\n",
+        }),
+      );
+      return;
+    }
+
     if (method === "GET" && path.startsWith("/recommendations/for-you")) {
       await route.fulfill(
         json({

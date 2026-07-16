@@ -1,4 +1,6 @@
 from app.application.taste_summary import (
+    build_taste_export,
+    format_taste_export_text,
     humanize_feature_key,
     rank_features,
     summarize_profile_features,
@@ -52,3 +54,31 @@ def test_summarize_strips_explain_memory() -> None:
     assert out["anchor_count"] == 2
     assert out["likes"][0].key == "genre:thriller"
     assert all(not c.key.startswith("__") for c in out["likes"])
+
+
+def test_build_taste_export_and_text() -> None:
+    raw = {
+        "genre:drama": 2.0,
+        "genre:horror": -1.0,
+        EXPLAIN_MEMORY_KEY: {
+            "anchors": [{"name": "Inception", "year": 2010, "title_id": "secret"}]
+        },
+    }
+    snap = build_taste_export(
+        profile_version=4,
+        updated_at=None,
+        has_vector=True,
+        raw_features=raw,
+        exported_at="2026-07-17T12:00:00+00:00",
+    )
+    assert snap["schema"] == "cinetaste.taste_snapshot.v1"
+    assert snap["profile_version"] == 4
+    assert snap["likes"][0]["label"] == "Drama"
+    assert snap["dislikes"][0]["label"] == "Horror"
+    assert snap["anchors"] == [{"name": "Inception", "year": 2010}]
+    text = format_taste_export_text(snap)
+    assert "You lean toward" in text
+    assert "Drama" in text
+    assert "Horror" in text
+    assert "Inception (2010)" in text
+    assert "secret" not in text

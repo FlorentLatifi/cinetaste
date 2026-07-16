@@ -101,3 +101,21 @@ export type TasteSummary = {
 export function getTasteSummary(accessToken: string) {
   return apiFetch<TasteSummary>("/me/taste", {}, accessToken);
 }
+
+export type TasteExport = {
+  schema: string;
+  exported_at: string;
+  profile_version: number;
+  updated_at: string | null;
+  has_vector: boolean;
+  feature_count: number;
+  anchor_count: number;
+  likes: TasteFeature[];
+  dislikes: TasteFeature[];
+  anchors: { name: string; year?: number | null }[];
+  text: string;
+};
+
+export function exportTaste(accessToken: string) {
+  return apiFetch<TasteExport>("/me/taste/export", {}, accessToken);
+}

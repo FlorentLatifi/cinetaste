@@ -17,6 +17,8 @@ export function AccountPage() {
   const [taste, setTaste] = useState<TasteSummary | null>(null);
   const [tasteError, setTasteError] = useState<string | null>(null);
   const [tasteLoading, setTasteLoading] = useState(true);
+  const [exportBusy, setExportBusy] = useState(false);
+  const [exportStatus, setExportStatus] = useState<string | null>(null);
 
   useEffect(() => {
     if (!accessToken) return;
@@ -39,6 +41,50 @@ export function AccountPage() {
       cancelled = true;
     };
   }, [accessToken]);
+
+  async function downloadTasteJson() {
+    if (!accessToken) return;
+    setExportBusy(true);
+    setExportStatus(null);
+    try {
+      const data = await authApi.exportTaste(accessToken);
+      const { text: _text, ...jsonBody } = data;
+      const blob = new Blob([JSON.stringify(jsonBody, null, 2)], {
+        type: "application/json",
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      const stamp = data.exported_at.slice(0, 10);
+      a.href = url;
+      a.download = `cinetaste-taste-${stamp}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setExportStatus("JSON downloaded.");
+    } catch (err) {
+      setExportStatus(
+        err instanceof ApiError ? err.message : "Could not export taste profile",
+      );
+    } finally {
+      setExportBusy(false);
+    }
+  }
+
+  async function copyTasteText() {
+    if (!accessToken) return;
+    setExportBusy(true);
+    setExportStatus(null);
+    try {
+      const data = await authApi.exportTaste(accessToken);
+      await navigator.clipboard.writeText(data.text);
+      setExportStatus("Share text copied to clipboard.");
+    } catch (err) {
+      setExportStatus(
+        err instanceof ApiError ? err.message : "Could not copy taste profile",
+      );
+    } finally {
+      setExportBusy(false);
+    }
+  }
 
   async function onDelete(e: FormEvent) {
     e.preventDefault();
@@ -155,6 +201,33 @@ export function AccountPage() {
                 rating to unlock clearer labels.
               </p>
             )}
+            <div className="taste-export" role="group" aria-label="Export taste profile">
+              <button
+                type="button"
+                className="btn ghost"
+                disabled={exportBusy}
+                onClick={() => void downloadTasteJson()}
+              >
+                {exportBusy ? "Working…" : "Download JSON"}
+              </button>
+              <button
+                type="button"
+                className="btn ghost"
+                disabled={exportBusy}
+                onClick={() => void copyTasteText()}
+              >
+                Copy share text
+              </button>
+            </div>
+            {exportStatus && (
+              <p className="meta-line" role="status" aria-live="polite">
+                {exportStatus}
+              </p>
+            )}
+            <p className="taste-export-note">
+              Export is private to you — no embedding vector, only readable signals
+              and title anchors used in explanations.
+            </p>
           </>
         )}
       </div>

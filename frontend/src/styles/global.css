@@ -586,6 +586,19 @@ p {
   background: rgba(240, 113, 120, 0.08);
 }
 
+.taste-export {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.35rem;
+}
+
+.taste-export-note {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
 .rec-poster-link {
   display: block;
   color: inherit;
