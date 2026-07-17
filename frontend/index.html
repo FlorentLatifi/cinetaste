@@ -19,10 +19,10 @@
     <script>
       (function () {
         try {
-          var k = "ct_contrast";
-          var v = localStorage.getItem(k);
-          if (v === "high" || v === "normal") {
-            document.documentElement.setAttribute("data-contrast", v);
+          var ck = "ct_contrast";
+          var cv = localStorage.getItem(ck);
+          if (cv === "high" || cv === "normal") {
+            document.documentElement.setAttribute("data-contrast", cv);
           } else if (window.matchMedia("(prefers-contrast: more)").matches) {
             document.documentElement.setAttribute("data-contrast", "high");
           } else {
@@ -30,6 +30,20 @@
           }
         } catch (e) {
           document.documentElement.setAttribute("data-contrast", "normal");
+        }
+        try {
+          var tk = "ct_color_scheme";
+          var tv = localStorage.getItem(tk);
+          var theme = "dark";
+          if (tv === "light") theme = "light";
+          else if (tv === "dark") theme = "dark";
+          else if (window.matchMedia("(prefers-color-scheme: light)").matches) {
+            theme = "light";
+          }
+          document.documentElement.setAttribute("data-theme", theme);
+          document.documentElement.style.colorScheme = theme;
+        } catch (e2) {
+          document.documentElement.setAttribute("data-theme", "dark");
         }
       })();
     </script>

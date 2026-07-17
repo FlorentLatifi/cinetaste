@@ -96,6 +96,17 @@ export function HomePage() {
     }
   }, [current?.title.id, loading]);
 
+  // Prefetch the next poster so slate advances feel instant
+  useEffect(() => {
+    const next = items[1];
+    if (!next) return;
+    const url = heroPosterUrl(next.title);
+    if (!url) return;
+    const img = new Image();
+    img.decoding = "async";
+    img.src = url;
+  }, [items]);
+
   const dismissToast = useCallback(() => {
     if (toastTimer.current) {
       clearTimeout(toastTimer.current);

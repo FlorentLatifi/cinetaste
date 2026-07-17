@@ -1,20 +1,53 @@
-import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import {
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type FormEvent,
+} from "react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { ApiError } from "../api/client";
 import * as authApi from "../api/auth";
 import type { TasteSummary } from "../api/auth";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { PasswordField } from "../components/PasswordField";
 import { useAuth } from "../features/auth/AuthContext";
 import {
   parseTasteSnapshot,
   type TasteSnapshotV1,
 } from "../features/taste/snapshot";
+import {
+  useColorScheme,
+  type ColorSchemePreference,
+} from "../features/theme/colorScheme";
 import { useContrast } from "../features/theme/contrast";
+
+type AccountTab = "profile" | "taste" | "appearance" | "danger";
+
+const TABS: { id: AccountTab; label: string }[] = [
+  { id: "profile", label: "Profile" },
+  { id: "taste", label: "Taste" },
+  { id: "appearance", label: "Appearance" },
+  { id: "danger", label: "Danger zone" },
+];
+
+function parseTab(raw: string | null): AccountTab {
+  if (raw === "profile" || raw === "taste" || raw === "appearance" || raw === "danger") {
+    return raw;
+  }
+  return "profile";
+}
 
 export function AccountPage() {
   const { user, accessToken, logout } = useAuth();
   const { isHigh, setContrast } = useContrast();
+  const { preference: colorPref, setPreference: setColorPref } = useColorScheme();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab = parseTab(searchParams.get("tab"));
+  const tablistId = useId();
+
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -30,6 +63,13 @@ export function AccountPage() {
   const [confirmMerge, setConfirmMerge] = useState(false);
   const [confirmClearImport, setConfirmClearImport] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  function setTab(next: AccountTab) {
+    setSearchParams(
+      next === "profile" ? {} : { tab: next },
+      { replace: true },
+    );
+  }
 
   useEffect(() => {
     if (!accessToken) return;
@@ -189,232 +229,371 @@ export function AccountPage() {
       <p className="eyebrow">Account</p>
       <h1>Your profile</h1>
       <p className="lede">
-        Manage your CineTaste account. Deletion is permanent and removes taste
-        data, watchlist, and history.
+        Profile details, taste signals, display preferences, and account security —
+        one section at a time.
       </p>
 
-      <div className="account-card">
-        <h2>Details</h2>
-        <p className="meta-line">
-          <strong>Email</strong> · {user?.email}
-        </p>
-        {user?.display_name && (
-          <p className="meta-line">
-            <strong>Name</strong> · {user.display_name}
-          </p>
-        )}
-        <p className="meta-line">
-          <strong>Onboarding</strong> ·{" "}
-          {user?.onboarding_completed_at ? "Complete" : "Not finished"}
-        </p>
-        <div className="account-card-actions">
-          <Link className="btn ghost" to="/">
-            Back to For You
-          </Link>
-          <Link className="btn ghost" to="/history">
-            History
-          </Link>
-        </div>
+      <div
+        className="account-tabs"
+        role="tablist"
+        aria-label="Account sections"
+        id={tablistId}
+      >
+        {TABS.map((t) => {
+          const selected = tab === t.id;
+          return (
+            <button
+              key={t.id}
+              type="button"
+              role="tab"
+              id={`account-tab-${t.id}`}
+              aria-selected={selected}
+              aria-controls={`account-panel-${t.id}`}
+              tabIndex={selected ? 0 : -1}
+              className={`account-tab${selected ? " active" : ""}`}
+              onClick={() => setTab(t.id)}
+            >
+              {t.label}
+            </button>
+          );
+        })}
       </div>
 
-      <div className="account-card" aria-labelledby="taste-heading">
-        <h2 id="taste-heading">Your taste</h2>
-        {tasteLoading && (
-          <p className="meta-line" role="status">
-            Loading taste profile…
+      {tab === "profile" && (
+        <div
+          className="account-card"
+          role="tabpanel"
+          id="account-panel-profile"
+          aria-labelledby="account-tab-profile"
+        >
+          <h2>Details</h2>
+          <p className="meta-line">
+            <strong>Email</strong> · {user?.email}
           </p>
-        )}
-        {tasteError && (
-          <p className="form-error" role="alert">
-            {tasteError}
-          </p>
-        )}
-        {!tasteLoading && taste && !taste.ready && (
-          <p className="lede" style={{ margin: 0 }}>
-            Not enough signal yet. Finish onboarding or rate a few titles — we
-            build an explainable profile from what you like and avoid.
-          </p>
-        )}
-        {!tasteLoading && taste?.ready && (
-          <>
+          {user?.display_name && (
             <p className="meta-line">
-              Profile v{taste.version}
-              {taste.has_vector ? " · vector ready" : ""}
-              {taste.feature_count
-                ? ` · ${taste.feature_count} signals`
-                : ""}
-              {taste.anchor_count
-                ? ` · ${taste.anchor_count} “because you liked” anchors`
-                : ""}
-              {taste.has_import_overlay
-                ? ` · ${taste.import_overlay_count ?? 0} imported`
-                : ""}
+              <strong>Name</strong> · {user.display_name}
             </p>
-            {taste.likes.length > 0 && (
-              <div className="taste-block">
-                <h3 className="taste-subhead">You lean toward</h3>
-                <ul className="taste-chips" aria-label="Positive taste signals">
-                  {taste.likes.map((f) => (
-                    <li key={f.key} className="taste-chip positive">
-                      {f.label}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-            {taste.dislikes.length > 0 && (
-              <div className="taste-block">
-                <h3 className="taste-subhead">You tend to avoid</h3>
-                <ul className="taste-chips" aria-label="Negative taste signals">
-                  {taste.dislikes.map((f) => (
-                    <li key={f.key} className="taste-chip negative">
-                      {f.label}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-            {!taste.likes.length && !taste.dislikes.length && (
-              <p className="lede" style={{ margin: 0 }}>
-                Dense taste vector is ready, but sparse features are thin. Keep
-                rating to unlock clearer labels.
+          )}
+          <p className="meta-line">
+            <strong>Onboarding</strong> ·{" "}
+            {user?.onboarding_completed_at ? "Complete" : "Not finished"}
+          </p>
+          <div className="account-card-actions">
+            <Link className="btn ghost" to="/">
+              Back to For You
+            </Link>
+            <Link className="btn ghost" to="/history">
+              History
+            </Link>
+            <button
+              type="button"
+              className="btn ghost"
+              onClick={() => setTab("taste")}
+            >
+              View taste
+            </button>
+          </div>
+        </div>
+      )}
+
+      {tab === "taste" && (
+        <div
+          className="account-card"
+          role="tabpanel"
+          id="account-panel-taste"
+          aria-labelledby="account-tab-taste"
+        >
+          <h2 id="taste-heading">Your taste</h2>
+          {tasteLoading && (
+            <p className="meta-line" role="status">
+              Loading taste profile…
+            </p>
+          )}
+          {tasteError && (
+            <p className="form-error" role="alert">
+              {tasteError}
+            </p>
+          )}
+          {!tasteLoading && taste && !taste.ready && (
+            <p className="lede" style={{ margin: 0 }}>
+              Not enough signal yet. Finish onboarding or rate a few titles — we
+              build an explainable profile from what you like and avoid.
+            </p>
+          )}
+          {!tasteLoading && taste?.ready && (
+            <>
+              <p className="meta-line">
+                Profile v{taste.version}
+                {taste.has_vector ? " · vector ready" : ""}
+                {taste.feature_count
+                  ? ` · ${taste.feature_count} signals`
+                  : ""}
+                {taste.anchor_count
+                  ? ` · ${taste.anchor_count} “because you liked” anchors`
+                  : ""}
+                {taste.has_import_overlay
+                  ? ` · ${taste.import_overlay_count ?? 0} imported`
+                  : ""}
               </p>
-            )}
-            {taste.has_import_overlay && (
+              {taste.likes.length > 0 && (
+                <div className="taste-block">
+                  <h3 className="taste-subhead">You lean toward</h3>
+                  <ul className="taste-chips" aria-label="Positive taste signals">
+                    {taste.likes.map((f) => (
+                      <li key={f.key} className="taste-chip positive">
+                        {f.label}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {taste.dislikes.length > 0 && (
+                <div className="taste-block">
+                  <h3 className="taste-subhead">You tend to avoid</h3>
+                  <ul className="taste-chips" aria-label="Negative taste signals">
+                    {taste.dislikes.map((f) => (
+                      <li key={f.key} className="taste-chip negative">
+                        {f.label}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {!taste.likes.length && !taste.dislikes.length && (
+                <p className="lede" style={{ margin: 0 }}>
+                  Dense taste vector is ready, but sparse features are thin. Keep
+                  rating to unlock clearer labels.
+                </p>
+              )}
+              {taste.has_import_overlay && (
+                <div className="taste-export">
+                  <button
+                    type="button"
+                    className="btn ghost"
+                    disabled={importBusy}
+                    onClick={() => setConfirmClearImport(true)}
+                  >
+                    Clear imported snapshot
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+
+          <div
+            className="taste-export"
+            role="group"
+            aria-label="Export or open taste snapshot"
+          >
+            <button
+              type="button"
+              className="btn ghost"
+              disabled={exportBusy || !taste?.ready}
+              onClick={() => void downloadTasteJson()}
+            >
+              {exportBusy ? "Working…" : "Download JSON"}
+            </button>
+            <button
+              type="button"
+              className="btn ghost"
+              disabled={exportBusy || !taste?.ready}
+              onClick={() => void copyTasteText()}
+            >
+              Copy share text
+            </button>
+            <button
+              type="button"
+              className="btn ghost"
+              onClick={() => fileInputRef.current?.click()}
+            >
+              Open snapshot…
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="application/json,.json"
+              className="sr-only"
+              aria-label="Open taste snapshot JSON file"
+              onChange={(ev) => void onImportFile(ev)}
+            />
+          </div>
+          {exportStatus && (
+            <p className="meta-line" role="status" aria-live="polite">
+              {exportStatus}
+            </p>
+          )}
+          {importError && (
+            <p className="form-error" role="alert">
+              {importError}
+            </p>
+          )}
+          {importPreview && (
+            <div
+              className="taste-import-preview"
+              aria-label="Imported snapshot preview"
+            >
+              <h3 className="taste-subhead">Snapshot preview</h3>
+              <p className="meta-line">
+                Exported {importPreview.exported_at.slice(0, 10)}
+                {" · "}v{importPreview.profile_version}
+                {" · "}
+                {importPreview.likes.length} likes /{" "}
+                {importPreview.dislikes.length} dislikes
+              </p>
+              {importPreview.likes.length > 0 && (
+                <div className="taste-block">
+                  <p className="taste-subhead">Lean toward (file)</p>
+                  <ul className="taste-chips">
+                    {importPreview.likes.map((f) => (
+                      <li key={`imp-l-${f.key}`} className="taste-chip positive">
+                        {f.label}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {importPreview.dislikes.length > 0 && (
+                <div className="taste-block">
+                  <p className="taste-subhead">Tend to avoid (file)</p>
+                  <ul className="taste-chips">
+                    {importPreview.dislikes.map((f) => (
+                      <li key={`imp-d-${f.key}`} className="taste-chip negative">
+                        {f.label}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {importPreview.anchors.length > 0 && (
+                <p className="meta-line">
+                  Anchors:{" "}
+                  {importPreview.anchors
+                    .map((a) => (a.year ? `${a.name} (${a.year})` : a.name))
+                    .join(" · ")}
+                </p>
+              )}
+              <p className="taste-export-note">
+                Merge soft-blends these signals into your profile (scaled so live
+                ratings still dominate). It does not replace history or the dense
+                vector. For You cache is refreshed after merge.
+              </p>
               <div className="taste-export">
+                <button
+                  type="button"
+                  className="btn primary"
+                  disabled={importBusy}
+                  onClick={() => setConfirmMerge(true)}
+                >
+                  Merge into my profile
+                </button>
                 <button
                   type="button"
                   className="btn ghost"
                   disabled={importBusy}
-                  onClick={() => setConfirmClearImport(true)}
+                  onClick={() => {
+                    setImportPreview(null);
+                    setImportError(null);
+                    setConfirmMerge(false);
+                  }}
                 >
-                  Clear imported snapshot
+                  Dismiss
                 </button>
               </div>
-            )}
-          </>
-        )}
-
-        <div className="taste-export" role="group" aria-label="Export or open taste snapshot">
-          <button
-            type="button"
-            className="btn ghost"
-            disabled={exportBusy || !taste?.ready}
-            onClick={() => void downloadTasteJson()}
-          >
-            {exportBusy ? "Working…" : "Download JSON"}
-          </button>
-          <button
-            type="button"
-            className="btn ghost"
-            disabled={exportBusy || !taste?.ready}
-            onClick={() => void copyTasteText()}
-          >
-            Copy share text
-          </button>
-          <button
-            type="button"
-            className="btn ghost"
-            onClick={() => fileInputRef.current?.click()}
-          >
-            Open snapshot…
-          </button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="application/json,.json"
-            className="sr-only"
-            aria-label="Open taste snapshot JSON file"
-            onChange={(ev) => void onImportFile(ev)}
-          />
-        </div>
-        {exportStatus && (
-          <p className="meta-line" role="status" aria-live="polite">
-            {exportStatus}
-          </p>
-        )}
-        {importError && (
-          <p className="form-error" role="alert">
-            {importError}
-          </p>
-        )}
-        {importPreview && (
-          <div className="taste-import-preview" aria-label="Imported snapshot preview">
-            <h3 className="taste-subhead">Snapshot preview</h3>
-            <p className="meta-line">
-              Exported {importPreview.exported_at.slice(0, 10)}
-              {" · "}v{importPreview.profile_version}
-              {" · "}
-              {importPreview.likes.length} likes / {importPreview.dislikes.length}{" "}
-              dislikes
-            </p>
-            {importPreview.likes.length > 0 && (
-              <div className="taste-block">
-                <p className="taste-subhead">Lean toward (file)</p>
-                <ul className="taste-chips">
-                  {importPreview.likes.map((f) => (
-                    <li key={`imp-l-${f.key}`} className="taste-chip positive">
-                      {f.label}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-            {importPreview.dislikes.length > 0 && (
-              <div className="taste-block">
-                <p className="taste-subhead">Tend to avoid (file)</p>
-                <ul className="taste-chips">
-                  {importPreview.dislikes.map((f) => (
-                    <li key={`imp-d-${f.key}`} className="taste-chip negative">
-                      {f.label}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-            {importPreview.anchors.length > 0 && (
-              <p className="meta-line">
-                Anchors:{" "}
-                {importPreview.anchors
-                  .map((a) => (a.year ? `${a.name} (${a.year})` : a.name))
-                  .join(" · ")}
-              </p>
-            )}
-            <p className="taste-export-note">
-              Merge soft-blends these signals into your profile (scaled so live
-              ratings still dominate). It does not replace history or the dense
-              vector. For You cache is refreshed after merge.
-            </p>
-            <div className="taste-export">
-              <button
-                type="button"
-                className="btn primary"
-                disabled={importBusy}
-                onClick={() => setConfirmMerge(true)}
-              >
-                Merge into my profile
-              </button>
-              <button
-                type="button"
-                className="btn ghost"
-                disabled={importBusy}
-                onClick={() => {
-                  setImportPreview(null);
-                  setImportError(null);
-                  setConfirmMerge(false);
-                }}
-              >
-                Dismiss
-              </button>
             </div>
-          </div>
-        )}
-        <p className="taste-export-note">
-          Export is private to you — no embedding vector, only readable signals
-          and title anchors. Open a downloaded JSON to preview, then optionally
-          merge.
-        </p>
-      </div>
+          )}
+          <p className="taste-export-note">
+            Export is private to you — no embedding vector, only readable signals
+            and title anchors. Open a downloaded JSON to preview, then optionally
+            merge.
+          </p>
+        </div>
+      )}
+
+      {tab === "appearance" && (
+        <div
+          className="account-card"
+          role="tabpanel"
+          id="account-panel-appearance"
+          aria-labelledby="account-tab-appearance"
+        >
+          <h2>Display</h2>
+          <p className="lede" style={{ margin: 0 }}>
+            Theme and contrast are saved on this device. System theme follows your
+            OS light/dark preference.
+          </p>
+          <label className="contrast-choice">
+            <span>Theme</span>
+            <select
+              value={colorPref}
+              onChange={(e) =>
+                setColorPref(e.target.value as ColorSchemePreference)
+              }
+              aria-label="Color theme"
+            >
+              <option value="system">System</option>
+              <option value="dark">Dark</option>
+              <option value="light">Light</option>
+            </select>
+          </label>
+          <label className="contrast-choice">
+            <span>Contrast</span>
+            <select
+              value={isHigh ? "high" : "normal"}
+              onChange={(e) =>
+                setContrast(e.target.value === "high" ? "high" : "normal")
+              }
+              aria-label="Contrast mode"
+            >
+              <option value="normal">Standard</option>
+              <option value="high">High contrast</option>
+            </select>
+          </label>
+        </div>
+      )}
+
+      {tab === "danger" && (
+        <form
+          className="account-card danger-zone"
+          role="tabpanel"
+          id="account-panel-danger"
+          aria-labelledby="account-tab-danger"
+          onSubmit={onDelete}
+        >
+          <h2>Delete account</h2>
+          <p className="lede" style={{ margin: 0 }}>
+            This cannot be undone. Enter your password and type{" "}
+            <strong>DELETE</strong> to confirm. Deletion removes taste data,
+            watchlist, and history.
+          </p>
+          <PasswordField
+            label="Password"
+            value={password}
+            onChange={setPassword}
+            autoComplete="current-password"
+            required
+          />
+          <label>
+            Type DELETE to confirm
+            <input
+              type="text"
+              autoComplete="off"
+              required
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
+              placeholder="DELETE"
+            />
+          </label>
+          {error && (
+            <p className="form-error" role="alert">
+              {error}
+            </p>
+          )}
+          <button className="btn danger" type="submit" disabled={submitting}>
+            {submitting ? "Deleting…" : "Delete my account"}
+          </button>
+        </form>
+      )}
 
       <ConfirmDialog
         open={confirmMerge}
@@ -441,62 +620,6 @@ export function AccountPage() {
           if (!importBusy) setConfirmClearImport(false);
         }}
       />
-
-      <div className="account-card">
-        <h2>Display</h2>
-        <p className="lede" style={{ margin: 0 }}>
-          High contrast uses solid blacks, stronger borders, and brighter text.
-          Your choice is saved on this device.
-        </p>
-        <label className="contrast-choice">
-          <span>Contrast</span>
-          <select
-            value={isHigh ? "high" : "normal"}
-            onChange={(e) => setContrast(e.target.value === "high" ? "high" : "normal")}
-            aria-label="Contrast mode"
-          >
-            <option value="normal">Standard</option>
-            <option value="high">High contrast</option>
-          </select>
-        </label>
-      </div>
-
-      <form className="account-card danger-zone" onSubmit={onDelete}>
-        <h2>Delete account</h2>
-        <p className="lede" style={{ margin: 0 }}>
-          This cannot be undone. Enter your password and type{" "}
-          <strong>DELETE</strong> to confirm.
-        </p>
-        <label>
-          Password
-          <input
-            type="password"
-            autoComplete="current-password"
-            required
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-          />
-        </label>
-        <label>
-          Type DELETE to confirm
-          <input
-            type="text"
-            autoComplete="off"
-            required
-            value={confirm}
-            onChange={(e) => setConfirm(e.target.value)}
-            placeholder="DELETE"
-          />
-        </label>
-        {error && (
-          <p className="form-error" role="alert">
-            {error}
-          </p>
-        )}
-        <button className="btn danger" type="submit" disabled={submitting}>
-          {submitting ? "Deleting…" : "Delete my account"}
-        </button>
-      </form>
     </section>
   );
 }

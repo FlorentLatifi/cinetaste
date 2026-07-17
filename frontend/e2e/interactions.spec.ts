@@ -4,6 +4,14 @@ import { installApiMock, mockTitle } from "./helpers/mockApi";
 /**
  * Behavioral smoke tests against Playwright API mocks (no real backend).
  */
+test("Unknown route shows real 404 page", async ({ page }) => {
+  await page.goto("/this-route-does-not-exist");
+  await expect(
+    page.getByRole("heading", { name: /doesn’t exist|doesn't exist/i }),
+  ).toBeVisible();
+  await expect(page.getByRole("link", { name: /^Home$/i })).toBeVisible();
+});
+
 test("Landing: guest home shows Start free and preview", async ({ page }) => {
   await page.goto("/");
   await expect(
@@ -198,9 +206,26 @@ test("History: infinite scroll / Load more appends next page", async ({ page }) 
   await expect(page.getByRole("button", { name: "Load more" })).toHaveCount(0);
 });
 
-test("Account: open snapshot previews export JSON", async ({ page }) => {
+test("Account: tabs isolate taste import flow", async ({ page }) => {
   await installApiMock(page, { onboardingComplete: true });
   await page.goto("/account");
+  await page.getByRole("heading", { name: "Your profile" }).waitFor();
+  await expect(page.getByRole("tab", { name: "Profile" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  await page.getByRole("tab", { name: "Taste" }).click();
+  await expect(page).toHaveURL(/tab=taste/);
+  await expect(page.getByRole("heading", { name: "Your taste" })).toBeVisible();
+  await page.getByRole("tab", { name: "Appearance" }).click();
+  await expect(page.getByLabel("Color theme")).toBeVisible();
+  await page.getByLabel("Color theme").selectOption("light");
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+});
+
+test("Account: open snapshot previews export JSON", async ({ page }) => {
+  await installApiMock(page, { onboardingComplete: true });
+  await page.goto("/account?tab=taste");
   await page.getByRole("heading", { name: "Your taste" }).waitFor();
 
   const snapshot = {

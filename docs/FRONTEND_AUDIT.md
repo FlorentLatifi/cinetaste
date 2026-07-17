@@ -3,7 +3,7 @@
 **Date:** 2026-07-17  
 **Scope:** `frontend/` SPA (React 19 + Vite + React Router)  
 **Method:** Code inspection, architecture review, Playwright mocks (`e2e/*`), design critique against Netflix / Letterboxd / Apple TV / Spotify patterns.  
-**Shipped:** Immersive For You; guest **LandingPage**; password show/strength; lazy routes; `lib/poster.ts`; For You **keyboard shortcuts**; mobile **bottom nav**; session-expiry handler; chaos e2e (see § Immediate improvements).
+**Shipped through Wave 4:** immersive For You, landing, password UX, lazy routes, keyboard shortcuts, bottom nav, session expiry, **Account tabs**, **light/system theme**, poster prefetch, real **404** (see § Immediate improvements).
 
 ---
 
@@ -34,6 +34,13 @@ It does **not** yet feel like a finished premium discovery product end-to-end. B
 ---
 
 ## Immediate improvements
+
+### Wave 4 — Account IA, light mode, 404, prefetch
+
+- Account progressive disclosure: Profile / Taste / Appearance / Danger tabs (`?tab=`)
+- Light + system color scheme (`data-theme`, FOUC-safe in `index.html`)
+- Prefetch next For You poster image
+- Real `NotFoundPage` instead of silent redirect to `/`
 
 ### Wave 3 — Interaction polish + mobile shell + chaos
 

@@ -3,8 +3,11 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import App from "./App";
 import { AuthProvider } from "./features/auth/AuthContext";
+import { initColorScheme } from "./features/theme/colorScheme";
 import { initFrontendObservability } from "./observability";
 import "./styles/global.css";
+
+initColorScheme();
 
 void initFrontendObservability().finally(() => {
   createRoot(document.getElementById("root")!).render(
