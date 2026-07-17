@@ -52,6 +52,9 @@ services:
     name: cinetaste-redis
     plan: starter
     maxmemoryPolicy: allkeys-lru
+    ipAllowList:
+      - source: 0.0.0.0/0
+        description: allow-all-internal
 
 databases:
   - name: cinetaste-db
