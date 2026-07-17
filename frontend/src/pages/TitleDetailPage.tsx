@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { ApiError } from "../api/client";
 import * as titlesApi from "../api/titles";
@@ -273,7 +273,10 @@ export function TitleDetailPage() {
       </div>
 
       <div className="title-detail-grid">
-        <div className="title-detail-poster">
+        <div
+          className="title-detail-poster"
+          style={{ viewTransitionName: "title-poster" } as CSSProperties}
+        >
           {poster ? (
             <img
               src={poster}

@@ -602,6 +602,28 @@ html[data-theme="light"] .account-tab.active {
   background: rgba(154, 107, 47, 0.1);
 }
 
+/* View Transitions API — poster morph For You/catalog → detail */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 0.28s;
+}
+
+::view-transition-old(title-poster),
+::view-transition-new(title-poster) {
+  animation-duration: 0.32s;
+  mix-blend-mode: normal;
+  height: 100%;
+  object-fit: cover;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation: none !important;
+  }
+}
+
 /* Catalog / detail loading skeletons */
 .catalog-skeleton {
   margin: 0.5rem 0 1rem;

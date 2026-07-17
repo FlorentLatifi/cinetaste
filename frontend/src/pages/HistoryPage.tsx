@@ -236,6 +236,10 @@ export function HistoryPage() {
             })}
           </ul>
 
+          {loadingMore && (
+            <CatalogSkeleton count={4} label="Loading more history" />
+          )}
+
           {nextCursor && (
             <div className="history-more">
               {/* Sentinel for IntersectionObserver infinite scroll */}

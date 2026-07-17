@@ -43,6 +43,7 @@ export function PosterCard({
       <Link
         to={`/titles/${title.id}`}
         className="poster-card-cover"
+        viewTransition
         aria-label={`${name}${year ? `, ${year}` : ""}`}
       >
         <div className="poster-card-frame">

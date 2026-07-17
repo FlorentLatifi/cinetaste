@@ -3,7 +3,7 @@
 **Date:** 2026-07-17  
 **Scope:** `frontend/` SPA (React 19 + Vite + React Router)  
 **Method:** Code inspection, architecture review, Playwright mocks (`e2e/*`), design critique against Netflix / Letterboxd / Apple TV / Spotify patterns.  
-**Shipped through Wave 5:** immersive For You, landing, password UX, lazy routes, keyboard shortcuts, bottom nav, session expiry, Account tabs, light theme, 404, **catalog skeletons**, **optimistic For You**, **poster srcset**, tablist arrows (see § Immediate improvements).
+**Shipped through Wave 6:** Waves 1–5 plus `useForYouQueue` extraction, View Transitions on title navigation, history load-more skeletons, soft-launch checklist (see § Immediate improvements).
 
 ---
 
@@ -21,19 +21,26 @@ It does **not** yet feel like a finished premium discovery product end-to-end. B
 
 | Dimension | Score | Notes |
 |-----------|------:|-------|
-| **Overall** | **68 / 100** | Strong core loop; polish & empty/error productization lag |
-| **UI** | **70** | Cohesive dark cinema palette; For You now premium; auth/catalog less so |
-| **UX** | **66** | Clear loop once onboarded; first-run & empty states still weak |
-| **Accessibility** | **78** | Skip link, focus-visible, contrast toggle, forced-colors, axe specs |
-| **Performance** | **72** | Small bundle (~300kb JS); no route split; posters lazy elsewhere |
-| **Responsiveness** | **74** | Topbar scroll nav; grids ok; For You single column is phone-native |
-| **Code quality** | **71** | Clear pages/api; little shared UI kit; some page bloat |
-| **Maintainability** | **68** | CSS monolith; limited component library |
-| **Production readiness** | **62** | Soft-launch ops exist; product polish + observability gaps |
+| **Overall** | **78 / 100** | Core loop + polish waves; ops remaining for public beta |
+| **UI** | **78** | Immersive For You, landing, light theme, skeletons |
+| **UX** | **76** | Clear onboarding → one-poster recs; error/empty recovery |
+| **Accessibility** | **82** | Axe gates, contrast, tablist keys, forced-colors |
+| **Performance** | **78** | Route split, srcset, prefetch, optimistic slate |
+| **Responsiveness** | **80** | Bottom nav + poster-first stages |
+| **Code quality** | **76** | Feature hooks (`useForYouQueue`), lib/poster, password field |
+| **Maintainability** | **74** | Better structure; CSS still monolithic |
+| **Production readiness** | **72** | Soft-launch checklist; deploy still operator-owned |
 
 ---
 
 ## Immediate improvements
+
+### Wave 6 — Architecture + motion + soft-launch doc
+
+- `features/for-you/useForYouQueue.ts` — slate logic extracted from HomePage
+- React Router `viewTransition` + shared `title-poster` name (respects reduced motion)
+- History “load more” uses catalog skeleton tiles
+- `docs/SOFT_LAUNCH_CHECKLIST.md` for operator go-live
 
 ### Wave 5 — Skeletons, optimistic recs, responsive images, a11y tabs
 
