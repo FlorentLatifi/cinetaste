@@ -17,7 +17,7 @@ services:
     runtime: docker
     dockerfilePath: ./backend/Dockerfile
     dockerContext: ./backend
-    plan: starter
+    plan: free
     healthCheckPath: /api/v1/ready
     # Auto-deploy from master is fine for a personal beta; pin a staging branch if preferred.
     envVars:
@@ -40,17 +40,12 @@ services:
         fromDatabase:
           name: cinetaste-db-staging
           property: connectionString
-      - key: REDIS_URL
-        fromService:
-          name: cinetaste-redis-staging
-          type: redis
-          property: connectionString
       - key: TMDB_API_KEY
         sync: false
       - key: WATCH_PROVIDER_REGION
         value: "US"
       - key: RATE_LIMIT_ENABLED
-        value: "true"
+        value: "false"
       - key: WEB_CONCURRENCY
         value: "1"
       - key: SENTRY_DSN
@@ -60,13 +55,8 @@ services:
       - key: SENTRY_RELEASE
         value: staging
 
-  - type: redis
-    name: cinetaste-redis-staging
-    plan: starter
-    maxmemoryPolicy: allkeys-lru
-
 databases:
   - name: cinetaste-db-staging
-    plan: starter
+    plan: free
     postgresMajorVersion: "16"
     # Enable pgvector: CREATE EXTENSION IF NOT EXISTS vector;

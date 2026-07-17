@@ -19,12 +19,12 @@ async def health() -> HealthResponse:
 
 @router.get("/ready", response_model=ReadyResponse)
 async def ready() -> ReadyResponse | JSONResponse:
-    """Readiness: DB must be up. Redis is required for rate limits / cache health.
+    """Readiness: DB must be up. Redis is optional (caching only).
 
-    Returns HTTP 503 when not fully ready so load balancers drain the instance.
+    Returns HTTP 503 when DB is down so load balancers drain the instance.
     """
     db_status = "ok"
-    redis_status = "ok"
+    redis_status = "unavailable"
 
     try:
         async with engine.connect() as conn:
@@ -35,25 +35,12 @@ async def ready() -> ReadyResponse | JSONResponse:
     try:
         redis = await get_redis()
         pong = await redis.ping()
-        if not pong:
-            redis_status = "error"
+        redis_status = "ok" if pong else "error"
     except Exception:
-        redis_status = "error"
+        redis_status = "unavailable"
 
-    # Database is hard-required. Redis error also marks not-ready in production
-    # so rate-limit fail-closed auth path is honest; local can still run degraded
-    # if needed via APP_ENV=local (soft redis for ready).
-    settings = get_settings()
     db_ok = db_status == "ok"
-    redis_ok = redis_status == "ok"
-    if settings.is_production:
-        fully_ready = db_ok and redis_ok
-    else:
-        # Local/dev: API is usable without Redis (recs compute cold; auth RL soft).
-        fully_ready = db_ok
-
-    status = "ok" if fully_ready else "not_ready"
-    body = ReadyResponse(status=status, database=db_status, redis=redis_status)
-    if not fully_ready:
+    body = ReadyResponse(status="ok" if db_ok else "not_ready", database=db_status, redis=redis_status)
+    if not db_ok:
         return JSONResponse(status_code=503, content=body.model_dump())
     return body
