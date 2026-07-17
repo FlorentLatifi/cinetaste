@@ -10,7 +10,7 @@ import {
   type FeedbackAction,
 } from "../components/ActionToast";
 import { useAuth } from "../features/auth/AuthContext";
-import { heroPosterUrl, yearOf } from "../lib/poster";
+import { heroPosterUrl, posterSrcSet, yearOf } from "../lib/poster";
 
 type LocationState = {
   fromOnboarding?: boolean;
@@ -45,6 +45,7 @@ export function HomePage() {
   const current = items[0] ?? null;
   const remaining = Math.max(0, items.length - 1);
   const poster = current ? heroPosterUrl(current.title) : null;
+  const posterSet = current ? posterSrcSet(current.title) : null;
 
   useEffect(() => {
     const state = (location.state as LocationState) || null;
@@ -134,27 +135,38 @@ export function HomePage() {
       setBusy(true);
       setError(null);
       setExiting(true);
+
+      // Optimistic UI: animate out, advance slate immediately, reconcile API after.
+      await new Promise((r) => setTimeout(r, 160));
+      setItems((prev) => prev.filter((i) => i.title.id !== titleId));
+      setCardKey((k) => k + 1);
+      setExiting(false);
+      showUndoToast({
+        item,
+        action: event,
+        message: `${FEEDBACK_ACTION_LABELS[event]} · ${item.title.name}`,
+        index,
+      });
+
       try {
         await titlesApi.interact(accessToken, titleId, event);
-        // Brief exit so the next poster can enter cleanly
-        await new Promise((r) => setTimeout(r, 180));
-        setItems((prev) => prev.filter((i) => i.title.id !== titleId));
-        setCardKey((k) => k + 1);
-        setExiting(false);
-        showUndoToast({
-          item,
-          action: event,
-          message: `${FEEDBACK_ACTION_LABELS[event]} · ${item.title.name}`,
-          index,
-        });
       } catch (err) {
-        setExiting(false);
+        // Roll back slate + toast if the server rejected the action
+        setItems((prev) => {
+          if (prev.some((i) => i.title.id === titleId)) return prev;
+          const next = [...prev];
+          const at = Math.min(Math.max(index, 0), next.length);
+          next.splice(at, 0, item);
+          return next;
+        });
+        setCardKey((k) => k + 1);
+        dismissToast();
         setError(err instanceof ApiError ? err.message : "Action failed");
       } finally {
         setBusy(false);
       }
     },
-    [accessToken, current, busy, exiting, showUndoToast],
+    [accessToken, current, busy, exiting, showUndoToast, dismissToast],
   );
 
   const undoLast = useCallback(async () => {
@@ -372,6 +384,12 @@ export function HomePage() {
                 <img
                   className="fy-poster"
                   src={poster}
+                  srcSet={posterSet ?? undefined}
+                  sizes={
+                    posterSet
+                      ? "(max-width: 560px) 70vw, 340px"
+                      : undefined
+                  }
                   alt=""
                   draggable={false}
                   decoding="async"

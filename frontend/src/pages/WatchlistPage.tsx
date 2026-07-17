@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { ApiError } from "../api/client";
 import * as titlesApi from "../api/titles";
 import type { Title } from "../api/titles";
+import { CatalogSkeleton } from "../components/CatalogSkeleton";
 import { PosterCard } from "../components/PosterCard";
 import { useAuth } from "../features/auth/AuthContext";
 
@@ -50,26 +51,26 @@ export function WatchlistPage() {
         </p>
       )}
       {loading && (
-        <div className="center-inline">
-          <div className="spinner" aria-label="Loading" />
-        </div>
+        <CatalogSkeleton count={8} label="Loading watchlist" />
       )}
       {!loading && !items.length && (
         <div className="callout" role="status">
           Nothing saved yet. Hit Save on a recommendation or title page.
         </div>
       )}
-      <ul className="poster-grid catalog" aria-label="Watchlist">
-        {items.map((title) => (
-          <li key={title.id}>
-            <PosterCard
-              title={title}
-              compact
-              badge={<span className="rec-badge discovery">Saved</span>}
-            />
-          </li>
-        ))}
-      </ul>
+      {!loading && (
+        <ul className="poster-grid catalog" aria-label="Watchlist">
+          {items.map((title) => (
+            <li key={title.id}>
+              <PosterCard
+                title={title}
+                compact
+                badge={<span className="rec-badge discovery">Saved</span>}
+              />
+            </li>
+          ))}
+        </ul>
+      )}
     </section>
   );
 }

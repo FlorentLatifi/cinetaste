@@ -9,7 +9,9 @@ import {
   FEEDBACK_ACTION_LABELS,
   type FeedbackAction,
 } from "../components/ActionToast";
+import { DetailSkeleton } from "../components/CatalogSkeleton";
 import { useAuth } from "../features/auth/AuthContext";
+import { heroPosterUrl, posterSrcSet } from "../lib/poster";
 
 const WATCH_REGIONS = [
   { code: "US", label: "United States" },
@@ -68,18 +70,6 @@ function ProviderRow({
 
 function yearOf(title: TitleDetail): string | null {
   return title.release_date ? title.release_date.slice(0, 4) : null;
-}
-
-function largePoster(title: TitleDetail): string | null {
-  if (!title.poster_url && !title.poster_path) return null;
-  const raw = title.poster_path || title.poster_url || "";
-  if (raw.startsWith("http") && raw.includes("/w500")) {
-    return raw.replace("/w500", "/w780");
-  }
-  if (raw.startsWith("/") && !raw.startsWith("http")) {
-    return `https://image.tmdb.org/t/p/w780${raw}`;
-  }
-  return title.poster_url;
 }
 
 function splitCredits(credits: Credit[]) {
@@ -250,11 +240,7 @@ export function TitleDetailPage() {
   }
 
   if (loading) {
-    return (
-      <div className="center-inline">
-        <div className="spinner" />
-      </div>
-    );
+    return <DetailSkeleton label="Loading title details" />;
   }
 
   if (!title) {
@@ -269,7 +255,8 @@ export function TitleDetailPage() {
     );
   }
 
-  const poster = largePoster(title);
+  const poster = heroPosterUrl(title);
+  const posterSet = posterSrcSet(title);
 
   return (
     <article className="title-detail">
@@ -288,7 +275,18 @@ export function TitleDetailPage() {
       <div className="title-detail-grid">
         <div className="title-detail-poster">
           {poster ? (
-            <img src={poster} alt={title.name} />
+            <img
+              src={poster}
+              srcSet={posterSet ?? undefined}
+              sizes={
+                posterSet
+                  ? "(max-width: 720px) 70vw, 320px"
+                  : undefined
+              }
+              alt={title.name}
+              decoding="async"
+              fetchPriority="high"
+            />
           ) : (
             <div className="poster-fallback">{title.name}</div>
           )}

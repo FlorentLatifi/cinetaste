@@ -3,7 +3,7 @@
 **Date:** 2026-07-17  
 **Scope:** `frontend/` SPA (React 19 + Vite + React Router)  
 **Method:** Code inspection, architecture review, Playwright mocks (`e2e/*`), design critique against Netflix / Letterboxd / Apple TV / Spotify patterns.  
-**Shipped through Wave 4:** immersive For You, landing, password UX, lazy routes, keyboard shortcuts, bottom nav, session expiry, **Account tabs**, **light/system theme**, poster prefetch, real **404** (see § Immediate improvements).
+**Shipped through Wave 5:** immersive For You, landing, password UX, lazy routes, keyboard shortcuts, bottom nav, session expiry, Account tabs, light theme, 404, **catalog skeletons**, **optimistic For You**, **poster srcset**, tablist arrows (see § Immediate improvements).
 
 ---
 
@@ -34,6 +34,13 @@ It does **not** yet feel like a finished premium discovery product end-to-end. B
 ---
 
 ## Immediate improvements
+
+### Wave 5 — Skeletons, optimistic recs, responsive images, a11y tabs
+
+- `CatalogSkeleton` / `DetailSkeleton` on Search, History, Watchlist, Title detail
+- For You optimistic Pass/Save/Like (rollback on API failure)
+- TMDb `srcset` (w185–w780) on PosterCard, For You hero, title detail
+- Account tablist: Arrow / Home / End roving focus
 
 ### Wave 4 — Account IA, light mode, 404, prefetch
 

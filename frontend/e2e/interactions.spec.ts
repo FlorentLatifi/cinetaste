@@ -223,6 +223,18 @@ test("Account: tabs isolate taste import flow", async ({ page }) => {
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
 });
 
+test("Account: arrow keys move between tabs", async ({ page }) => {
+  await installApiMock(page, { onboardingComplete: true });
+  await page.goto("/account");
+  await page.getByRole("tab", { name: "Profile" }).focus();
+  await page.keyboard.press("ArrowRight");
+  await expect(page.getByRole("tab", { name: "Taste" })).toBeFocused();
+  await expect(page).toHaveURL(/tab=taste/);
+  await page.keyboard.press("End");
+  await expect(page.getByRole("tab", { name: "Danger zone" })).toBeFocused();
+  await expect(page).toHaveURL(/tab=danger/);
+});
+
 test("Account: open snapshot previews export JSON", async ({ page }) => {
   await installApiMock(page, { onboardingComplete: true });
   await page.goto("/account?tab=taste");

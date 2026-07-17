@@ -3,6 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { ApiError } from "../api/client";
 import * as titlesApi from "../api/titles";
 import type { HistoryItem } from "../api/titles";
+import { CatalogSkeleton } from "../components/CatalogSkeleton";
 import { PosterCard } from "../components/PosterCard";
 import { useAuth } from "../features/auth/AuthContext";
 import { prefersReducedMotion } from "../features/taste/snapshot";
@@ -188,9 +189,7 @@ export function HistoryPage() {
       )}
 
       {loading && (
-        <div className="center-inline">
-          <div className="spinner" aria-label="Loading" />
-        </div>
+        <CatalogSkeleton count={8} label="Loading history" />
       )}
 
       {!loading && !items.length && (

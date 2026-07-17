@@ -602,6 +602,108 @@ html[data-theme="light"] .account-tab.active {
   background: rgba(154, 107, 47, 0.1);
 }
 
+/* Catalog / detail loading skeletons */
+.catalog-skeleton {
+  margin: 0.5rem 0 1rem;
+}
+
+.catalog-skeleton-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.catalog-skeleton-poster {
+  aspect-ratio: 2 / 3;
+  border-radius: 14px;
+  background: var(--bg-soft);
+}
+
+.catalog-skeleton-line {
+  height: 0.85rem;
+  border-radius: 6px;
+  background: var(--bg-soft);
+  width: 88%;
+}
+
+.catalog-skeleton-line.short {
+  width: 55%;
+  height: 0.7rem;
+}
+
+.detail-skeleton {
+  padding: 0.5rem 0 2rem;
+}
+
+.detail-skeleton-grid {
+  display: grid;
+  grid-template-columns: minmax(180px, 280px) 1fr;
+  gap: 1.5rem 2rem;
+  align-items: start;
+}
+
+.detail-skeleton-poster {
+  aspect-ratio: 2 / 3;
+  border-radius: 16px;
+  background: var(--bg-soft);
+  width: 100%;
+}
+
+.detail-skeleton-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  padding-top: 0.25rem;
+}
+
+.detail-skeleton-line {
+  height: 0.95rem;
+  border-radius: 8px;
+  background: var(--bg-soft);
+  width: 100%;
+  max-width: 36rem;
+}
+
+.detail-skeleton-line.title {
+  height: 1.75rem;
+  width: min(100%, 18rem);
+}
+
+.detail-skeleton-line.short {
+  width: min(100%, 10rem);
+  height: 0.8rem;
+}
+
+.detail-skeleton-line.mid {
+  width: min(100%, 24rem);
+}
+
+.detail-skeleton-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.detail-skeleton-actions span {
+  display: block;
+  height: 2.5rem;
+  width: 6.5rem;
+  border-radius: 999px;
+  background: var(--bg-soft);
+}
+
+@media (max-width: 720px) {
+  .detail-skeleton-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .detail-skeleton-poster {
+    max-width: 240px;
+    margin: 0 auto;
+  }
+}
+
 .not-found {
   min-height: 100vh;
   display: grid;

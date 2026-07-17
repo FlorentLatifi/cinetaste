@@ -3,6 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { ApiError } from "../api/client";
 import * as titlesApi from "../api/titles";
 import type { Title } from "../api/titles";
+import { CatalogSkeleton } from "../components/CatalogSkeleton";
 import { PosterCard } from "../components/PosterCard";
 import { useAuth } from "../features/auth/AuthContext";
 
@@ -117,6 +118,10 @@ export function SearchPage() {
         </p>
       )}
 
+      {loading && (
+        <CatalogSkeleton count={10} label="Searching the catalog" />
+      )}
+
       {searched && !loading && (
         <h2
           ref={resultsHeadingRef}
@@ -137,21 +142,25 @@ export function SearchPage() {
         </div>
       )}
 
-      <ul className="poster-grid catalog" aria-label="Search results">
-        {results.map((title) => (
-          <li key={title.id}>
-            <PosterCard
-              title={title}
-              compact
-              badge={
-                title.genres[0] ? (
-                  <span className="rec-badge discovery">{title.genres[0].name}</span>
-                ) : undefined
-              }
-            />
-          </li>
-        ))}
-      </ul>
+      {!loading && (
+        <ul className="poster-grid catalog" aria-label="Search results">
+          {results.map((title) => (
+            <li key={title.id}>
+              <PosterCard
+                title={title}
+                compact
+                badge={
+                  title.genres[0] ? (
+                    <span className="rec-badge discovery">
+                      {title.genres[0].name}
+                    </span>
+                  ) : undefined
+                }
+              />
+            </li>
+          ))}
+        </ul>
+      )}
     </section>
   );
 }

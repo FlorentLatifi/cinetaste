@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import type { Title } from "../api/titles";
-import { posterSrc, yearOf } from "../lib/poster";
+import { posterSrc, posterSrcSet, yearOf } from "../lib/poster";
 
 export { posterSrc, yearOf } from "../lib/poster";
 
@@ -31,8 +31,12 @@ export function PosterCard({
 }: Props) {
   const name = title.name;
   const src = posterSrc(title);
+  const srcSet = posterSrcSet(title);
   const year = yearOf(title);
   const Heading = headingLevel;
+  const sizes = compact
+    ? "(max-width: 480px) 46vw, (max-width: 768px) 30vw, 180px"
+    : "(max-width: 480px) 90vw, (max-width: 768px) 45vw, 280px";
 
   return (
     <article className={`poster-card ${compact ? "compact" : ""} ${className}`.trim()}>
@@ -43,7 +47,14 @@ export function PosterCard({
       >
         <div className="poster-card-frame">
           {src ? (
-            <img src={src} alt="" loading="lazy" decoding="async" />
+            <img
+              src={src}
+              srcSet={srcSet ?? undefined}
+              sizes={srcSet ? sizes : undefined}
+              alt=""
+              loading="lazy"
+              decoding="async"
+            />
           ) : (
             <div className="poster-fallback" aria-hidden="true">
               <span className="poster-fallback-letter">{name.slice(0, 1)}</span>

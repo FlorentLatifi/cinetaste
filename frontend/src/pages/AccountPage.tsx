@@ -5,6 +5,7 @@ import {
   useState,
   type ChangeEvent,
   type FormEvent,
+  type KeyboardEvent,
 } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { ApiError } from "../api/client";
@@ -69,6 +70,32 @@ export function AccountPage() {
       next === "profile" ? {} : { tab: next },
       { replace: true },
     );
+  }
+
+  function onTabListKeyDown(e: KeyboardEvent<HTMLDivElement>) {
+    const idx = TABS.findIndex((t) => t.id === tab);
+    if (idx < 0) return;
+    let nextIdx = idx;
+    if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+      e.preventDefault();
+      nextIdx = (idx + 1) % TABS.length;
+    } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+      e.preventDefault();
+      nextIdx = (idx - 1 + TABS.length) % TABS.length;
+    } else if (e.key === "Home") {
+      e.preventDefault();
+      nextIdx = 0;
+    } else if (e.key === "End") {
+      e.preventDefault();
+      nextIdx = TABS.length - 1;
+    } else {
+      return;
+    }
+    const next = TABS[nextIdx];
+    setTab(next.id);
+    requestAnimationFrame(() => {
+      document.getElementById(`account-tab-${next.id}`)?.focus();
+    });
   }
 
   useEffect(() => {
@@ -238,6 +265,7 @@ export function AccountPage() {
         role="tablist"
         aria-label="Account sections"
         id={tablistId}
+        onKeyDown={onTabListKeyDown}
       >
         {TABS.map((t) => {
           const selected = tab === t.id;
