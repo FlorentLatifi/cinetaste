@@ -49,6 +49,33 @@ test("Register: password show toggle and strength meter", async ({ page }) => {
   );
 });
 
+test("Onboarding: skip advances to next card", async ({ page }) => {
+  await installApiMock(page, { onboardingComplete: false });
+  await page.goto("/onboarding");
+  await page.getByRole("heading", { name: "Rate what you know" }).waitFor();
+  await expect(page.getByRole("heading", { name: mockTitle.name })).toBeVisible();
+
+  await page
+    .getByRole("button", { name: new RegExp(`Haven't seen ${mockTitle.name}`, "i") })
+    .click();
+  await expect(page.getByRole("heading", { name: "Mock Sequel" })).toBeVisible({
+    timeout: 5_000,
+  });
+});
+
+test("Onboarding: Rate opens scale and records a rating", async ({ page }) => {
+  await installApiMock(page, { onboardingComplete: false });
+  await page.goto("/onboarding");
+  await page.getByRole("heading", { name: mockTitle.name }).waitFor();
+
+  await page.getByRole("button", { name: `Rate ${mockTitle.name}` }).click();
+  await expect(page.getByText("How was it for you?")).toBeVisible();
+  await page.getByRole("button", { name: /Good:/i }).click();
+  // Progress should reflect at least one rating
+  await expect(page.getByText(/of 6 rated/i)).toBeVisible();
+  await expect(page.locator(".ob-progress-count strong")).toHaveText("1");
+});
+
 test("For You: Pass removes card and Undo restores it", async ({ page }) => {
   await installApiMock(page, { onboardingComplete: true });
   await page.goto("/");

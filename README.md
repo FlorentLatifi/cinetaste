@@ -57,7 +57,10 @@ cinetaste/
 - [x] Where-to-watch (TMDb/JustWatch), watched + rate-after-watch
 - [x] A11y: skip link, axe CI (guest + auth mocks), reduced motion, forced-colors
 - [x] Ops: CI integration tests, staging compose + `render.staging.yaml`, soft-launch checklist
-- [ ] Live hosted deploy (you connect Render/Vercel and run §6b smoke)
+- [x] Frontend production polish (immersive For You, landing, themes, a11y e2e) — see [`docs/FRONTEND_AUDIT.md`](docs/FRONTEND_AUDIT.md)
+- [ ] Live hosted deploy (you connect Render/Vercel and run checklist smoke)
+
+Go-live steps: [`docs/SOFT_LAUNCH_CHECKLIST.md`](docs/SOFT_LAUNCH_CHECKLIST.md) · full ops: [`docs/DEPLOY.md`](docs/DEPLOY.md)
 
 ---
 

@@ -3,7 +3,7 @@
 **Date:** 2026-07-17  
 **Scope:** `frontend/` SPA (React 19 + Vite + React Router)  
 **Method:** Code inspection, architecture review, Playwright mocks (`e2e/*`), design critique against Netflix / Letterboxd / Apple TV / Spotify patterns.  
-**Shipped through Wave 6:** Waves 1–5 plus `useForYouQueue` extraction, View Transitions on title navigation, history load-more skeletons, soft-launch checklist (see § Immediate improvements).
+**Shipped through Wave 7:** Waves 1–6 plus `useOnboardingDeck`, stronger Vercel headers, onboarding e2e, frontend README refresh (see § Immediate improvements).
 
 ---
 
@@ -34,6 +34,13 @@ It does **not** yet feel like a finished premium discovery product end-to-end. B
 ---
 
 ## Immediate improvements
+
+### Wave 7 — Onboarding extraction + deploy hardening
+
+- `features/onboarding/useOnboardingDeck.ts` + `constants.ts`
+- Vercel: HSTS, Permissions-Policy, long-cache hashed assets
+- E2E: onboarding skip advance + rate scale
+- Frontend README aligned with current product
 
 ### Wave 6 — Architecture + motion + soft-launch doc
 

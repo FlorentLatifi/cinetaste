@@ -1,284 +1,46 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { ApiError } from "../api/client";
-import * as titlesApi from "../api/titles";
-import type { OnboardingAction, OnboardingReaction, Title } from "../api/titles";
-import { useAuth } from "../features/auth/AuthContext";
-import { heroPosterUrl, yearOf } from "../lib/poster";
-
-/** Must match backend MIN_ONBOARDING_RATINGS / MIN_ONBOARDING_POSITIVE. */
-const MIN_RATINGS = 6;
-const MIN_POSITIVE = 2;
-const BATCH_SIZE = 15;
-
-const RATE_OPTIONS: {
-  action: OnboardingAction;
-  label: string;
-  hint: string;
-  emoji: string;
-  className: string;
-}[] = [
-  {
-    action: "rate_1",
-    label: "Bad",
-    hint: "Not for me",
-    emoji: "👎",
-    className: "ob-rate-bad",
-  },
-  {
-    action: "rate_2",
-    label: "OK",
-    hint: "Fine, not special",
-    emoji: "😐",
-    className: "ob-rate-ok",
-  },
-  {
-    action: "rate_3",
-    label: "Good",
-    hint: "I'd recommend it",
-    emoji: "👍",
-    className: "ob-rate-good",
-  },
-  {
-    action: "rate_4",
-    label: "Favorite",
-    hint: "Peak taste",
-    emoji: "✦",
-    className: "ob-rate-fav",
-  },
-];
-
-function isRating(action: OnboardingAction): boolean {
-  return action.startsWith("rate_");
-}
-
-function isPositive(action: OnboardingAction): boolean {
-  return action === "rate_2" || action === "rate_3" || action === "rate_4";
-}
+import { useEffect, useRef } from "react";
+import { RATE_OPTIONS } from "../features/onboarding/constants";
+import { useOnboardingDeck } from "../features/onboarding/useOnboardingDeck";
+import { heroPosterUrl, posterSrcSet, yearOf } from "../lib/poster";
 
 export function OnboardingPage() {
-  const { accessToken, user, refreshUser } = useAuth();
-  const navigate = useNavigate();
-  const [cards, setCards] = useState<Title[]>([]);
-  const [index, setIndex] = useState(0);
-  const [reactions, setReactions] = useState<OnboardingReaction[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  const [rateMode, setRateMode] = useState(false);
-  const [exhausted, setExhausted] = useState(false);
-  const [cardAnimKey, setCardAnimKey] = useState(0);
-  const [exiting, setExiting] = useState(false);
+  const {
+    current,
+    reactions,
+    error,
+    loading,
+    loadingMore,
+    submitting,
+    rateMode,
+    setRateMode,
+    cardAnimKey,
+    exiting,
+    ratedCount,
+    positiveCount,
+    unseenCount,
+    canFinish,
+    progressPct,
+    applyAction,
+    finish,
+    minRatings,
+  } = useOnboardingDeck();
+
   const rateFirstRef = useRef<HTMLButtonElement>(null);
   const titleRef = useRef<HTMLHeadingElement>(null);
-
-  const loadBatch = useCallback(
-    async (exclude: string[], replace: boolean) => {
-      if (!accessToken) return;
-      const data = await titlesApi.getOnboardingCards(accessToken, {
-        limit: BATCH_SIZE,
-        exclude,
-      });
-      if (data.items.length === 0) {
-        setExhausted(true);
-        return;
-      }
-      setCards((prev) => (replace ? data.items : [...prev, ...data.items]));
-      setExhausted(false);
-    },
-    [accessToken],
-  );
+  const poster = current ? heroPosterUrl(current) : null;
+  const posterSet = current ? posterSrcSet(current) : null;
 
   useEffect(() => {
-    if (user?.onboarding_completed_at) {
-      navigate("/", { replace: true });
-      return;
+    if (current && !loading && !submitting) {
+      requestAnimationFrame(() => titleRef.current?.focus());
     }
-    if (!accessToken) return;
-
-    let cancelled = false;
-    (async () => {
-      try {
-        await loadBatch([], true);
-      } catch (err) {
-        if (!cancelled) {
-          setError(
-            err instanceof ApiError
-              ? err.message
-              : "Could not load onboarding cards",
-          );
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [accessToken, user, navigate, loadBatch]);
-
-  const current = cards[index];
-  const ratedCount = useMemo(
-    () => reactions.filter((r) => isRating(r.action)).length,
-    [reactions],
-  );
-  const positiveCount = useMemo(
-    () => reactions.filter((r) => isPositive(r.action)).length,
-    [reactions],
-  );
-  const unseenCount = useMemo(
-    () => reactions.filter((r) => r.action === "haven't_seen").length,
-    [reactions],
-  );
-  const canFinish =
-    ratedCount >= MIN_RATINGS && positiveCount >= MIN_POSITIVE && !submitting;
-
-  const seenIds = useMemo(() => cards.map((c) => c.id), [cards]);
-  const progressPct = Math.min(100, (ratedCount / MIN_RATINGS) * 100);
-  const poster = current ? heroPosterUrl(current) : null;
-
-  async function ensureMoreCardsIfNeeded(
-    nextIndex: number,
-    nextReactions: OnboardingReaction[],
-  ) {
-    const remaining = cards.length - nextIndex;
-    const ratingsSoFar = nextReactions.filter((r) => isRating(r.action)).length;
-    if (remaining > 3 || exhausted || !accessToken) return;
-    if (ratingsSoFar >= MIN_RATINGS && remaining > 0) return;
-
-    setLoadingMore(true);
-    try {
-      await loadBatch(seenIds, false);
-    } catch (err) {
-      setError(
-        err instanceof ApiError ? err.message : "Could not load more titles",
-      );
-    } finally {
-      setLoadingMore(false);
-    }
-  }
-
-  function advanceCard() {
-    setExiting(false);
-    setCardAnimKey((k) => k + 1);
-    requestAnimationFrame(() => titleRef.current?.focus());
-  }
+  }, [current?.id, cardAnimKey, loading, submitting]);
 
   useEffect(() => {
     if (rateMode) {
       requestAnimationFrame(() => rateFirstRef.current?.focus());
     }
   }, [rateMode]);
-
-  async function applyAction(action: OnboardingAction) {
-    if (!current || submitting || exiting) return;
-    setRateMode(false);
-    setError(null);
-    setExiting(true);
-
-    const nextReactions = [
-      ...reactions.filter((r) => r.title_id !== current.id),
-      { title_id: current.id, action },
-    ];
-    setReactions(nextReactions);
-
-    // Brief exit animation before swapping the card
-    await new Promise((r) => setTimeout(r, 160));
-
-    const nextIndex = index + 1;
-    const nextRated = nextReactions.filter((r) => isRating(r.action)).length;
-    const nextPositive = nextReactions.filter((r) => isPositive(r.action)).length;
-
-    if (nextIndex < cards.length) {
-      setIndex(nextIndex);
-      advanceCard();
-      void ensureMoreCardsIfNeeded(nextIndex, nextReactions);
-      return;
-    }
-
-    if (nextRated >= MIN_RATINGS && nextPositive >= MIN_POSITIVE) {
-      await finish(nextReactions);
-      return;
-    }
-
-    setLoadingMore(true);
-    try {
-      const exclude = [
-        ...new Set([...seenIds, ...nextReactions.map((r) => r.title_id)]),
-      ];
-      const data = await titlesApi.getOnboardingCards(accessToken!, {
-        limit: BATCH_SIZE,
-        exclude,
-      });
-      if (data.items.length === 0) {
-        setExhausted(true);
-        setError(
-          `We need ${MIN_RATINGS} ratings of titles you've seen (you have ${nextRated}). ` +
-            "“Haven't seen it” doesn't count — keep going when more titles load, or seed the catalog.",
-        );
-        setExiting(false);
-        setReactions(nextReactions);
-        return;
-      }
-      setCards((prev) => [...prev, ...data.items]);
-      setIndex(nextIndex);
-      advanceCard();
-    } catch (err) {
-      setError(
-        err instanceof ApiError ? err.message : "Could not load more titles",
-      );
-      setExiting(false);
-    } finally {
-      setLoadingMore(false);
-    }
-  }
-
-  async function finish(finalReactions: OnboardingReaction[]) {
-    if (!accessToken) return;
-    const ratings = finalReactions.filter((r) => isRating(r.action)).length;
-    const positives = finalReactions.filter((r) => isPositive(r.action)).length;
-    if (ratings < MIN_RATINGS) {
-      setError(
-        `Rate at least ${MIN_RATINGS} titles you've actually seen. ` +
-          `Current: ${ratings}. “Haven't seen it” does not count.`,
-      );
-      setExiting(false);
-      return;
-    }
-    if (positives < MIN_POSITIVE) {
-      setError(
-        `Mark at least ${MIN_POSITIVE} as OK, Good, or Favorite so we know what you like.`,
-      );
-      setExiting(false);
-      return;
-    }
-
-    setSubmitting(true);
-    setError(null);
-    try {
-      await titlesApi.completeOnboarding(accessToken, finalReactions);
-      // Refresh auth user so Home sees onboarding_completed_at without full reload
-      try {
-        await refreshUser();
-      } catch {
-        // Still navigate; home may re-fetch user on next load
-      }
-      navigate("/", {
-        replace: true,
-        state: {
-          fromOnboarding: true,
-          ratingsCount: ratings,
-        },
-      });
-    } catch (err) {
-      setError(
-        err instanceof ApiError ? err.message : "Could not finish onboarding",
-      );
-      setSubmitting(false);
-      setExiting(false);
-    }
-  }
 
   if (loading) {
     return (
@@ -325,7 +87,6 @@ export function OnboardingPage() {
 
   return (
     <div className="ob-stage">
-      {/* Ambient poster glow */}
       {poster && (
         <div
           className="ob-ambient"
@@ -348,7 +109,7 @@ export function OnboardingPage() {
           <div className="ob-progress-top">
             <span className="ob-progress-count">
               <strong>{ratedCount}</strong>
-              <span className="ob-progress-of"> of {MIN_RATINGS} rated</span>
+              <span className="ob-progress-of"> of {minRatings} rated</span>
             </span>
             {positiveCount > 0 && (
               <span className="ob-progress-meta">
@@ -362,15 +123,20 @@ export function OnboardingPage() {
             role="progressbar"
             aria-valuenow={ratedCount}
             aria-valuemin={0}
-            aria-valuemax={MIN_RATINGS}
+            aria-valuemax={minRatings}
             aria-label="Onboarding rating progress"
           >
-            <div className="ob-progress-fill" style={{ width: `${progressPct}%` }} />
+            <div
+              className="ob-progress-fill"
+              style={{ width: `${progressPct}%` }}
+            />
           </div>
           <p className="ob-progress-hint">
-            {ratedCount < MIN_RATINGS
-              ? `${MIN_RATINGS - ratedCount} more rating${MIN_RATINGS - ratedCount === 1 ? "" : "s"} to unlock For You`
-              : positiveCount < MIN_POSITIVE
+            {ratedCount < minRatings
+              ? `${minRatings - ratedCount} more rating${
+                  minRatings - ratedCount === 1 ? "" : "s"
+                } to unlock For You`
+              : positiveCount < 2
                 ? "Add a couple of OK / Good / Favorite picks"
                 : "You can finish anytime — or keep refining"}
           </p>
@@ -388,8 +154,12 @@ export function OnboardingPage() {
               <img
                 className="ob-poster"
                 src={poster}
+                srcSet={posterSet ?? undefined}
+                sizes={posterSet ? "(max-width: 720px) 90vw, 420px" : undefined}
                 alt=""
                 draggable={false}
+                decoding="async"
+                fetchPriority="high"
               />
             ) : (
               <div className="ob-poster ob-poster-fallback">
