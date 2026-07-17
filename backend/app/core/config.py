@@ -131,8 +131,8 @@ class Settings(BaseSettings):
         if self.jwt_secret in _WEAK_SECRETS or "change-me" in self.jwt_secret.lower():
             raise ValueError("JWT_SECRET is weak or default — set a strong unique secret in production")
 
-        if len(self.jwt_secret) < 48:
-            raise ValueError("JWT_SECRET should be at least 48 characters in production")
+        if len(self.jwt_secret) < 32:
+            raise ValueError("JWT_SECRET should be at least 32 characters in production")
 
         if not self.cors_origin_list:
             raise ValueError("CORS_ORIGINS must be set in production")
