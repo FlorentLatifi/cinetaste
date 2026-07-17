@@ -3,7 +3,7 @@
 **Date:** 2026-07-17  
 **Scope:** `frontend/` SPA (React 19 + Vite + React Router)  
 **Method:** Code inspection, architecture review, Playwright mocks (`e2e/*`), design critique against Netflix / Letterboxd / Apple TV / Spotify patterns.  
-**Shipped:** Immersive For You; guest **LandingPage**; password show/strength; lazy routes; `lib/poster.ts` (see § Immediate improvements).
+**Shipped:** Immersive For You; guest **LandingPage**; password show/strength; lazy routes; `lib/poster.ts`; For You **keyboard shortcuts**; mobile **bottom nav**; session-expiry handler; chaos e2e (see § Immediate improvements).
 
 ---
 
@@ -34,6 +34,13 @@ It does **not** yet feel like a finished premium discovery product end-to-end. B
 ---
 
 ## Immediate improvements
+
+### Wave 3 — Interaction polish + mobile shell + chaos
+
+- For You keys: `1`/`P` Pass · `2`/`S` Save · `3`/`L` Like · `U` Undo (+ on-screen hints)
+- Mobile bottom nav (≤720px); topbar primary nav hidden on phone
+- `setSessionExpiredHandler` — 401 + failed refresh clears auth → guest landing
+- E2E: keyboard pass, double-click single POST, dead session, bottom nav
 
 ### Wave 2 — Landing, auth UX, code splitting
 

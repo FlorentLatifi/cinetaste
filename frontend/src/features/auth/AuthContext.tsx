@@ -9,7 +9,7 @@ import {
 } from "react";
 import * as authApi from "../../api/auth";
 import type { User } from "../../api/auth";
-import { tryRefreshAccessToken } from "../../api/client";
+import { setSessionExpiredHandler, tryRefreshAccessToken } from "../../api/client";
 import { clearLegacyTokenStorage, setAccessToken } from "../../api/tokenStore";
 
 type AuthState = {
@@ -69,6 +69,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       cancelled = true;
     };
   }, [applySession]);
+
+  // When apiFetch gets 401 and refresh fails, drop local session immediately.
+  useEffect(() => {
+    setSessionExpiredHandler(() => {
+      setAccessToken(null);
+      setAccessTokenState(null);
+      setUser(null);
+      clearLegacyTokenStorage();
+    });
+    return () => setSessionExpiredHandler(null);
+  }, []);
 
   const login = useCallback(
     async (email: string, password: string) => {

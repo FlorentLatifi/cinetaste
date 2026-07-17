@@ -3,6 +3,14 @@ import { Link, NavLink } from "react-router-dom";
 import { useAuth } from "../features/auth/AuthContext";
 import { ContrastToggle } from "./ContrastToggle";
 
+const PRIMARY_NAV = [
+  { to: "/", label: "For You", end: true },
+  { to: "/search", label: "Search", end: false },
+  { to: "/watchlist", label: "Watchlist", end: false },
+  { to: "/history", label: "History", end: false },
+  { to: "/account", label: "Account", end: false },
+] as const;
+
 export function AppShell({ children }: { children: ReactNode }) {
   const { user, logout } = useAuth();
 
@@ -28,21 +36,16 @@ export function AppShell({ children }: { children: ReactNode }) {
             </div>
           </Link>
           <nav className="topbar-nav" aria-label="Main">
-            <NavLink className="nav-link" to="/" end>
-              For You
-            </NavLink>
-            <NavLink className="nav-link" to="/search">
-              Search
-            </NavLink>
-            <NavLink className="nav-link" to="/watchlist">
-              Watchlist
-            </NavLink>
-            <NavLink className="nav-link" to="/history">
-              History
-            </NavLink>
-            <NavLink className="nav-link" to="/account">
-              Account
-            </NavLink>
+            {PRIMARY_NAV.map((item) => (
+              <NavLink
+                key={item.to}
+                className="nav-link"
+                to={item.to}
+                end={item.end}
+              >
+                {item.label}
+              </NavLink>
+            ))}
           </nav>
           <div className="topbar-right">
             <ContrastToggle compact />
@@ -64,6 +67,18 @@ export function AppShell({ children }: { children: ReactNode }) {
       <main id="main-content" className="main" tabIndex={-1}>
         {children}
       </main>
+      <nav className="bottom-nav" aria-label="Primary">
+        {PRIMARY_NAV.map((item) => (
+          <NavLink
+            key={item.to}
+            className="bottom-nav-link"
+            to={item.to}
+            end={item.end}
+          >
+            <span className="bottom-nav-label">{item.label}</span>
+          </NavLink>
+        ))}
+      </nav>
     </div>
   );
 }

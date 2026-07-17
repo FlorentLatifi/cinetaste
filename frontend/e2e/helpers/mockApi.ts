@@ -42,6 +42,11 @@ function json(data: unknown, status = 200) {
  * Intercept SPA API calls so authenticated routes render without a backend.
  * Matches Vite preview / production base path `/api/v1`.
  */
+export type ApiMockHandle = {
+  /** Number of POST …/interactions calls fulfilled (or attempted). */
+  interactionPosts: () => number;
+};
+
 export async function installApiMock(
   page: Page,
   opts: {
@@ -50,10 +55,19 @@ export async function installApiMock(
     forYouEmpty?: boolean;
     /** Force For You GET to 500. */
     forYouError?: boolean;
+    /**
+     * First /auth/refresh succeeds (bootstrap). Later refreshes fail and
+     * interactions return 401 — exercises session-expiry → guest UI.
+     */
+    sessionDeadOnInteraction?: boolean;
+    /** Artificial delay before fulfilling interactions (ms). */
+    interactionDelayMs?: number;
   } = {},
-): Promise<void> {
+): Promise<ApiMockHandle> {
   const onboardingComplete = opts.onboardingComplete !== false;
   const user = onboardingComplete ? mockUserComplete : mockUserNeedsOnboarding;
+  let interactionPosts = 0;
+  let refreshCalls = 0;
 
   await page.route("**/api/v1/**", async (route: Route) => {
     const req = route.request();
@@ -67,6 +81,13 @@ export async function installApiMock(
     const method = req.method();
 
     if (method === "POST" && path === "/auth/refresh") {
+      refreshCalls += 1;
+      if (opts.sessionDeadOnInteraction && refreshCalls > 1) {
+        await route.fulfill(
+          json({ message: "Session expired", code: "unauthorized" }, 401),
+        );
+        return;
+      }
       await route.fulfill(
         json({
           access_token: "mock-access-token",
@@ -379,6 +400,16 @@ export async function installApiMock(
     }
 
     if (method === "POST" && path.includes("/interactions")) {
+      interactionPosts += 1;
+      if (opts.interactionDelayMs && opts.interactionDelayMs > 0) {
+        await new Promise((r) => setTimeout(r, opts.interactionDelayMs));
+      }
+      if (opts.sessionDeadOnInteraction) {
+        await route.fulfill(
+          json({ message: "Unauthorized", code: "unauthorized" }, 401),
+        );
+        return;
+      }
       await route.fulfill({ status: 204, body: "" });
       return;
     }
@@ -397,4 +428,8 @@ export async function installApiMock(
       json({ detail: "unmocked", method, path }, 404),
     );
   });
+
+  return {
+    interactionPosts: () => interactionPosts,
+  };
 }

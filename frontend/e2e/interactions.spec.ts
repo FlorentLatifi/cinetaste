@@ -57,6 +57,73 @@ test("For You: Pass removes card and Undo restores it", async ({ page }) => {
   await expect(page.getByRole("heading", { name: mockTitle.name })).toBeVisible();
 });
 
+test("For You: keyboard 1 passes the current pick", async ({ page }) => {
+  await installApiMock(page, { onboardingComplete: true });
+  await page.goto("/");
+  await page.getByRole("heading", { name: mockTitle.name }).waitFor();
+
+  await page.keyboard.press("1");
+  await expect(page.getByText(new RegExp(`Passed · ${mockTitle.name}`))).toBeVisible();
+  await expect(page.getByRole("heading", { name: mockTitle.name })).toHaveCount(0);
+});
+
+test("For You: double-click Pass only posts one interaction", async ({ page }) => {
+  const mock = await installApiMock(page, {
+    onboardingComplete: true,
+    interactionDelayMs: 250,
+  });
+  await page.goto("/");
+  await page.getByRole("heading", { name: mockTitle.name }).waitFor();
+
+  const pass = page.getByRole("button", { name: `Pass on ${mockTitle.name}` });
+  await pass.dblclick();
+  await expect(page.getByText(new RegExp(`Passed · ${mockTitle.name}`))).toBeVisible({
+    timeout: 10_000,
+  });
+  // busy/exiting guards must collapse double activation to a single POST
+  expect(mock.interactionPosts()).toBe(1);
+});
+
+test("For You: dead session on Pass returns guest to landing", async ({ page }) => {
+  await installApiMock(page, {
+    onboardingComplete: true,
+    sessionDeadOnInteraction: true,
+  });
+  await page.goto("/");
+  await page.getByRole("heading", { name: mockTitle.name }).waitFor();
+
+  await page.getByRole("button", { name: `Pass on ${mockTitle.name}` }).click();
+  // Session cleared → RootRoute renders public LandingPage
+  await expect(
+    page.getByRole("heading", {
+      name: "One poster. Your taste. Every pick explained.",
+    }),
+  ).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByRole("link", { name: /Start free/i })).toBeVisible();
+});
+
+test("App shell: mobile bottom nav exposes primary destinations", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await installApiMock(page, { onboardingComplete: true });
+  await page.goto("/");
+  await page.getByRole("heading", { name: /Picks matched/i }).waitFor();
+
+  // Bottom nav is CSS-shown only ≤720px; display:none keeps it out of a11y tree on desktop.
+  const primary = page.getByRole("navigation", { name: "Primary" });
+  await expect(primary).toBeVisible();
+  await expect(primary.getByRole("link", { name: "For You" })).toBeVisible();
+  await expect(primary.getByRole("link", { name: "Search" })).toBeVisible();
+  await expect(primary.getByRole("link", { name: "Watchlist" })).toBeVisible();
+  await expect(primary.getByRole("link", { name: "History" })).toBeVisible();
+  await expect(primary.getByRole("link", { name: "Account" })).toBeVisible();
+
+  await primary.getByRole("link", { name: "Search" }).click();
+  await expect(page).toHaveURL(/\/search/);
+  await expect(page.getByRole("heading", { name: /Search/i })).toBeVisible();
+});
+
 test("For You: empty slate shows recovery CTAs", async ({ page }) => {
   await installApiMock(page, { onboardingComplete: true, forYouEmpty: true });
   await page.goto("/");

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { ApiError } from "../api/client";
 import * as titlesApi from "../api/titles";
@@ -96,54 +96,57 @@ export function HomePage() {
     }
   }, [current?.title.id, loading]);
 
-  function dismissToast() {
+  const dismissToast = useCallback(() => {
     if (toastTimer.current) {
       clearTimeout(toastTimer.current);
       toastTimer.current = null;
     }
     setToast(null);
-  }
+  }, []);
 
-  function showUndoToast(next: UndoToast) {
+  const showUndoToast = useCallback((next: UndoToast) => {
     if (toastTimer.current) clearTimeout(toastTimer.current);
     setToast(next);
     toastTimer.current = setTimeout(() => {
       setToast(null);
       toastTimer.current = null;
     }, ACTION_TOAST_MS);
-  }
+  }, []);
 
-  async function act(event: FeedbackAction) {
-    if (!accessToken || !current || busy || exiting) return;
-    const item = current;
-    const titleId = item.title.id;
-    const index = 0;
+  const act = useCallback(
+    async (event: FeedbackAction) => {
+      if (!accessToken || !current || busy || exiting) return;
+      const item = current;
+      const titleId = item.title.id;
+      const index = 0;
 
-    setBusy(true);
-    setError(null);
-    setExiting(true);
-    try {
-      await titlesApi.interact(accessToken, titleId, event);
-      // Brief exit so the next poster can enter cleanly
-      await new Promise((r) => setTimeout(r, 180));
-      setItems((prev) => prev.filter((i) => i.title.id !== titleId));
-      setCardKey((k) => k + 1);
-      setExiting(false);
-      showUndoToast({
-        item,
-        action: event,
-        message: `${FEEDBACK_ACTION_LABELS[event]} · ${item.title.name}`,
-        index,
-      });
-    } catch (err) {
-      setExiting(false);
-      setError(err instanceof ApiError ? err.message : "Action failed");
-    } finally {
-      setBusy(false);
-    }
-  }
+      setBusy(true);
+      setError(null);
+      setExiting(true);
+      try {
+        await titlesApi.interact(accessToken, titleId, event);
+        // Brief exit so the next poster can enter cleanly
+        await new Promise((r) => setTimeout(r, 180));
+        setItems((prev) => prev.filter((i) => i.title.id !== titleId));
+        setCardKey((k) => k + 1);
+        setExiting(false);
+        showUndoToast({
+          item,
+          action: event,
+          message: `${FEEDBACK_ACTION_LABELS[event]} · ${item.title.name}`,
+          index,
+        });
+      } catch (err) {
+        setExiting(false);
+        setError(err instanceof ApiError ? err.message : "Action failed");
+      } finally {
+        setBusy(false);
+      }
+    },
+    [accessToken, current, busy, exiting, showUndoToast],
+  );
 
-  async function undoLast() {
+  const undoLast = useCallback(async () => {
     if (!accessToken || !toast || undoBusy) return;
     const { item, index } = toast;
     setUndoBusy(true);
@@ -164,7 +167,50 @@ export function HomePage() {
     } finally {
       setUndoBusy(false);
     }
-  }
+  }, [accessToken, toast, undoBusy, dismissToast]);
+
+  // Keyboard: 1/P Pass · 2/S Save · 3/L Like · U Undo (when toast visible)
+  useEffect(() => {
+    if (!current || loading || needsOnboarding) return;
+
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.tagName === "SELECT" ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+
+      const key = e.key.toLowerCase();
+      if (key === "1" || key === "p") {
+        e.preventDefault();
+        void act("dislike");
+        return;
+      }
+      if (key === "2" || key === "s") {
+        e.preventDefault();
+        void act("watchlist");
+        return;
+      }
+      if (key === "3" || key === "l") {
+        e.preventDefault();
+        void act("like");
+        return;
+      }
+      if (key === "u" && toast && !undoBusy) {
+        e.preventDefault();
+        void undoLast();
+      }
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [current, loading, needsOnboarding, act, toast, undoBusy, undoLast]);
 
   if (needsOnboarding) {
     return (
@@ -393,39 +439,59 @@ export function HomePage() {
             <div
               className="fy-actions"
               role="group"
-              aria-label={`Actions for ${current.title.name}`}
+              aria-label={`Actions for ${current.title.name}. Keyboard: 1 pass, 2 save, 3 like.`}
             >
               <button
                 type="button"
                 className="fy-act fy-act-pass"
                 disabled={busy}
+                aria-keyshortcuts="1 p"
                 aria-label={`Pass on ${current.title.name}`}
                 onClick={() => void act("dislike")}
               >
-                <span className="fy-act-label">Pass</span>
+                <span className="fy-act-label">
+                  Pass <kbd className="fy-kbd">1</kbd>
+                </span>
                 <span className="fy-act-hint">Not for me</span>
               </button>
               <button
                 type="button"
                 className="fy-act fy-act-save"
                 disabled={busy}
+                aria-keyshortcuts="2 s"
                 aria-label={`Save ${current.title.name} to watchlist`}
                 onClick={() => void act("watchlist")}
               >
-                <span className="fy-act-label">Save</span>
+                <span className="fy-act-label">
+                  Save <kbd className="fy-kbd">2</kbd>
+                </span>
                 <span className="fy-act-hint">Watch later</span>
               </button>
               <button
                 type="button"
                 className="fy-act fy-act-like"
                 disabled={busy}
+                aria-keyshortcuts="3 l"
                 aria-label={`Like ${current.title.name}`}
                 onClick={() => void act("like")}
               >
-                <span className="fy-act-label">Like</span>
+                <span className="fy-act-label">
+                  Like <kbd className="fy-kbd">3</kbd>
+                </span>
                 <span className="fy-act-hint">More like this</span>
               </button>
             </div>
+
+            <p className="fy-keys-hint">
+              <span className="sr-only">Keyboard shortcuts: </span>
+              <kbd>1</kbd> Pass · <kbd>2</kbd> Save · <kbd>3</kbd> Like
+              {toast ? (
+                <>
+                  {" "}
+                  · <kbd>U</kbd> Undo
+                </>
+              ) : null}
+            </p>
 
             <p className="fy-detail-hint">
               <Link to={`/titles/${current.title.id}`}>Full details</Link>

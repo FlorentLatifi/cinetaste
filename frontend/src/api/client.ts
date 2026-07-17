@@ -15,6 +15,18 @@ export class ApiError extends Error {
   }
 }
 
+/** Called when access token is invalid and refresh fails (session dead). */
+type SessionExpiredHandler = () => void;
+let sessionExpiredHandler: SessionExpiredHandler | null = null;
+
+export function setSessionExpiredHandler(handler: SessionExpiredHandler | null) {
+  sessionExpiredHandler = handler;
+}
+
+function notifySessionExpired() {
+  sessionExpiredHandler?.();
+}
+
 /** Single-flight refresh so concurrent 401s share one /auth/refresh call. */
 let refreshInFlight: Promise<string | null> | null = null;
 
@@ -66,6 +78,8 @@ export async function apiFetch<T>(
     if (next) {
       return apiFetch<T>(path, options, next, true);
     }
+    // Refresh failed — clear React session so Protected routes → login
+    notifySessionExpired();
   }
 
   if (response.status === 204) {
