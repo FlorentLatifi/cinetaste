@@ -156,7 +156,7 @@ def test_like_dislike_shortcuts_align_with_ratings() -> None:
 
 
 def test_rating_and_anchor_sets() -> None:
-    assert RATING_EVENT_TYPES == {"rate_1", "rate_2", "rate_3", "rate_4"}
+    assert RATING_EVENT_TYPES == {"mid", "rate_1", "rate_2", "rate_3", "rate_4"}
     assert "haven't_seen" not in RATING_EVENT_TYPES
     assert "not_interested" not in RATING_EVENT_TYPES
     assert POSITIVE_RATING_EVENT_TYPES >= {"rate_2", "rate_3", "rate_4", "like"}

@@ -59,4 +59,6 @@ databases:
   - name: cinetaste-db-staging
     plan: free
     postgresMajorVersion: "16"
-    # Enable pgvector: CREATE EXTENSION IF NOT EXISTS vector;
+    # After first deploy, run via Render dashboard SQL or psql:
+    #   CREATE EXTENSION IF NOT EXISTS vector;
+    #   CREATE EXTENSION IF NOT EXISTS pg_trgm;

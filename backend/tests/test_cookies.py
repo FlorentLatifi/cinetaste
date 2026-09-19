@@ -16,6 +16,7 @@ def _settings(**kwargs) -> Settings:
         redis_url="redis://localhost:6379/0",
         api_prefix="/api/v1",
         app_env="local",
+        app_debug=False,
     )
     base.update(kwargs)
     return Settings(**base)

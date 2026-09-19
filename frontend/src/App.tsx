@@ -2,8 +2,8 @@ import { lazy, Suspense, type ReactNode } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { useAuth } from "./features/auth/AuthContext";
 import { AppShell } from "./components/AppShell";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { ForgotPasswordPage } from "./pages/ForgotPasswordPage";
-import { HomePage } from "./pages/HomePage";
 import { LandingPage } from "./pages/LandingPage";
 import { LoginPage } from "./pages/LoginPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
@@ -28,6 +28,9 @@ const TitleDetailPage = lazy(() =>
 );
 const WatchlistPage = lazy(() =>
   import("./pages/WatchlistPage").then((m) => ({ default: m.WatchlistPage })),
+);
+const ForYouPage = lazy(() =>
+  import("./pages/HomePage").then((m) => ({ default: m.HomePage })),
 );
 
 function RouteFallback() {
@@ -77,7 +80,9 @@ function RootRoute() {
   if (!user) return <LandingPage />;
   return (
     <AppShell>
-      <HomePage />
+      <Suspense fallback={<RouteFallback />}>
+        <ForYouPage />
+      </Suspense>
     </AppShell>
   );
 }
@@ -94,6 +99,7 @@ function LazyProtected({ children }: { children: ReactNode }) {
 
 export default function App() {
   return (
+    <ErrorBoundary>
     <Routes>
       <Route
         path="/login"
@@ -178,5 +184,6 @@ export default function App() {
       <Route path="/" element={<RootRoute />} />
       <Route path="*" element={<NotFoundPage />} />
     </Routes>
+    </ErrorBoundary>
   );
 }
