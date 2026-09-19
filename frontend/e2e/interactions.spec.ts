@@ -308,6 +308,47 @@ test("Account: open snapshot previews export JSON", async ({ page }) => {
   await expect(page.getByText(/Cleared merged snapshot overlay/i)).toBeVisible();
 });
 
+
+
+test("For You: malformed item with null poster does not crash", async ({
+  page,
+}) => {
+  const handle = await installApiMock(page, { onboardingComplete: true });
+  // Override For You response with null poster
+  await page.route("**/api/v1/recommendations/for-you**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        items: [
+          {
+            title: {
+              ...mockTitle,
+              poster_url: null,
+              poster_path: null,
+              backdrop_path: null,
+            },
+            score: 0.85,
+            reasons: [
+              {
+                code: "shared_genre",
+                message: "Fits your taste",
+                evidence: {},
+              },
+            ],
+          },
+        ],
+      }),
+    });
+  });
+  await page.goto("/");
+  await page.getByRole("heading", { name: mockTitle.name }).waitFor();
+  // No crash = page rendered without poster
+  await expect(
+    page.getByRole("button", { name: /Pass on/i }),
+  ).toBeVisible();
+});
+
 test("Title detail: Watched opens rate panel", async ({ page }) => {
   await installApiMock(page, { onboardingComplete: true });
   await page.goto(`/titles/${mockTitle.id}`);

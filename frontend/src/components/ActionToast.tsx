@@ -6,6 +6,8 @@ export type FeedbackAction =
   | "watched"
   | "watched_liked"
   | "watched_disliked"
+  | "mid"
+  | "haven't_seen"
   | "rate_1"
   | "rate_2"
   | "rate_3"
@@ -19,9 +21,11 @@ export const FEEDBACK_ACTION_LABELS: Record<FeedbackAction, string> = {
   watched: "Marked as watched",
   watched_liked: "Watched and liked",
   watched_disliked: "Watched and disliked",
+  mid: "Rated Ok",
+  "haven't_seen": "Haven't seen",
   rate_1: "Rated Bad",
-  rate_2: "Rated It's ok",
-  rate_3: "Rated Good",
+  rate_2: "Rated I like it",
+  rate_3: "Rated I like it so much",
   rate_4: "Rated Favorite",
 };
 

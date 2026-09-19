@@ -154,6 +154,7 @@ export type InteractionEventType =
   | "skip"
   | "view"
   | "haven't_seen"
+  | "mid"
   | "rate_1"
   | "rate_2"
   | "rate_3"

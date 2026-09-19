@@ -19,6 +19,7 @@ def _settings(**kwargs) -> Settings:
         database_url="postgresql+asyncpg://u:p@localhost/db",
         redis_url="redis://localhost:6379/0",
         app_env="local",
+        app_debug=False,
         public_app_url="http://localhost:5173",
         password_reset_ttl_minutes=60,
     )
