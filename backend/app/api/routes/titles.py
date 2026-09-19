@@ -37,8 +37,10 @@ async def for_you(
     limit: int = Query(default=20, ge=1, le=50),
 ) -> RecommendationSlateOut:
     service = _rec_service(session, settings)
-    ranked = await service.for_you(user.id, limit=limit)
-    slate_id = await service.log_impressions(user.id, ranked)
+    slate = await service.for_you(user.id, limit=limit)
+    # Log what was shown once per computed slate, not on every cache hit.
+    if slate.fresh:
+        await service.log_impressions(user.id, slate.items, slate_id=slate.slate_id)
     items = [
         RecommendationItemOut(
             title=TitleSummaryOut.from_title(title),
@@ -47,9 +49,9 @@ async def for_you(
                 ReasonOut(code=r.code, message=r.message, evidence=r.evidence) for r in item.reasons
             ],
         )
-        for title, item in ranked
+        for title, item in slate.items
     ]
-    return RecommendationSlateOut(items=items, slate_id=slate_id)
+    return RecommendationSlateOut(items=items, slate_id=slate.slate_id)
 
 
 @router.get("/titles/search", response_model=list[TitleSummaryOut])
@@ -74,8 +76,7 @@ async def similar_titles(
     limit: int = Query(default=12, ge=1, le=30),
 ) -> list[TitleSummaryOut]:
     service = _rec_service(session, settings)
-    source = await service.get_title(title_id)
-    if source is None:
+    if not await service.title_exists(title_id):
         raise NotFoundError("Title not found")
     titles = await service.similar_titles(title_id, limit=limit)
     return [TitleSummaryOut.from_title(t) for t in titles]
@@ -150,8 +151,7 @@ async def interact(
     settings: Annotated[Settings, Depends(get_settings_dep)],
 ) -> None:
     service = _rec_service(session, settings)
-    title = await service.get_title(title_id)
-    if title is None:
+    if not await service.title_exists(title_id):
         raise NotFoundError("Title not found")
 
     taste = TasteService(session)

@@ -138,7 +138,7 @@ class RecommendationSlateOut(BaseModel):
     items: list[RecommendationItemOut]
     slate_id: UUID | None = Field(
         default=None,
-        description="Impression slate id when rec_log_impressions is enabled",
+        description="Identifies this slate (same id while served from cache)",
     )
 
 
