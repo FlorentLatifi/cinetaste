@@ -24,7 +24,7 @@ from app.core.config import get_settings
 from app.infrastructure.db import models as _models  # noqa: F401 — register metadata
 from app.infrastructure.db.base import Base
 from app.infrastructure.db.models.catalog import Genre, Title, TitleGenre
-from app.infrastructure.db.redis import close_redis, get_redis
+from app.infrastructure.db.redis import get_redis
 from app.infrastructure.db.session import async_session_factory, engine
 from app.main import app
 from app.recommendation.embeddings import PersonSignal, build_title_signals

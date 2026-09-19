@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """Taste profile learning from user–title interactions.
 
 Signal weights, polarities, feed exclusion, and special cases are defined once in
@@ -17,6 +15,8 @@ Bulk flows (onboarding complete) MUST use ``recompute=False`` and call
 ``recompute_profile`` once at the end to avoid O(n²) full-history replays.
 """
 
+from __future__ import annotations
+
 from typing import Any
 from uuid import UUID
 
@@ -24,6 +24,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.application.taste_summary import IMPORT_OVERLAY_KEY, merge_import_overlay
 from app.domain.taste_signals import (
     EXPLAIN_ANCHOR_EVENT_TYPES,
     EXPLAIN_ANCHOR_MIN_WEIGHT,
@@ -36,15 +37,14 @@ from app.domain.taste_signals import (
     ZERO_SIGNAL_EPS,
     affects_taste,
     get_policy,
-    is_supported_event,
     is_superseded_by_clear,
+    is_supported_event,
     last_clear_timestamps,
     weight_for,
 )
 from app.infrastructure.db.models.catalog import Title
 from app.infrastructure.db.models.interaction import InteractionEvent, UserTitleState
 from app.infrastructure.db.models.taste import TasteProfile
-from app.application.taste_summary import IMPORT_OVERLAY_KEY, merge_import_overlay
 from app.recommendation.embeddings import blend_vectors, normalize_feature_families
 from app.recommendation.explanations import (
     build_anchor_from_title,

@@ -7,12 +7,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.recommendation_service import RecommendationService
 from app.application.taste_service import TasteService
+from app.domain.exceptions import AppError
 from app.domain.taste_signals import (
     POSITIVE_RATING_EVENT_TYPES,
     RATING_EVENT_TYPES,
     is_supported_event,
 )
-from app.domain.exceptions import AppError
 from app.infrastructure.db.models.user import User
 
 # Minimum explicit 1–4 ratings before we trust the profile enough for For You.

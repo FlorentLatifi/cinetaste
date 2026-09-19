@@ -12,9 +12,8 @@ from dataclasses import dataclass, field
 from typing import Any
 from uuid import UUID
 
-from app.recommendation.embeddings import top_feature_overlap
-
 from app.domain.taste_signals import EXPLAIN_ANCHOR_MIN_WEIGHT
+from app.recommendation.embeddings import top_feature_overlap
 
 # Stored inside TasteProfile.features (stripped before scoring).
 EXPLAIN_MEMORY_KEY = "__explain_memory__"
@@ -276,7 +275,7 @@ def build_reasons(
             liked_unique = list(dict.fromkeys(liked))[:2]
             shared_kw: list[str] = []
             shared_tones: list[str] = []
-            for _s, anchor, overlap in top:
+            for _s, _anchor, overlap in top:
                 if director in (overlap.get("directors") or []):
                     shared_kw.extend(overlap.get("keywords") or [])
                     shared_tones.extend(overlap.get("tones") or [])

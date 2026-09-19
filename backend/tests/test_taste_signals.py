@@ -1,14 +1,14 @@
 """Unit tests for the canonical taste signal policy."""
 
+from datetime import UTC, datetime, timedelta
+from uuid import uuid4
+
 from app.application.onboarding_service import (
+    _LEGACY_ACTION_MAP,
     MIN_ONBOARDING_POSITIVE,
     MIN_ONBOARDING_RATINGS,
     ONBOARDING_ACTIONS,
-    _LEGACY_ACTION_MAP,
 )
-from datetime import datetime, timedelta, timezone
-from uuid import uuid4
-
 from app.domain.taste_signals import (
     ACTIVE_INTERACTION_EVENT_TYPES,
     EXPLAIN_ANCHOR_EVENT_TYPES,
@@ -84,7 +84,7 @@ def test_clear_is_zero_signal_and_active_api() -> None:
 
 def test_clear_supersedes_prior_events_for_title() -> None:
     t1, t2 = uuid4(), uuid4()
-    t0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    t0 = datetime(2026, 1, 1, tzinfo=UTC)
     events = [
         (t1, "like", t0),
         (t1, "dislike", t0 + timedelta(minutes=1)),

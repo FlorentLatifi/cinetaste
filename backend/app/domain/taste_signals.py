@@ -21,9 +21,10 @@ Rules of thumb
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Iterable, Literal
+from typing import Literal
 from uuid import UUID
 
 Polarity = Literal["positive", "negative", "neutral", "zero"]

@@ -151,7 +151,7 @@ class AuthService:
         )
         try:
             await self._email.send(to=user.email, subject=subject, text_body=body)
-        except Exception:
+        except Exception as exc:
             logger.exception("password_reset_email_failed user_id=%s", user.id)
             # Still keep the token so ops can recover via logs in non-prod
             if self._settings.is_production:
@@ -159,7 +159,7 @@ class AuthService:
                     "Could not send reset email. Try again later.",
                     status_code=503,
                     code="email_unavailable",
-                )
+                ) from exc
 
         logger.info(
             "password_reset_issued user_id=%s email=%s",

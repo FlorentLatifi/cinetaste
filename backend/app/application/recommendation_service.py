@@ -414,7 +414,11 @@ class RecommendationService:
         """
         from sqlalchemy import and_, or_
 
-        from app.application.history_cursor import CursorError, decode_history_cursor, encode_history_cursor
+        from app.application.history_cursor import (
+            CursorError,
+            decode_history_cursor,
+            encode_history_cursor,
+        )
         from app.domain.taste_signals import HISTORY_VISIBLE_STATES
 
         allowed = list(HISTORY_VISIBLE_STATES)
