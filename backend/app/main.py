@@ -15,20 +15,13 @@ from app.core.middleware import (
 )
 from app.core.observability import capture_exception, init_observability
 from app.domain.exceptions import AppError
-from app.infrastructure.db.redis import close_redis, get_redis
+from app.infrastructure.cache import close_store
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    settings = get_settings()
-    configure_logging(debug=settings.app_debug)
-    init_observability(settings)
-    try:
-        await get_redis()
-    except Exception:
-        pass
     yield
-    await close_redis()
+    await close_store()
 
 
 def create_app() -> FastAPI:

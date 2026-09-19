@@ -1,17 +1,22 @@
-"""Fixtures for API integration tests.
+"""Fixtures for API integration tests (real Postgres + pgvector).
 
-Requires:
-  - Postgres with pgvector (DATABASE_URL)
-  - Redis (REDIS_URL)
-
-When services are down (typical local laptop without Docker), tests are skipped
-so pure unit suites stay green.
+* The schema is built with ``alembic upgrade head`` — the migrations are part of
+  what is being tested, not ``Base.metadata.create_all``.
+* All integration tests share one event loop. The app's engine is a module-level
+  singleton; with a fresh loop per test, pooled connections belong to a closed
+  loop and every test after the first fails to connect.
+* When Postgres is unreachable the tests are skipped locally, but fail when
+  ``INTEGRATION_REQUIRED=1`` (set in CI) so a broken setup can't pass silently.
 """
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 from collections.abc import AsyncIterator
 from datetime import date
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -24,54 +29,62 @@ from app.core.config import get_settings
 from app.infrastructure.db import models as _models  # noqa: F401 — register metadata
 from app.infrastructure.db.base import Base
 from app.infrastructure.db.models.catalog import Genre, Title, TitleGenre
-from app.infrastructure.db.redis import close_redis, get_redis
 from app.infrastructure.db.session import async_session_factory, engine
 from app.main import app
 from app.recommendation.embeddings import PersonSignal, build_title_signals
 
 API = get_settings().api_prefix
+BACKEND_DIR = Path(__file__).resolve().parents[2]
 
 
-async def _services_available() -> tuple[bool, str]:
+def _unavailable(reason: str) -> None:
+    if os.environ.get("INTEGRATION_REQUIRED") == "1":
+        pytest.fail(reason)
+    pytest.skip(reason)
+
+
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    session_loop = pytest.mark.asyncio(loop_scope="session")
+    for item in items:
+        if "integration" in Path(str(item.fspath)).parts and pytest_asyncio.is_async_test(item):
+            item.add_marker(session_loop, append=False)
+
+
+@pytest.fixture(scope="session")
+def migrated_database() -> None:
+    result = subprocess.run(
+        [sys.executable, "-m", "alembic", "upgrade", "head"],
+        cwd=BACKEND_DIR,
+        capture_output=True,
+        text=True,
+        timeout=180,
+    )
+    if result.returncode != 0:
+        _unavailable(f"alembic upgrade head failed: {result.stderr[-800:]}")
+
+
+async def _reset_cache() -> None:
+    from app.infrastructure.cache import reset_cache_for_tests
+
+    await reset_cache_for_tests()
+
+
+@pytest_asyncio.fixture(loop_scope="session")
+async def integration_ready(migrated_database: None) -> AsyncIterator[None]:
     try:
         async with engine.connect() as conn:
             await conn.execute(text("SELECT 1"))
     except Exception as exc:  # noqa: BLE001
-        return False, f"postgres unavailable: {exc}"
-    try:
-        redis = await get_redis()
-        if not await redis.ping():
-            return False, "redis ping failed"
-    except Exception as exc:  # noqa: BLE001
-        return False, f"redis unavailable: {exc}"
-    return True, "ok"
+        _unavailable(f"postgres unavailable: {exc}")
 
-
-@pytest_asyncio.fixture
-async def integration_ready() -> AsyncIterator[None]:
-    ok, reason = await _services_available()
-    if not ok:
-        pytest.skip(reason)
-
+    tables = ", ".join(t.name for t in Base.metadata.sorted_tables)
     async with engine.begin() as conn:
-        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-        await conn.run_sync(Base.metadata.create_all)
-
-    # Truncate so tests do not pollute each other (FK-safe order via metadata).
-    async with engine.begin() as conn:
-        for table in reversed(Base.metadata.sorted_tables):
-            await conn.execute(table.delete())
-
-    try:
-        redis = await get_redis()
-        await redis.flushdb()
-    except Exception:
-        pass
-
+        await conn.execute(text(f"TRUNCATE TABLE {tables} RESTART IDENTITY CASCADE"))
+    await _reset_cache()
     yield
 
 
-@pytest_asyncio.fixture
+@pytest_asyncio.fixture(loop_scope="session")
 async def db_session(integration_ready: None) -> AsyncIterator[AsyncSession]:
     async with async_session_factory() as session:
         yield session
@@ -82,7 +95,7 @@ async def db_session(integration_ready: None) -> AsyncIterator[AsyncSession]:
             raise
 
 
-@pytest_asyncio.fixture
+@pytest_asyncio.fixture(loop_scope="session")
 async def client(integration_ready: None) -> AsyncIterator[AsyncClient]:
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:

@@ -11,7 +11,7 @@ from starlette.responses import JSONResponse, Response
 
 from app.core.config import Settings
 from app.core.observability import set_request_context
-from app.infrastructure.db.redis import get_redis
+from app.infrastructure.cache import get_store
 
 logger = logging.getLogger("cinetaste.request")
 
@@ -71,25 +71,28 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         return response
 
 
-def client_ip(request: Request, *, trust_x_forwarded_for: bool) -> str:
-    """Resolve client IP.
+def client_ip(request: Request, *, trusted_proxy_hops: int = 0) -> str:
+    """Client IP used as the rate-limit key.
 
-    Only honor X-Forwarded-For when the process is known to sit behind a
-    trusted reverse proxy (production). Otherwise clients can spoof the header
-    and evade rate limits.
+    Each proxy appends the address it received the request from to
+    X-Forwarded-For, so the entry ``trusted_proxy_hops`` from the right was
+    written by our outermost trusted proxy. Entries further left come from the
+    client and can be forged, so the left-most value is never trusted.
     """
-    if trust_x_forwarded_for:
-        forwarded = request.headers.get("x-forwarded-for")
-        if forwarded:
-            return forwarded.split(",")[0].strip() or "unknown"
+    if trusted_proxy_hops > 0:
+        raw = request.headers.get("x-forwarded-for", "")
+        hops = [part.strip() for part in raw.split(",") if part.strip()]
+        if hops:
+            return hops[-trusted_proxy_hops] if len(hops) >= trusted_proxy_hops else hops[0]
     return request.client.host if request.client else "unknown"
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
-    """Fixed-window rate limiting via Redis.
+    """Fixed-window rate limiting per client IP and route family.
 
-    - Auth routes: **fail closed** if Redis is unavailable (prevents brute force).
-    - Other routes: fail open with a warning (recs remain available).
+    Counters live in Redis when configured, otherwise in process (see
+    ``app.infrastructure.cache``). If the store itself fails, auth routes fail
+    closed (brute-force protection) and other routes fail open.
     """
 
     def __init__(self, app, settings: Settings) -> None:
@@ -103,12 +106,14 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         """Return (max_requests, window_seconds)."""
         if path.endswith("/auth/login") or path.endswith("/auth/register"):
             return self._settings.rate_limit_auth_requests, self._settings.rate_limit_auth_window_seconds
+        if path.endswith("/auth/forgot-password") or path.endswith("/auth/reset-password"):
+            return self._settings.rate_limit_auth_requests, self._settings.rate_limit_auth_window_seconds
         if self._is_auth_path(path):
             return self._settings.rate_limit_auth_requests * 2, self._settings.rate_limit_auth_window_seconds
         return self._settings.rate_limit_requests, self._settings.rate_limit_window_seconds
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
-        if not self._settings.rate_limit_enabled:
+        if not self._settings.rate_limit_enabled or request.method == "OPTIONS":
             return await call_next(request)
 
         path = request.url.path
@@ -116,36 +121,17 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         if path.endswith("/health") or path.endswith("/ready"):
             return await call_next(request)
 
-        trust_xff = self._settings.is_production
-        ip = client_ip(request, trust_x_forwarded_for=trust_xff)
-
+        ip = client_ip(request, trusted_proxy_hops=self._settings.trusted_proxy_hops)
         max_requests, window = self._limits_for(path)
         # Bucket by route family, not full path+query, to limit cardinality.
         family = "auth" if self._is_auth_path(path) else "api"
         bucket = f"rl:{ip}:{family}:{window}"
 
         try:
-            redis = await get_redis()
-            current = await redis.incr(bucket)
-            if current == 1:
-                await redis.expire(bucket, window)
-            if current > max_requests:
-                ttl = await redis.ttl(bucket)
-                return JSONResponse(
-                    status_code=429,
-                    content={
-                        "code": "rate_limited",
-                        "message": "Too many requests. Please slow down.",
-                    },
-                    headers={
-                        "Retry-After": str(max(ttl, 1)),
-                        "X-RateLimit-Limit": str(max_requests),
-                    },
-                )
+            current, retry_after = await get_store().hit(bucket, window_seconds=window)
         except Exception:
             logger.warning("rate_limit_unavailable path=%s", path, exc_info=True)
             if self._is_auth_path(path):
-                # Fail closed for auth: better temporary 503 than open brute-force.
                 return JSONResponse(
                     status_code=503,
                     content={
@@ -154,5 +140,18 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                     },
                     headers={"Retry-After": "5"},
                 )
+            return await call_next(request)
 
+        if current > max_requests:
+            return JSONResponse(
+                status_code=429,
+                content={
+                    "code": "rate_limited",
+                    "message": "Too many requests. Please slow down.",
+                },
+                headers={
+                    "Retry-After": str(retry_after),
+                    "X-RateLimit-Limit": str(max_requests),
+                },
+            )
         return await call_next(request)

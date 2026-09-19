@@ -4,7 +4,7 @@ from sqlalchemy import text
 
 from app.api.schemas.common import HealthResponse, ReadyResponse
 from app.core.config import get_settings
-from app.infrastructure.db.redis import get_redis
+from app.infrastructure.cache import get_store
 from app.infrastructure.db.session import engine
 
 router = APIRouter()
@@ -19,12 +19,11 @@ async def health() -> HealthResponse:
 
 @router.get("/ready", response_model=ReadyResponse)
 async def ready() -> ReadyResponse | JSONResponse:
-    """Readiness: DB must be up. Redis is optional (caching only).
+    """Readiness: DB must be up. The cache is optional (Redis or in-process).
 
     Returns HTTP 503 when DB is down so load balancers drain the instance.
     """
     db_status = "ok"
-    redis_status = "unavailable"
 
     try:
         async with engine.connect() as conn:
@@ -32,15 +31,16 @@ async def ready() -> ReadyResponse | JSONResponse:
     except Exception:
         db_status = "error"
 
+    store = get_store()
     try:
-        redis = await get_redis()
-        pong = await redis.ping()
-        redis_status = "ok" if pong else "error"
-    except Exception:
-        redis_status = "unavailable"
+        await store.ping()
+    except Exception:  # noqa: BLE001 — cache is optional; report it, don't fail
+        pass
 
     db_ok = db_status == "ok"
-    body = ReadyResponse(status="ok" if db_ok else "not_ready", database=db_status, redis=redis_status)
+    body = ReadyResponse(
+        status="ok" if db_ok else "not_ready", database=db_status, cache=store.backend
+    )
     if not db_ok:
         return JSONResponse(status_code=503, content=body.model_dump())
     return body

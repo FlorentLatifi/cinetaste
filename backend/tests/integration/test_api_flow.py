@@ -27,7 +27,7 @@ async def test_health_and_ready(client: AsyncClient, api_prefix: str) -> None:
     body = ready.json()
     assert body["status"] == "ok"
     assert body["database"] == "ok"
-    assert body["redis"] == "ok"
+    assert body["cache"] in {"redis", "memory"}
 
 
 @pytest.mark.asyncio

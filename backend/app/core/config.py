@@ -31,7 +31,8 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
 
     database_url: str
-    redis_url: str = "redis://localhost:6379/0"
+    # Optional. Empty → in-process cache/rate limits (fine for one process).
+    redis_url: str = ""
 
     tmdb_api_key: str = ""
     tmdb_base_url: str = "https://api.themoviedb.org/3"
@@ -51,6 +52,9 @@ class Settings(BaseSettings):
     rec_use_ann: bool = True
     # Append-only For You impression log (offline eval). Fail-open if write fails.
     rec_log_impressions: bool = True
+    # Taste drifts: an interaction loses half its influence after this many days
+    # (0 disables decay).
+    taste_half_life_days: float = Field(default=365.0, ge=0)
 
     # Rate limiting
     rate_limit_enabled: bool = True
@@ -61,6 +65,10 @@ class Settings(BaseSettings):
 
     # Comma-separated hostnames allowed in production (optional)
     trusted_hosts: str = ""
+
+    # Reverse proxies in front of the API that append to X-Forwarded-For
+    # (0 = ignore the header). Render alone: 1. Vercel rewrite → Render: 2.
+    trusted_proxy_hops: int = Field(default=0, ge=0, le=5)
 
     # Force Secure cookies even outside production (e.g. https:// local tunnels)
     cookie_secure: bool = False
