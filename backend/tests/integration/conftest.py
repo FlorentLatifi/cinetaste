@@ -143,8 +143,6 @@ async def seed_catalog(session: AsyncSession, *, count: int = 24) -> list[Title]
             media_type="movie",
             release_year=year,
             runtime=100 + i,
-            popularity=float(80 - i),
-            vote_average=6.5 + (i % 3) * 0.5,
             original_language="en",
             countries=["US"],
         )

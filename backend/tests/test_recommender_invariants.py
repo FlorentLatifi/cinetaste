@@ -336,3 +336,32 @@ def test_explanations_do_not_claim_unmodelled_pacing() -> None:
     )
     assert reasons
     assert not any("pacing" in r.message for r in reasons)
+
+
+def test_synopsis_filler_words_do_not_create_similarity() -> None:
+    """Hashing "the", "of", "young"... made unrelated titles look alike."""
+    from app.recommendation.embeddings import build_title_embedding, content_tokens
+
+    assert content_tokens("The story of a young man who must find his way in the world") == []
+    assert content_tokens("A detective hunts a smuggler through the harbor") == [
+        "detective",
+        "hunts",
+        "smuggler",
+        "harbor",
+    ]
+    common = dict(
+        genres=["Drama"],
+        keywords=[],
+        people=[],
+        media_type="movie",
+        release_year=2010,
+        runtime=100,
+    )
+    a = build_title_embedding(name="A", overview="the story of a young man and his life", **common)
+    b = build_title_embedding(name="B", overview="the story of a young woman and her world", **common)
+    # Only genre/decade/runtime/format remain in common; synopsis filler adds nothing.
+    assert cosine(a, b) == pytest.approx(1.0)
+    # Real synopsis words do separate titles that share only coarse metadata.
+    c = build_title_embedding(name="C", overview="a detective hunts smugglers", **common)
+    d = build_title_embedding(name="D", overview="astronauts repair a failing station", **common)
+    assert cosine(c, d) < cosine(a, b) - 0.05
