@@ -44,6 +44,15 @@ class TasteFeatureOut(BaseModel):
     weight: float
 
 
+class TasteFeatureIn(BaseModel):
+    """One feature chip from an exported snapshot (bounded: stored in JSONB)."""
+
+    key: str = Field(min_length=3, max_length=200)
+    family: str = Field(default="", max_length=40)
+    label: str = Field(default="", max_length=200)
+    weight: float = Field(ge=-10.0, le=10.0)
+
+
 class TasteSummaryOut(BaseModel):
     """Interpretable slice of the user's taste profile for the Account page."""
 
@@ -96,8 +105,8 @@ class TasteImportRequest(BaseModel):
         alias="schema",
         description='Must be "cinetaste.taste_snapshot.v1"',
     )
-    likes: list[TasteFeatureOut] = Field(default_factory=list, max_length=40)
-    dislikes: list[TasteFeatureOut] = Field(default_factory=list, max_length=40)
+    likes: list[TasteFeatureIn] = Field(default_factory=list, max_length=40)
+    dislikes: list[TasteFeatureIn] = Field(default_factory=list, max_length=40)
 
 
 class TasteImportResultOut(BaseModel):

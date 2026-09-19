@@ -67,23 +67,47 @@ async def test_request_password_reset_known_email_dev_returns_token() -> None:
 
 
 @pytest.mark.asyncio
-async def test_request_password_reset_production_hides_token() -> None:
+async def test_request_password_reset_production_emails_and_hides_token() -> None:
     session = AsyncMock()
     user = _user()
     session.scalar = AsyncMock(return_value=user)
     session.execute = AsyncMock()
     session.flush = AsyncMock()
     session.add = MagicMock()
+    email = AsyncMock()
     auth = AuthService(
         session,
         _settings(
             app_env="production",
             jwt_secret="x" * 48,
             cors_origins="https://cinetaste.vercel.app",
+            smtp_host="smtp.example.com",
+            public_app_url="https://cinetaste.app",
         ),
+        email=email,
     )
     raw = await auth.request_password_reset(email=user.email)
     assert raw is None
+    email.send.assert_awaited_once()
+    assert "https://cinetaste.app/reset-password?token=" in email.send.call_args.kwargs["text_body"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("env", ["staging", "production"])
+async def test_request_password_reset_without_email_never_leaks_token(env: str) -> None:
+    """Staging used to return the reset token in the response to anyone."""
+    session = AsyncMock()
+    session.scalar = AsyncMock(return_value=_user())
+    auth = AuthService(
+        session,
+        _settings(app_env=env, jwt_secret="x" * 48, cors_origins="https://cinetaste.vercel.app"),
+    )
+    with pytest.raises(AppError) as exc:
+        await auth.request_password_reset(email="a@example.com")
+    assert exc.value.status_code == 503
+    assert exc.value.code == "email_unavailable"
+    # Decided before the lookup: the response can't reveal whether the email exists.
+    session.scalar.assert_not_awaited()
 
 
 @pytest.mark.asyncio

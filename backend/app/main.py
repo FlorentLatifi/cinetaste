@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.middleware.trustedhost import TrustedHostMiddleware
@@ -60,6 +61,30 @@ def create_app() -> FastAPI:
         if request_id:
             content["request_id"] = request_id
         return JSONResponse(status_code=exc.status_code, content=content)
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_error_handler(
+        request: Request, exc: RequestValidationError
+    ) -> JSONResponse:
+        """Same {code, message} shape as every other error, plus field details."""
+        errors = [
+            {
+                "field": ".".join(str(part) for part in err.get("loc", ()) if part != "body"),
+                "message": err.get("msg", "Invalid value"),
+            }
+            for err in exc.errors()
+        ]
+        first = errors[0] if errors else {"field": "", "message": "Invalid request"}
+        message = f"{first['field']}: {first['message']}" if first["field"] else first["message"]
+        return JSONResponse(
+            status_code=422,
+            content={
+                "code": "validation_error",
+                "message": message,
+                "errors": errors,
+                "request_id": getattr(request.state, "request_id", None),
+            },
+        )
 
     if not settings.app_debug:
 

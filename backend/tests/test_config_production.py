@@ -54,6 +54,26 @@ def test_production_rejects_localhost_cors() -> None:
         Settings(**_base(cors_origins="http://localhost:5173"))
 
 
+def test_app_env_aliases_are_normalized() -> None:
+    assert Settings(**_base(app_env="prod")).app_env == "production"
+    local = Settings(**{**_base(), "app_env": "development", "cors_origins": "http://localhost:5173"})
+    assert local.app_env == "local"
+    assert local.is_dev_like
+
+
+def test_unknown_app_env_is_rejected() -> None:
+    """A typo must not silently disable production safety checks."""
+    with pytest.raises(ValidationError):
+        Settings(**_base(app_env="prod-eu"))
+
+
+def test_production_email_requires_public_https_url() -> None:
+    with pytest.raises(ValidationError):
+        Settings(**_base(smtp_host="smtp.example.com", public_app_url="http://localhost:5173"))
+    ok = Settings(**_base(smtp_host="smtp.example.com", public_app_url="https://cinetaste.app"))
+    assert ok.email_configured
+
+
 def test_local_allows_dev_defaults() -> None:
     settings = Settings(
         app_env="local",
