@@ -39,13 +39,27 @@ def test_set_refresh_cookie_httponly_local() -> None:
     assert "lax" in header.lower() or "SameSite=lax" in header or "samesite=lax" in header.lower()
 
 
-def test_set_refresh_cookie_production_samesite_none() -> None:
-    s = _settings(app_env="production", cors_origins="https://cinetaste.vercel.app", jwt_secret="x" * 48)
+def _prod(**kwargs) -> Settings:
+    return _settings(
+        app_env="production", cors_origins="https://cinetaste.vercel.app", jwt_secret="x" * 48, **kwargs
+    )
+
+
+def test_set_refresh_cookie_production_is_first_party_lax_and_secure() -> None:
+    """Default deploy proxies /api through the SPA's own domain (same-site)."""
     response = Response()
-    set_refresh_cookie(response, "prod-refresh", s)
-    header = response.headers.get("set-cookie", "")
-    assert "none" in header.lower()
-    assert "secure" in header.lower()
+    set_refresh_cookie(response, "prod-refresh", _prod())
+    header = response.headers.get("set-cookie", "").lower()
+    assert "samesite=lax" in header
+    assert "secure" in header
+
+
+def test_set_refresh_cookie_cross_site_requires_secure() -> None:
+    response = Response()
+    set_refresh_cookie(response, "x-site", _settings(cookie_samesite="none"))
+    header = response.headers.get("set-cookie", "").lower()
+    assert "samesite=none" in header
+    assert "secure" in header
 
 
 def test_clear_refresh_cookie() -> None:

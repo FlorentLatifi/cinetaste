@@ -1,9 +1,24 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Accepted APP_ENV spellings → canonical environment.
+_ENV_ALIASES = {
+    "local": "local",
+    "dev": "local",
+    "development": "local",
+    "test": "test",
+    "testing": "test",
+    "ci": "test",
+    "staging": "staging",
+    "stage": "staging",
+    "prod": "production",
+    "production": "production",
+}
 
 _WEAK_SECRETS = {
     "local-dev-only-change-me-to-a-long-random-string-32chars",
@@ -20,6 +35,7 @@ class Settings(BaseSettings):
     )
 
     app_name: str = "CineTaste"
+    # local | test | staging | production (aliases accepted, anything else fails).
     app_env: str = "local"
     app_debug: bool = False
     api_prefix: str = "/api/v1"
@@ -29,6 +45,10 @@ class Settings(BaseSettings):
     jwt_access_ttl_minutes: int = 15
     jwt_refresh_ttl_days: int = 30
     jwt_algorithm: str = "HS256"
+    # A refresh token presented again within this many seconds of being rotated
+    # (two tabs, a double-fired effect) gets a sibling token instead of being
+    # treated as theft, which would revoke the whole session family.
+    refresh_reuse_grace_seconds: int = Field(default=20, ge=0, le=120)
 
     database_url: str
     # Optional. Empty → in-process cache/rate limits (fine for one process).
@@ -72,6 +92,10 @@ class Settings(BaseSettings):
 
     # Force Secure cookies even outside production (e.g. https:// local tunnels)
     cookie_secure: bool = False
+    # "lax" when the SPA reaches the API on the same site (Vite proxy locally,
+    # Vercel rewrite in production). "none" only if the browser calls the API on
+    # another site directly — third-party cookies are blocked by Safari.
+    cookie_samesite: Literal["lax", "strict", "none"] = "lax"
 
     # Observability (optional — leave empty to disable)
     sentry_dsn: str = ""
@@ -90,6 +114,15 @@ class Settings(BaseSettings):
     smtp_password: str = ""
     smtp_from: str = ""
     smtp_use_tls: bool = True
+
+    @field_validator("app_env", mode="before")
+    @classmethod
+    def normalize_app_env(cls, value: str) -> str:
+        key = str(value).strip().lower()
+        if key not in _ENV_ALIASES:
+            allowed = ", ".join(sorted(set(_ENV_ALIASES.values())))
+            raise ValueError(f"APP_ENV must be one of {allowed} (got {value!r})")
+        return _ENV_ALIASES[key]
 
     @field_validator("cors_origins", mode="before")
     @classmethod
@@ -126,7 +159,16 @@ class Settings(BaseSettings):
 
     @property
     def is_production(self) -> bool:
-        return self.app_env.lower() in {"prod", "production"}
+        return self.app_env == "production"
+
+    @property
+    def is_dev_like(self) -> bool:
+        """Local development and automated tests (dev conveniences allowed)."""
+        return self.app_env in {"local", "test"}
+
+    @property
+    def email_configured(self) -> bool:
+        return bool(self.smtp_host.strip())
 
     @model_validator(mode="after")
     def validate_production_safety(self) -> Settings:
@@ -150,6 +192,14 @@ class Settings(BaseSettings):
 
         if self.database_url.startswith("postgresql+asyncpg://cinetaste:cinetaste@"):
             raise ValueError("Default local DATABASE_URL credentials are not allowed in production")
+
+        if self.email_configured and (
+            not self.public_app_url.startswith("https://") or "localhost" in self.public_app_url
+        ):
+            raise ValueError(
+                "PUBLIC_APP_URL must be the public https:// SPA URL when email is enabled "
+                "(password-reset links point there)"
+            )
 
         return self
 

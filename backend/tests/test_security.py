@@ -39,3 +39,14 @@ def test_refresh_token_hash_is_stable() -> None:
     raw = generate_refresh_token()
     assert hash_token(raw) == hash_token(raw)
     assert len(hash_token(raw)) == 64
+
+
+def test_bcrypt_uses_first_72_bytes_consistently() -> None:
+    long_password = "p" * 100
+    hashed = hash_password(long_password)
+    assert hashed.startswith("$2b$12$")
+    assert verify_password(long_password, hashed)
+
+
+def test_verify_rejects_malformed_hash() -> None:
+    assert not verify_password("anything", "not-a-bcrypt-hash")
