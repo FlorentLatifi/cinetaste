@@ -34,6 +34,8 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+import numpy as np
+
 from app.infrastructure.db.models.catalog import EMBEDDING_DIM
 
 FEATURE_SCHEMA_VERSION = 2
@@ -59,8 +61,10 @@ _KEYWORD_NOISE = frozenset(
     }
 )
 
-# Keyword (substring or exact, lowercased) → tone tag for explainable mood.
-# First match wins per keyword; multiple tones can attach to one title.
+# Keyword phrase (matched as whole words, lowercased) → tone tag for explainable
+# mood. First match wins per keyword; multiple tones can attach to one title.
+# Whole-word matching matters: a substring match maps "dwarf", "award" and
+# "warehouse" to "war", and "intense" to "tense".
 _KEYWORD_TONE_RULES: list[tuple[str, str, float]] = [
     ("neo-noir", "dark", 1.0),
     ("film noir", "dark", 1.0),
@@ -97,6 +101,11 @@ _KEYWORD_TONE_RULES: list[tuple[str, str, float]] = [
     ("martial arts", "action_heavy", 0.85),
     ("slow burn", "meditative", 0.95),
     ("atmospheric", "meditative", 0.8),
+]
+
+_TONE_PATTERNS: list[tuple[re.Pattern[str], str, float]] = [
+    (re.compile(r"(?<![a-z0-9])" + re.escape(needle) + r"(?![a-z0-9])"), tone, weight)
+    for needle, tone, weight in _KEYWORD_TONE_RULES
 ]
 
 # Family multipliers for sparse scoring / family normalization.
@@ -237,8 +246,8 @@ def tones_from_keywords(keywords: Iterable[str]) -> dict[str, float]:
     tones: dict[str, float] = {}
     for kw in keywords:
         low = str(kw).strip().lower()
-        for needle, tone, weight in _KEYWORD_TONE_RULES:
-            if needle in low:
+        for pattern, tone, weight in _TONE_PATTERNS:
+            if pattern.search(low):
                 prev = tones.get(tone, 0.0)
                 if weight > prev:
                     tones[tone] = weight
@@ -465,27 +474,26 @@ def build_title_signals(
 
 
 def blend_vectors(
-    vectors: list[tuple[list[float], float]],
+    vectors: list[tuple[Any, float]],
 ) -> list[float] | None:
-    if not vectors:
+    """Weighted sum of vectors, L2-normalised. None when nothing carries weight."""
+    usable = [(vec, weight) for vec, weight in vectors if vec is not None and len(vec) > 0]
+    if not usable or sum(abs(weight) for _vec, weight in usable) < 1e-12:
         return None
-    acc = [0.0] * EMBEDDING_DIM
-    total_w = 0.0
-    for vec, weight in vectors:
-        if not vec:
-            continue
-        total_w += abs(weight)
-        for i, v in enumerate(vec):
-            acc[i] += v * weight
-    if total_w < 1e-12:
+    matrix = np.asarray([vec for vec, _w in usable], dtype=np.float64)
+    weights = np.asarray([weight for _vec, weight in usable], dtype=np.float64)
+    acc = weights @ matrix
+    norm = float(np.linalg.norm(acc))
+    if norm < 1e-12:
         return None
-    return _l2_normalize(acc)
+    return (acc / norm).tolist()
 
 
-def cosine(a: list[float] | None, b: list[float] | None) -> float:
-    if not a or not b or len(a) != len(b):
+def cosine(a: Any | None, b: Any | None) -> float:
+    """Dot product of two (already L2-normalised) vectors; 0 when unusable."""
+    if a is None or b is None or len(a) == 0 or len(a) != len(b):
         return 0.0
-    return float(sum(x * y for x, y in zip(a, b, strict=True)))
+    return float(np.dot(np.asarray(a, dtype=np.float64), np.asarray(b, dtype=np.float64)))
 
 
 def top_feature_overlap(
