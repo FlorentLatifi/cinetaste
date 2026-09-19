@@ -2,7 +2,8 @@
 
 Usage (from backend/ with env loaded):
 
-    python -m app.scripts.ingest_catalog --pages 3
+    python -m app.scripts.ingest_catalog              # ~10 pages x 2 sorts x movie+TV
+    python -m app.scripts.ingest_catalog --pages 25   # larger catalog
     python -m app.scripts.ingest_catalog --seed-only
 
 Always prioritizes the curated onboarding seed deck
@@ -47,7 +48,12 @@ async def main(pages: int, include_tv: bool, *, seed_only: bool) -> int:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Ingest TMDb catalog into CineTaste")
-    parser.add_argument("--pages", type=int, default=3, help="Discover pages per media type")
+    parser.add_argument(
+        "--pages",
+        type=int,
+        default=10,
+        help="Discover pages (20 titles each) per sort order and media type",
+    )
     parser.add_argument("--movies-only", action="store_true")
     parser.add_argument(
         "--seed-only",
