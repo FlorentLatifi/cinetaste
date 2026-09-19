@@ -46,8 +46,6 @@ def test_held_out_like_surfaces_in_slate() -> None:
         media_type="movie",
         release_year=2019,
         runtime=110,
-        popularity=30,
-        vote_average=8.0,
     )
     held = _T(["Thriller"], base, pop=25, vote=8.0)
     comedy = _T(
@@ -61,8 +59,6 @@ def test_held_out_like_surfaces_in_slate() -> None:
             media_type="movie",
             release_year=2019,
             runtime=100,
-            popularity=90,
-            vote_average=6.5,
         ),
         pop=90,
         vote=6.5,

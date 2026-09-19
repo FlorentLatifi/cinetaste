@@ -1,7 +1,19 @@
-"""Deterministic content embeddings + sparse feature snapshots.
+"""Content features and content vectors for titles.
 
-No external model dependency for MVP. Re-embed in batch when upgrading to
-sentence-transformers or a hosted embedding API.
+Two representations are built from the same TMDb metadata at ingest time:
+
+* **Sparse feature snapshot** — interpretable weights such as
+  ``person:director:denis villeneuve`` or ``tone:dark``. Taste profiles,
+  sparse scoring and every explanation use these.
+* **Dense content vector (384-d)** — the same content features plus the
+  meaningful words of the overview, projected with the *hashing trick*
+  (feature hashing): each feature string is hashed to one of 384 dimensions
+  with a ±1 sign. It is not a learned/semantic embedding; it exists so
+  pgvector can do nearest-neighbour retrieval, "more like this" and MMR
+  diversity over a fixed-size vector. Collisions are the price of having no
+  vocabulary or model to maintain. A learned text embedding (same dimension)
+  can replace it without schema changes — re-embed with
+  ``python -m app.scripts.reembed_catalog --force``.
 
 Feature schema (FEATURE_SCHEMA_VERSION)
 ---------------------------------------
@@ -38,9 +50,28 @@ import numpy as np
 
 from app.infrastructure.db.models.catalog import EMBEDDING_DIM
 
-FEATURE_SCHEMA_VERSION = 2
+FEATURE_SCHEMA_VERSION = 3
 
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
+
+# Words found in almost every synopsis. Hashing them made unrelated titles look
+# alike ("the", "of", "young", "must", "find"...), so they are dropped.
+_STOPWORDS = frozenset(
+    """
+    a about after again against all also among an and any are around as at away back be
+    because been before being between both but by can could did do does doing down during
+    each even ever every few for from further get gets had has have having he her here
+    hers herself him himself his how however i if in into is it its itself just last let
+    like may me more most much must my myself never new no nor not now of off on once one
+    only or other our ours out over own same she should since so some soon such than that
+    the their theirs them themselves then there these they this those three through to too
+    two under until up upon very was way we were what when where which while who whom why
+    will with within without would yet you your yours
+    become becomes begin begins day days discover discovers film find finds first found
+    life lives man men movie story take takes time turns woman women world year years young
+    """.split()
+)
+OVERVIEW_TOKEN_LIMIT = 30
 
 # Ultra-generic TMDb keywords that add noise more than signal.
 _KEYWORD_NOISE = frozenset(
@@ -202,6 +233,20 @@ def tokenize(text: str | None) -> list[str]:
     return _TOKEN_RE.findall(text.lower())
 
 
+def content_tokens(text: str | None, *, limit: int = OVERVIEW_TOKEN_LIMIT) -> list[str]:
+    """Distinct meaningful words (no stopwords, numbers or 1–2 letter tokens)."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for token in tokenize(text):
+        if len(token) < 3 or token.isdigit() or token in _STOPWORDS or token in seen:
+            continue
+        seen.add(token)
+        out.append(token)
+        if len(out) >= limit:
+            break
+    return out
+
+
 def normalize_person_signals(
     people: Iterable[PersonSignal | tuple[str, str] | tuple[str, str, int | None] | str],
 ) -> list[PersonSignal]:
@@ -358,21 +403,29 @@ def build_title_embedding(
     media_type: str,
     release_year: int | None,
     runtime: int | None,
-    popularity: float,
-    vote_average: float,
     original_language: str | None = None,
     countries: Iterable[str] | None = None,
 ) -> list[float]:
-    """Hashing-trick embedding aligned with the sparse feature schema."""
+    """Hashed content vector (see module docstring).
+
+    Weights favour specific signals (keywords, people, synopsis words) over
+    coarse buckets (genre, decade, runtime, format), so two titles are close
+    because they share creative DNA, not just a genre and a decade.
+    Popularity and rating are deliberately absent: they are ranking priors,
+    not content, and made titles "similar" because they scored alike.
+    ``name`` is unused for the same reason (titles rarely share meaningful
+    words); it stays in the signature for callers' symmetry with the snapshot.
+    """
+    del name
     vec = [0.0] * EMBEDDING_DIM
 
-    _add(vec, f"media:{media_type}", 1.2)
+    _add(vec, f"media:{media_type}", 0.5)
     for i, g in enumerate(genres):
-        _add(vec, f"genre:{str(g).lower()}", 2.0 if i == 0 else 1.4)
+        _add(vec, f"genre:{str(g).lower()}", 1.5 if i == 0 else 1.0)
 
     kw_list = filter_keywords(keywords, limit=20)
     for k in kw_list:
-        _add(vec, f"kw:{k}", 1.35)
+        _add(vec, f"kw:{k}", 1.3)
 
     for person in normalize_person_signals(people):
         if not person.name.strip():
@@ -380,9 +433,7 @@ def build_title_embedding(
         _add(vec, person.feature_key(), person.embed_weight())
 
     if release_year:
-        decade = (release_year // 10) * 10
-        _add(vec, f"decade:{decade}", 1.1)
-        _add(vec, f"year:{release_year}", 0.25)
+        _add(vec, f"decade:{(release_year // 10) * 10}", 0.6)
 
     if runtime is not None:
         if runtime < 90:
@@ -393,29 +444,21 @@ def build_title_embedding(
             bucket = "long"
         else:
             bucket = "epic"
-        _add(vec, f"runtime:{bucket}", 0.7)
+        _add(vec, f"runtime:{bucket}", 0.3)
 
     if original_language:
-        _add(vec, f"lang:{original_language.strip().lower()}", 1.0)
+        _add(vec, f"lang:{original_language.strip().lower()}", 0.8)
 
     for c in countries or []:
         code = str(c).strip().upper()
         if code:
-            _add(vec, f"country:{code}", 0.95)
+            _add(vec, f"country:{code}", 0.5)
 
     for tone, weight in tones_from_keywords(kw_list).items():
-        _add(vec, f"tone:{tone}", 1.1 * weight)
+        _add(vec, f"tone:{tone}", 1.0 * weight)
 
-    # Soft popularity / quality signals (secondary to taste)
-    pop_bucket = min(int(popularity // 20), 10)
-    _add(vec, f"pop:{pop_bucket}", 0.25)
-    rating_bucket = int(round(vote_average))
-    _add(vec, f"rating:{rating_bucket}", 0.35)
-
-    for token in tokenize(name)[:10]:
-        _add(vec, f"title:{token}", 0.45)
-    for token in tokenize(overview)[:28]:
-        _add(vec, f"plot:{token}", 0.28)
+    for token in content_tokens(overview):
+        _add(vec, f"plot:{token}", 0.35)
 
     return _l2_normalize(vec)
 
@@ -430,8 +473,6 @@ def build_title_signals(
     media_type: str,
     release_year: int | None,
     runtime: int | None,
-    popularity: float,
-    vote_average: float,
     original_language: str | None = None,
     countries: Sequence[str] | None = None,
 ) -> tuple[list[float], dict[str, float], dict[str, Any]]:
@@ -458,8 +499,6 @@ def build_title_signals(
         media_type=media_type,
         release_year=release_year,
         runtime=runtime,
-        popularity=popularity,
-        vote_average=vote_average,
         original_language=original_language,
         countries=country_list,
     )

@@ -49,8 +49,6 @@ class _T:
             media_type="movie",
             release_year=2018,
             runtime=110,
-            popularity=pop,
-            vote_average=vote,
         )
         self.extra = {
             "feature_snapshot": features_from_title(

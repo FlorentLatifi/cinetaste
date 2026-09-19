@@ -302,8 +302,6 @@ class CatalogIngestService:
             media_type=media_type,
             release_year=year,
             runtime=runtime,
-            popularity=title.popularity,
-            vote_average=title.vote_average,
             original_language=title.original_language,
             countries=countries,
         )
