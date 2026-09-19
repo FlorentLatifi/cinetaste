@@ -1,9 +1,21 @@
+"""Ranking: score candidates, diversify, add exploration, explain.
+
+Pure functions over title-like objects (``id``, ``embedding``, ``extra``,
+``genres``, ``popularity``, ``vote_average``, optional ``vote_count``/``name``),
+so the same code runs in the API, in unit tests and in offline evaluation.
+"""
+
 from __future__ import annotations
 
+from collections import Counter
+from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
-from app.recommendation.embeddings import cosine, sparse_channel_scores
+import numpy as np
+
+from app.recommendation.embeddings import sparse_channel_scores
 from app.recommendation.explanations import (
     Reason,
     build_reasons,
@@ -12,26 +24,50 @@ from app.recommendation.explanations import (
 
 # Re-export for callers/tests that import Reason from pipeline.
 __all__ = [
+    "DEFAULT_WEIGHTS",
     "Reason",
     "RankedItem",
+    "RankingWeights",
     "annotate_discovery_reasons",
     "explain",
     "gem_boost",
     "mmr_select",
+    "primary_genre",
     "rank_titles",
 ]
 
 
-# Blend of dense similarity vs sparse explainable features.
-W_SIM = 0.42
-W_POS = 0.40
-W_NEG = 0.12
-W_GEM = 1.0
-W_COLD = 1.0
+@dataclass(frozen=True, slots=True)
+class RankingWeights:
+    """Blend of dense similarity, sparse (explainable) overlap and priors.
+
+    Hand-set values; ``python -m app.scripts.evaluate_recommender`` measures
+    how they perform against baselines and ablations (docs/EVALUATION.md).
+    """
+
+    similarity: float = 0.42
+    sparse_positive: float = 0.40
+    sparse_negative: float = 0.12
+    hidden_gem: float = 1.0
+    cold_popularity: float = 1.0
 
 
-def gem_boost(vote_average: float, popularity: float) -> float:
+DEFAULT_WEIGHTS = RankingWeights()
+
+# Diversity: at most this many titles share a primary genre in one slate.
+MAX_PER_PRIMARY_GENRE = 4
+# Exploration picks must still be well rated.
+EXPLORATION_MIN_VOTE = 6.8
+# Profiles with less positive mass than this get a popularity prior.
+COLD_START_POSITIVE_MASS = 0.8
+# Ratings from a handful of votes are noise; don't call those "hidden gems".
+GEM_MIN_VOTES = 50
+
+
+def gem_boost(vote_average: float, popularity: float, vote_count: int | None = None) -> float:
     """Quality-vs-popularity bonus for under-the-radar titles (hidden gems)."""
+    if vote_count is not None and vote_count < GEM_MIN_VOTES:
+        return 0.0
     if vote_average >= 7.2 and popularity < 40:
         return 0.08
     if vote_average >= 7.5 and popularity < 80:
@@ -86,7 +122,6 @@ def annotate_discovery_reasons(
         merged = [primary, *extra, *rest]
     else:
         merged = [*extra]
-    # De-dupe by code order-preserving
     seen: set[str] = set()
     out: list[Reason] = []
     for r in merged:
@@ -119,6 +154,22 @@ def _feature_snapshot(title_extra: dict[str, Any] | None) -> dict[str, float]:
     return out
 
 
+def primary_genre(title: Any) -> str:
+    """Main genre: the highest-weighted genre in the feature snapshot.
+
+    The snapshot keeps TMDb's genre order (first genre weighs most); the ORM
+    ``genres`` relationship is unordered, so it is only a fallback.
+    """
+    best_key, best_weight = "", 0.0
+    for key, weight in _feature_snapshot(getattr(title, "extra", None)).items():
+        if key.startswith("genre:") and weight > best_weight:
+            best_key, best_weight = key, weight
+    if best_key:
+        return best_key[len("genre:") :]
+    genres = getattr(title, "genres", None) or []
+    return str(genres[0].name).lower() if genres else "unknown"
+
+
 def explain(
     *,
     user_features: dict[str, Any],
@@ -141,41 +192,89 @@ def explain(
     )
 
 
+def _unit_matrix(vectors: Sequence[Any]) -> np.ndarray:
+    """Stack vectors into an L2-normalised matrix; missing ones become zero rows."""
+    dim = next((len(v) for v in vectors if v is not None and len(v) > 0), 0)
+    matrix = np.zeros((len(vectors), dim), dtype=np.float64)
+    for i, vec in enumerate(vectors):
+        if vec is not None and len(vec) == dim:
+            matrix[i] = np.asarray(vec, dtype=np.float64)
+    norms = np.linalg.norm(matrix, axis=1, keepdims=True)
+    np.divide(matrix, norms, out=matrix, where=norms > 1e-12)
+    return matrix
+
+
+def _mmr_order(
+    relevance: np.ndarray,
+    unit: np.ndarray,
+    *,
+    k: int,
+    lambda_mult: float,
+    groups: np.ndarray | None = None,
+    max_per_group: int | None = None,
+) -> list[int]:
+    """Greedy Maximal Marginal Relevance, optionally capping picks per group.
+
+    Each step picks ``argmax(λ·relevance − (1−λ)·max_similarity_to_picked)``.
+    Vectorised: one matrix-vector product per pick instead of pairwise loops.
+    """
+    n = len(relevance)
+    chosen: list[int] = []
+    if n == 0 or k <= 0:
+        return chosen
+    available = np.ones(n, dtype=bool)
+    max_sim = np.zeros(n, dtype=np.float64)
+    per_group: Counter[int] = Counter()
+
+    while len(chosen) < k:
+        if chosen:
+            mmr = lambda_mult * relevance - (1.0 - lambda_mult) * max_sim
+        else:
+            mmr = relevance.astype(np.float64, copy=True)
+        mmr = np.where(available, mmr, -np.inf)
+        pick = int(np.argmax(mmr))
+        if not np.isfinite(mmr[pick]):
+            break
+        chosen.append(pick)
+        available[pick] = False
+        np.maximum(max_sim, unit @ unit[pick], out=max_sim)
+        if groups is not None and max_per_group is not None:
+            group = int(groups[pick])
+            per_group[group] += 1
+            if per_group[group] >= max_per_group:
+                available &= groups != group
+    return chosen
+
+
 def mmr_select(
-    candidates: list[tuple[UUID, float, list[float] | None]],
+    candidates: list[tuple[UUID, float, Any]],
     *,
     k: int,
     lambda_mult: float = 0.7,
 ) -> list[UUID]:
-    """Maximal Marginal Relevance for diversity."""
-    selected: list[UUID] = []
-    selected_vecs: list[list[float] | None] = []
-    remaining = candidates[:]
+    """Maximal Marginal Relevance over ``(id, relevance, vector)`` candidates."""
+    if not candidates:
+        return []
+    relevance = np.asarray([float(rel) for _id, rel, _vec in candidates], dtype=np.float64)
+    unit = _unit_matrix([vec for _id, _rel, vec in candidates])
+    order = _mmr_order(relevance, unit, k=k, lambda_mult=lambda_mult)
+    return [candidates[i][0] for i in order]
 
-    while remaining and len(selected) < k:
-        best_idx = 0
-        best_score = float("-inf")
-        for i, (_tid, rel, vec) in enumerate(remaining):
-            if not selected:
-                mmr = rel
-            else:
-                max_sim = 0.0
-                for svec in selected_vecs:
-                    max_sim = max(max_sim, cosine(vec, svec))
-                mmr = lambda_mult * rel - (1.0 - lambda_mult) * max_sim
-            if mmr > best_score:
-                best_score = mmr
-                best_idx = i
-        tid, rel, vec = remaining.pop(best_idx)
-        selected.append(tid)
-        selected_vecs.append(vec)
 
-    return selected
+def _interleave(main: list[int], extra: list[int]) -> list[int]:
+    """Spread ``extra`` evenly through ``main`` (never at position 0)."""
+    if not extra:
+        return list(main)
+    out = list(main)
+    step = max(len(out) // (len(extra) + 1), 1)
+    for n, item in enumerate(extra, start=1):
+        out.insert(min(n * step + (n - 1), len(out)), item)
+    return out
 
 
 def rank_titles(
     *,
-    user_vector: list[float] | None,
+    user_vector: Sequence[float] | None,
     user_features: dict[str, Any],
     titles: list[Any],
     exclude_ids: set[UUID],
@@ -183,108 +282,165 @@ def rank_titles(
     mmr_lambda: float,
     exploration_slots: int = 3,
     explain_memory: dict[str, Any] | None = None,
+    weights: RankingWeights = DEFAULT_WEIGHTS,
+    max_per_genre: int = MAX_PER_PRIMARY_GENRE,
+    with_reasons: bool = True,
 ) -> list[RankedItem]:
-    """titles: objects with id, embedding, extra, genres, popularity, vote_average, name."""
+    """Rank candidate titles for one user.
+
+    1. Score = weighted dense similarity + sparse overlap − sparse penalty
+       + hidden-gem bonus + popularity prior (cold start only).
+    2. MMR over the top of the list, with a per-primary-genre cap.
+    3. Exploration: well-rated, moderately relevant titles from genres the slate
+       doesn't cover yet, spread through the slate.
+    4. Backfill by score, still honouring the genre cap; if the catalog can't
+       fill the slate that way, the cap is raised one step at a time.
+    """
+    if slate_size <= 0:
+        return []
     scoring_features, memory_from_features = strip_explain_memory(user_features)
     memory = explain_memory if explain_memory is not None else memory_from_features
 
-    scored: list[tuple[Any, float]] = []
-    profile_strength = sum(abs(v) for v in scoring_features.values()) if scoring_features else 0.0
-    cold = user_vector is None or profile_strength < 0.8
-
+    pool: list[Any] = []
+    seen_ids: set[UUID] = set()
     for title in titles:
-        if title.id in exclude_ids:
+        if title.id in exclude_ids or title.id in seen_ids or title.embedding is None:
             continue
-        if title.embedding is None:
-            continue
-        emb = list(title.embedding)
+        seen_ids.add(title.id)
+        pool.append(title)
+    if not pool:
+        return []
+    n = len(pool)
 
-        sim = cosine(user_vector, emb) if user_vector is not None else 0.0
-        title_features = _feature_snapshot(title.extra)
-        pos_sparse, neg_sparse = sparse_channel_scores(scoring_features, title_features)
+    unit = _unit_matrix([t.embedding for t in pool])
+    user_unit: np.ndarray | None = None
+    if user_vector is not None and len(user_vector) == unit.shape[1]:
+        vec = np.asarray(user_vector, dtype=np.float64)
+        norm = float(np.linalg.norm(vec))
+        if norm > 1e-12:
+            user_unit = vec / norm
+    similarity = unit @ user_unit if user_unit is not None else np.zeros(n)
 
-        gem = gem_boost(float(title.vote_average), float(title.popularity))
+    positive_mass = sum(v for v in scoring_features.values() if v > 0)
+    cold = user_unit is None or positive_mass < COLD_START_POSITIVE_MASS
 
-        pop_prior = 0.0
-        if cold:
-            pop_prior = min(title.popularity / 200.0, 0.22)
+    snapshots = [_feature_snapshot(t.extra) for t in pool]
+    if scoring_features:
+        sparse = [sparse_channel_scores(scoring_features, snap) for snap in snapshots]
+    else:
+        sparse = [(0.0, 0.0)] * n
+    positive = np.asarray([p for p, _ in sparse], dtype=np.float64)
+    negative = np.asarray([q for _, q in sparse], dtype=np.float64)
 
-        score = (
-            W_SIM * sim
-            + W_POS * pos_sparse
-            - W_NEG * neg_sparse
-            + W_GEM * gem
-            + W_COLD * pop_prior
+    popularity = np.asarray([float(t.popularity) for t in pool], dtype=np.float64)
+    gems = np.asarray(
+        [
+            gem_boost(float(t.vote_average), float(t.popularity), getattr(t, "vote_count", None))
+            for t in pool
+        ],
+        dtype=np.float64,
+    )
+    prior = np.minimum(popularity / 200.0, 0.22) if cold else np.zeros(n)
+
+    scores = (
+        weights.similarity * similarity
+        + weights.sparse_positive * positive
+        - weights.sparse_negative * negative
+        + weights.hidden_gem * gems
+        + weights.cold_popularity * prior
+    )
+    order = [int(i) for i in np.argsort(-scores, kind="stable")]
+
+    genres = [primary_genre(t) for t in pool]
+    genre_index = {g: i for i, g in enumerate(dict.fromkeys(genres))}
+    genre_ids = np.asarray([genre_index[g] for g in genres], dtype=np.int64)
+
+    slots = min(max(int(exploration_slots), 0), max(slate_size - 1, 0))
+    core_k = slate_size - slots
+
+    head = np.asarray(order[: max(slate_size * 4, 40)], dtype=np.int64)
+    core = [
+        int(head[i])
+        for i in _mmr_order(
+            scores[head],
+            unit[head],
+            k=core_k,
+            lambda_mult=mmr_lambda,
+            groups=genre_ids[head],
+            max_per_group=max_per_genre,
         )
-        scored.append((title, score))
-
-    scored.sort(key=lambda x: x[1], reverse=True)
-    head = scored[: max(slate_size * 4, 40)]
-
-    slots = max(int(exploration_slots), 0)
-    exploration_pool = [
-        t
-        for t, _s in scored[slate_size : slate_size * 5]
-        if t.vote_average >= 6.8
-    ][: max(slots * 3, 0)]
-
-    mmr_input = [
-        (t.id, s, list(t.embedding) if t.embedding is not None else None)  # noqa: SIM223
-        for t, s in head
     ]
-    core_k = max(slate_size - slots, 1) if slots else slate_size
-    selected_ids = mmr_select(mmr_input, k=core_k, lambda_mult=mmr_lambda)
+    chosen = set(core)
+    counts: Counter[str] = Counter(genres[i] for i in core)
 
-    by_id = {t.id: (t, s) for t, s in scored}
-    genre_counts: dict[str, int] = {}
-    final_ids: list[UUID] = []
-    for tid in selected_ids:
-        title, _ = by_id[tid]
-        primary = title.genres[0].name.lower() if title.genres else "unknown"
-        if genre_counts.get(primary, 0) >= 4:
-            continue
-        genre_counts[primary] = genre_counts.get(primary, 0) + 1
-        final_ids.append(tid)
+    exploration: list[int] = []
+    if slots:
+        window = order[slate_size : slate_size * 5]
+        eligible = [
+            i
+            for i in window
+            if i not in chosen and float(pool[i].vote_average) >= EXPLORATION_MIN_VOTE
+        ]
+        # Genres the slate doesn't show yet first — that is what makes it exploration.
+        fresh = [i for i in eligible if counts[genres[i]] == 0]
+        familiar = [i for i in eligible if counts[genres[i]] > 0]
+        picked_genres: set[str] = set()
+        for candidates, distinct in ((fresh, True), (familiar, False)):
+            for i in candidates:
+                if len(exploration) >= slots:
+                    break
+                genre = genres[i]
+                if distinct and genre in picked_genres:
+                    continue
+                if counts[genre] >= max_per_genre:
+                    continue
+                exploration.append(i)
+                picked_genres.add(genre)
+                chosen.add(i)
+                counts[genre] += 1
 
-    exploration_ids: set[UUID] = set()
-    for title in exploration_pool:
-        if title.id in final_ids or title.id in exclude_ids:
-            continue
-        final_ids.append(title.id)
-        exploration_ids.add(title.id)
-        if len(final_ids) >= slate_size:
-            break
+    # Backfill by score under the genre cap. If every genre is at the cap and the
+    # slate is still short, raise the cap one step at a time, so no genre gets
+    # another slot before every genre with candidates left has had its turn.
+    backfill: list[int] = []
+    need = slate_size - len(core) - len(exploration)
+    cap = max_per_genre
+    while need > 0 and len(chosen) < n:
+        for i in order:
+            if need <= 0:
+                break
+            if i in chosen or counts[genres[i]] >= cap:
+                continue
+            backfill.append(i)
+            chosen.add(i)
+            counts[genres[i]] += 1
+            need -= 1
+        cap += 1
 
-    for t, _ in scored:
-        if len(final_ids) >= slate_size:
-            break
-        if t.id not in final_ids and t.id not in exclude_ids:
-            final_ids.append(t.id)
+    final = _interleave(core + backfill, exploration)[:slate_size]
+    exploration_set = set(exploration)
 
     results: list[RankedItem] = []
-    for tid in final_ids[:slate_size]:
-        title, score = by_id[tid]
-        emb = list(title.embedding) if title.embedding is not None else None
-        sim = cosine(user_vector, emb) if user_vector is not None and emb is not None else 0.0
-        genre_names = [g.name for g in title.genres]
-        title_name = getattr(title, "name", None)
-        reasons = build_reasons(
-            user_features=scoring_features,
-            explain_memory=memory,
-            title_name=title_name,
-            title_extra=title.extra,
-            title_genres=genre_names,
-            similarity=sim,
-        )
-        is_gem = gem_boost(float(title.vote_average), float(title.popularity)) > 0
-        reasons = annotate_discovery_reasons(
-            reasons,
-            is_hidden_gem=is_gem,
-            is_exploration=tid in exploration_ids,
-            vote_average=float(title.vote_average),
-            popularity=float(title.popularity),
-            title_name=title_name,
-        )
-        results.append(RankedItem(title_id=tid, score=score, reasons=reasons))
-
+    for i in final:
+        title = pool[i]
+        reasons: list[Reason] = []
+        if with_reasons:
+            title_name = getattr(title, "name", None)
+            reasons = build_reasons(
+                user_features=scoring_features,
+                explain_memory=memory,
+                title_name=title_name,
+                title_extra=title.extra,
+                title_genres=[g.name for g in title.genres],
+                similarity=float(similarity[i]),
+            )
+            reasons = annotate_discovery_reasons(
+                reasons,
+                is_hidden_gem=gems[i] > 0,
+                is_exploration=i in exploration_set,
+                vote_average=float(title.vote_average),
+                popularity=float(title.popularity),
+                title_name=title_name,
+            )
+        results.append(RankedItem(title_id=title.id, score=float(scores[i]), reasons=reasons))
     return results
