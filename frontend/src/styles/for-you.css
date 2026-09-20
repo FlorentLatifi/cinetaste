@@ -30,7 +30,7 @@
 .fy-title:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: 4px; border-radius: 4px; }
 .fy-meta { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 0.4rem 0.65rem; margin: 0; color: var(--muted); font-size: 0.92rem; }
 .fy-genres { width: 100%; color: var(--muted); font-size: 0.88rem; opacity: 0.92; }
-.fy-why { width: 100%; text-align: left; padding: 0.75rem 1rem; border-radius: 14px; background: rgba(18, 20, 28, 0.6); border: 1px solid var(--border); backdrop-filter: blur(10px); }
+.fy-why { width: 100%; text-align: left; padding: 0.75rem 1rem; border-radius: 14px; background: var(--surface-glass); border: 1px solid var(--border); backdrop-filter: blur(10px); }
 .fy-why .why-label { margin: 0 0 0.3rem; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.12em; color: var(--accent); font-weight: 600; }
 .fy-reasons { margin: 0; padding-left: 1.1rem; }
 .fy-reasons li { margin-bottom: 0.2rem; font-size: 0.92rem; color: var(--muted); }
@@ -38,7 +38,7 @@
 .fy-reasons .reason-primary { color: var(--text); font-weight: 500; }
 
 .fy-actions { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.5rem; width: 100%; margin-top: 0.15rem; }
-.fy-act { appearance: none; border: 1px solid var(--border); background: rgba(18, 20, 28, 0.85); color: var(--text); border-radius: 14px; padding: 0.7rem 0.5rem; font: inherit; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 0.2rem; transition: border-color 0.15s ease, background 0.15s ease, transform 0.12s ease, box-shadow 0.15s ease; }
+.fy-act { appearance: none; border: 1px solid var(--border); background: var(--surface-glass-strong); color: var(--text); border-radius: 14px; padding: 0.7rem 0.5rem; font: inherit; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 0.2rem; transition: border-color 0.15s ease, background 0.15s ease, transform 0.12s ease, box-shadow 0.15s ease; }
 .fy-act:hover:not(:disabled) { transform: translateY(-2px); border-color: rgba(255, 255, 255, 0.22); }
 .fy-act:active:not(:disabled) { transform: translateY(0); }
 .fy-act:disabled { opacity: 0.55; cursor: not-allowed; }
