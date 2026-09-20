@@ -7,7 +7,7 @@
 .ob-header h1 { margin-bottom: 0.4rem; }
 .ob-sub { color: var(--muted); margin: 0; max-width: 32rem; font-size: 1.02rem; }
 
-.ob-progress { background: rgba(18, 20, 28, 0.72); border: 1px solid var(--border); border-radius: calc(var(--radius) + 2px); padding: 1rem 1.15rem; backdrop-filter: blur(10px); }
+.ob-progress { background: var(--surface-glass); border: 1px solid var(--border); border-radius: calc(var(--radius) + 2px); padding: 1rem 1.15rem; backdrop-filter: blur(10px); }
 .ob-progress-top { display: flex; justify-content: space-between; align-items: baseline; gap: 0.75rem; margin-bottom: 0.55rem; }
 .ob-progress-count { font-size: 1.05rem; color: var(--text); }
 .ob-progress-count strong { font-family: "Instrument Serif", Georgia, serif; font-size: 1.65rem; font-weight: 400; color: var(--accent-strong); margin-right: 0.15rem; }
@@ -17,7 +17,7 @@
 .ob-progress-fill { height: 100%; background: linear-gradient(90deg, var(--accent), #c99a4a); border-radius: 999px; transition: width 0.35s cubic-bezier(0.22, 1, 0.36, 1); }
 .ob-progress-hint { margin: 0.55rem 0 0; font-size: 0.84rem; color: var(--muted); }
 
-.ob-card { display: grid; grid-template-columns: minmax(240px, 0.95fr) 1.15fr; gap: 0; background: rgba(18, 20, 28, 0.88); border: 1px solid var(--border); border-radius: calc(var(--radius) + 8px); overflow: hidden; box-shadow: var(--shadow), 0 0 0 1px rgba(232, 194, 122, 0.04); min-height: 480px; }
+.ob-card { display: grid; grid-template-columns: minmax(240px, 0.95fr) 1.15fr; gap: 0; background: var(--surface-glass-strong); border: 1px solid var(--border); border-radius: calc(var(--radius) + 8px); overflow: hidden; box-shadow: var(--shadow), 0 0 0 1px rgba(232, 194, 122, 0.04); min-height: 480px; }
 .ob-card-enter { animation: ob-in 0.38s cubic-bezier(0.22, 1, 0.36, 1) both; }
 .ob-card-exit { animation: ob-out 0.16s ease-in both; pointer-events: none; }
 @keyframes ob-in { from { opacity: 0; transform: translateY(14px) scale(0.985); } to { opacity: 1; transform: none; } }
