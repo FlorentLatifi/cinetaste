@@ -95,12 +95,23 @@ For You and prior events for that title are superseded on recompute.
 Use when the user **has seen** (or knows) the title:
 
 1. Each step writes an `InteractionEvent` with the policy weight.
-2. Sparse features of that title (genres, directors, cast, keywords, tone, lang, country, decade) are multiplied by the weight and summed into the profile.
-3. The title embedding is blended into the dense taste vector with the same weight.
-4. `rate_3` / `rate_4` / `like` (weight ≥ **0.85**) become **explain anchors** for human reasons.
+2. **One signal per title decides the profile.** The event log is collapsed to
+   the latest event of the strongest *tier* (opinion > intent > implicit) after
+   the last `clear`. So a later "Didn't like it" overrides an earlier "Loved it",
+   marking a rated title as watched does not weaken the rating, and repeated
+   views count once. Summing every event ever recorded let stale and
+   contradictory clicks pile up.
+3. Sparse features of that title (genres, directors, cast, keywords, tone, lang, country, decade) are multiplied by the weight and summed into the profile.
+4. **Positive** signals blend into the dense taste vector. Negatives act only
+   through the sparse penalty: subtracting disliked titles pointed the vector
+   away from everything and retrieved arbitrary neighbours.
+5. Signals decay with age — half their influence after `TASTE_HALF_LIFE_DAYS`
+   (default 365, `0` disables) — because taste drifts.
+6. `rate_3` / `rate_4` / `like` (weight ≥ **0.85**) become **explain anchors** for human reasons.
 
-Onboarding requires **≥ 6** real ratings (`rate_1`–`rate_4`) and **≥ 2** positive among `rate_2`–`rate_4` / `like`.  
-`haven't_seen` does **not** count toward either gate.
+Onboarding requires **≥ 6** real ratings (`rate_1`, `mid`, `rate_2`–`rate_4`) and **≥ 2** positive among `rate_2`–`rate_4` / `like`.  
+`haven't_seen` does **not** count toward either gate, and repeating the same
+title counts once.
 
 ### Undo / clear (feed toast)
 

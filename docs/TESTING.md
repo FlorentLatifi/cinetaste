@@ -1,102 +1,70 @@
-# Testing strategy — recommendations & taste
+# Testing
 
-Focus: **fast, deterministic unit tests** for the ranking brain. Integration tests with Postgres/Redis come later when CI has services.
+Three layers, each answering a different question.
 
-## Layers
+| Layer | Count | Question | Needs |
+|---|---|---|---|
+| Unit (`backend/tests/*.py`) | 159 | Is the logic right? | nothing |
+| Integration (`backend/tests/integration/`) | 15 | Do the API, migrations and database agree? | Postgres + pgvector |
+| End-to-end (`frontend/e2e/`) | 34 | Does the app work in a browser, accessibly? | built SPA |
 
-| Layer | What we test | How | Speed |
-|-------|----------------|-----|-------|
-| **A. Signal policy** | Weights, zero-signal, feed exclusion | Pure unit (`taste_signals`) | Instant |
-| **B. Features / embeddings** | Sparse schema, director/cast weights, tones | Pure unit | Instant |
-| **C. Pipeline** | Score blend, cold start, MMR, exclude_ids, reasons | Pure unit + fake titles | Instant |
-| **D. Explanations** | Anchors, human copy, memory strip | Pure unit | Instant |
-| **E. Onboarding complete** | Gates, action mapping, record calls | Service + mocks (no DB) | Instant |
-| **F. Seed deck** | Primary size, diversity axes | Pure unit | Instant |
-| **G. API / DB** | register → onboard → for-you | `tests/integration/` + postgres + redis | Slow |
+## Running
 
-**Critical path first (this repo today):** A–F.  
-**Explicitly deferred:** full HTTP E2E, Redis slate cache, live TMDb.
+```bash
+# Unit — pure functions, mocked sessions
+cd backend && pytest -m "not integration"
 
-## Critical scenarios
+# Integration — real Postgres (docker compose up -d db)
+export DATABASE_URL=postgresql+asyncpg://cinetaste:cinetaste@localhost:5432/cinetaste
+INTEGRATION_REQUIRED=1 pytest -m integration
 
-### 1. User action signals
-- Positive (`rate_3`, `rate_4`, `like`) increase matching sparse score.
-- Negative (`rate_1`, `not_interested`) apply penalty channel.
-- **`haven't_seen` never contributes** (`affects_taste` false, weight 0).
-- Watchlist is mild positive, weaker than Good.
+# End-to-end + accessibility
+cd frontend && npm run build && npx playwright test
 
-### 2. Cold start
-- Empty / weak profile still produces a slate.
-- Popularity prior engages when vector/features are thin.
-- Onboarding seed deck loads without relying on pure popularity order.
-
-### 3. MMR diversity
-- Near-duplicate high-score titles lose to a diverse lower-score title at mid λ.
-- Genre soft-cap path still returns `slate_size` items when pool is large enough.
-
-### 3b. Hidden gems & exploration
-- `gem_boost` rewards high `vote_average` + low popularity.
-- Exploration slots inject stretch picks with `discovery` reasons.
-- Hidden gems surface `hidden_gem` reasons (and For You badges).
-
-### 4. Explanations
-- Strong favorites + shared director → `because_you_liked` citing title names.
-- Memory key stripped from scoring features.
-- Reasons always non-empty with human-readable `message`.
-
-### 5. Onboarding completion
-- Rejects &lt; 6 real ratings (haven’t-seen does not count).
-- Rejects &lt; 2 positive ratings.
-- Accepts 6+ ratings with 2+ positives; maps legacy like/dislike.
-- Calls `record_interaction` once per valid reaction; sets `onboarding_completed_at`.
-
-## How to run
-
-### Unit only (no Docker)
-
-```powershell
-cd backend
-$env:JWT_SECRET = "test-secret-for-unit-tests-only-32chars"
-$env:DATABASE_URL = "postgresql+asyncpg://u:p@localhost:5432/t"
-python -m pytest tests/ -q -m "not integration"
+# Offline recommender evaluation (not a pass/fail gate)
+cd backend && python -m app.scripts.evaluate_recommender
 ```
 
-### Full suite including integration
+## Conventions that matter
 
-Needs Postgres (pgvector) + Redis — same URLs as Docker Compose / CI:
+**Integration tests build the schema with `alembic upgrade head`.** Migrations
+are part of what's being tested; `create_all` would hide a broken migration.
 
-```powershell
-cd backend
-$env:JWT_SECRET = "ci-test-secret-key-at-least-32-characters-long"
-$env:DATABASE_URL = "postgresql+asyncpg://cinetaste:cinetaste@localhost:5432/cinetaste"
-$env:REDIS_URL = "redis://localhost:6379/0"
-$env:APP_ENV = "test"
-python -m pytest tests/ -q
-```
+**They fail instead of skipping.** Locally a missing database skips them so unit
+runs stay green; in CI `INTEGRATION_REQUIRED=1` turns that into a failure. This
+matters: they previously skipped silently because the module-level engine was
+bound to the first test's event loop, so three of five never ran. They now share
+one loop.
 
-Integration tests live under `tests/integration/` and **auto-skip** if Postgres/Redis are unreachable.
+**CI runs the integration suite twice** — without Redis (as production runs) and
+with it — because the cache and rate limiter have two backends.
 
-`DATABASE_URL` / `JWT_SECRET` are required because some modules import app settings at import time. Prefer fixing that import side-effect over time.
+**Tests assert behaviour, not implementation.** `test_recommender_invariants.py`
+pins the product's promises (a later dislike overrides an earlier like, a slate
+isn't one genre, explanations only cite real evidence). Several of those
+reproduce bugs found in the audit and fail on the old code.
 
-## File map
+**The evaluation harness runs production code.** `evaluate` builds profiles with
+the same `effective_title_signals` → `build_profile` → `rank_titles` path the API
+uses; a re-implementation would measure the re-implementation.
 
-| File | Covers |
-|------|--------|
-| `tests/test_taste_signals.py` | Policy table |
-| `tests/test_embeddings_and_rank.py` | Features, sparse, MMR smoke, rank slate |
-| `tests/test_explanations.py` | Human reasons |
-| `tests/test_onboarding_seed.py` | Curated deck |
-| `tests/test_recommendation_pipeline.py` | Cold start, signals → rank, MMR, exclude |
-| `tests/test_onboarding_complete.py` | Complete gates + mocks |
-| `tests/conftest.py` | Shared fakes |
-| `tests/integration/` | API flow vs Postgres + Redis |
-| `tests/test_candidate_generation.py` | ANN/popular pool settings |
-| `tests/test_eval.py` | Offline held-out hit-rate / precision@K |
-| `python -m app.scripts.eval_recommendations` | Synthetic offline eval smoke |
+## Where things are covered
 
-## Adding tests
+| Area | Where |
+|---|---|
+| Signal policy, tiers, decay, undo | `test_taste_signals.py`, `test_recommender_invariants.py` |
+| Profile building, ranking, diversity, explanations | `test_recommender_invariants.py`, `test_recommendation_pipeline.py`, `test_explanations.py` |
+| Features and content vectors | `test_embeddings_and_rank.py` |
+| Metrics and evaluation | `test_metrics_and_evaluation.py` |
+| Auth, reset tokens, refresh families | `test_auth_account.py`, `test_refresh_families.py`, `test_security.py` |
+| Config safety, cookies, rate-limit IPs, cache store | `test_config_production.py`, `test_cookies.py`, `test_middleware_and_ready.py` |
+| TMDb retries | `test_tmdb_client.py` |
+| Every API endpoint | `integration/test_api_endpoints.py` |
+| Ingestion (failures, TV creators, idempotency) | `integration/test_catalog_ingest.py` |
+| Full user journey | `integration/test_api_flow.py`, `frontend/e2e/interactions.spec.ts` |
 
-1. Prefer **pure functions** (`rank_titles`, `mmr_select`, `build_reasons`, `get_policy`).
-2. Avoid DB unless the bug is in SQLAlchemy/query wiring.
-3. Use `conftest` title fakes (`FakeTitle`) so embeddings/features stay consistent.
-4. Keep each test &lt; ~30 lines; one behavior per test name.
+## Gaps worth knowing
+
+- Coverage is reported in CI but not gated; pick a floor from a measured run.
+- No frontend unit tests (hooks are covered indirectly through e2e).
+- No load testing; latency claims come from micro-benchmarks, not a load run.
