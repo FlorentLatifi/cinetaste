@@ -1,388 +1,151 @@
-# System Architecture
+# Architecture
 
-## Design goals
+How CineTaste is put together and why. Product scope lives in
+[PRODUCT.md](PRODUCT.md); the recommender's measured quality in
+[EVALUATION.md](EVALUATION.md); signal weights in
+[TASTE_SIGNALS.md](TASTE_SIGNALS.md).
 
-1. **Taste profile is the core domain** — catalog is supporting infrastructure.
-2. **Explainability is first-class** — reasons flow through the ranking pipeline, not bolted on in the UI.
-3. **Simple now, extensible later** — onion/clean layering + strategy pattern for rankers; no CQRS/event-sourcing until measured need.
-4. **Production-shaped from day one** — Docker, health checks, migrations, secrets via env, structured logs.
-5. **Fast enough to feel magical** — Redis for slates and hot catalog; pgvector for similarity; async I/O.
-
----
-
-## High-level topology
+## System
 
 ```
-                    ┌─────────────┐
-                    │   Vercel    │
-                    │  React SPA  │
-                    └──────┬──────┘
-                           │ HTTPS / JWT
-                    ┌──────▼──────┐
-                    │   FastAPI   │  (Railway / Render)
-                    │  API + DI   │
-                    └──┬─────┬────┘
-           ┌───────────┘     └───────────┐
-           ▼                             ▼
-    ┌─────────────┐               ┌─────────────┐
-    │ PostgreSQL  │               │    Redis    │
-    │ + pgvector  │               │ cache/rate  │
-    └─────────────┘               └─────────────┘
-           ▲
-           │ batch ingest / embed
-    ┌──────┴──────┐
-    │  Workers    │  (same image, separate process later)
-    │  TMDb sync  │
-    └─────────────┘
+┌───────────────┐        /api/*        ┌────────────────────────┐
+│  React SPA    │ ───────────────────▶ │  FastAPI (async)       │
+│  Vite, TS     │  same-origin proxy   │  uvicorn               │
+└───────────────┘                      └───────────┬────────────┘
+   access token in memory                          │
+   refresh token in httpOnly cookie                │
+                                                   ▼
+                         ┌─────────────────────────────────────────┐
+                         │ PostgreSQL 16 + pgvector                │
+                         │  titles(embedding vector(384), HNSW)    │
+                         │  interaction_events (append-only)       │
+                         │  taste_profiles (vector + JSONB)        │
+                         └─────────────────────────────────────────┘
+                         ┌─────────────────────────────────────────┐
+                         │ Cache / rate-limit store                │
+                         │  Redis when REDIS_URL is set,           │
+                         │  otherwise in-process                   │
+                         └─────────────────────────────────────────┘
+                                          ▲
+                              TMDb (catalog + watch providers)
 ```
 
-**MVP simplification:** one API process; background jobs as CLI commands or lightweight async tasks. Split workers when job volume justifies it.
+The SPA and API share an origin in production (a Vercel rewrite forwards
+`/api/*` to Render), which keeps the refresh cookie first-party — Safari blocks
+third-party cookies, which would silently end sessions on reload.
 
----
-
-## Backend layering (onion / clean)
+## Layers
 
 ```
-backend/
-  app/
-    main.py                 # composition root, middleware
-    api/                    # HTTP adapters (routers, schemas)
-    application/            # use cases / services
-    domain/                 # entities, value objects, ports (interfaces)
-    infrastructure/         # SQLAlchemy, Redis, TMDb client, security
-    recommendation/         # rankers, diversifiers, explainers (strategies)
+backend/app
+├── api/            routes + Pydantic schemas. HTTP only: no business rules.
+├── application/    use cases: auth, taste, recommendations, onboarding, ingest.
+├── domain/         taste signal policy, errors. No framework, no I/O.
+├── recommendation/ features, content vectors, profile, ranking, explanations,
+│                   metrics, evaluation. Pure functions over plain objects.
+└── infrastructure/ SQLAlchemy models/session, cache store, TMDb client, email.
 ```
 
-### Dependency rule
+Dependencies point inward. `domain/` and `recommendation/` import neither
+FastAPI nor the database, which is what lets the evaluation harness run the real
+ranking code with no database at all.
 
-* `domain` has **no** framework imports.
-* `application` depends on domain ports only.
-* `infrastructure` implements ports (repositories, cache, external APIs).
-* `api` depends on application services via DI.
-* `recommendation` is a domain/application module with swappable **Strategy** implementations.
+## Data model
 
-### Patterns we use (and why)
+| Table | Holds | Notes |
+|---|---|---|
+| `titles` | catalog + `embedding vector(384)` + `extra` JSONB | HNSW index (`vector_cosine_ops`), trigram indexes on names |
+| `genres`, `keywords`, `people`, `credits` | normalised metadata | `credits` carries role and billing order |
+| `interaction_events` | append-only log of every action | indexed by `(user_id, created_at)` |
+| `user_title_state` | current state per user+title | drives feed exclusion, watchlist, history |
+| `taste_profiles` | dense vector + sparse features JSONB + version | version bump invalidates cached slates |
+| `recommendation_impressions` | what each slate showed | offline evaluation and future engagement metrics |
+| `users`, `refresh_tokens`, `password_reset_tokens` | auth | refresh tokens hashed, rotated, with family + successor |
 
-| Pattern | Use | Justification |
-|---------|-----|----------------|
-| Repository | Persist users, titles, signals, profiles | Testability, swap storage |
-| Strategy | Ranking, diversification, explanation | Multiple rec policies without if-soup |
-| DI | FastAPI `Depends` + factory | Clean tests, single composition root |
-| CQRS / Events | **Not MVP** | Add when write/read load or async pipelines demand it |
-
----
-
-## Core domains
-
-### 1. Identity
-* User, credentials, refresh tokens, sessions
-* Auth: access JWT (short) + refresh token (rotating, hashed at rest)
-
-### 2. Catalog
-* Title (movie/TV), genres, people, credits, keywords
-* External IDs (TMDb) for ingest — **never expose as product core**
-* Content embedding vector (pgvector) derived from structured features + text
-
-### 3. Signals
-* Explicit: like, dislike, watchlist, not_interested
-* Implicit (schema-ready): skip, dwell, detail_view (collect when UI supports)
-* Immutable-ish event log + aggregated counters (keep both paths simple)
-
-### 4. Taste profile
-* Per-user weighted feature vector + interpretable feature weights
-* Versioned: recompute on signal change (async or sync for MVP)
-* Stored as: dense vector (for ANN) + sparse feature map (for explanations)
-* **Signal policy (weights, zero-signal, feed exclusion):** [`docs/TASTE_SIGNALS.md`](TASTE_SIGNALS.md) · code: `app/domain/taste_signals.py`
-* **Recommendation test strategy:** [`docs/TESTING.md`](TESTING.md)
-
-### 5. Recommendations
-* Candidate generation → score → diversify → explain → cache slate
-* **Candidates (warm profile):** pgvector **HNSW** cosine ANN (`ix_titles_embedding_hnsw`) + popular exploration slice
-* **Candidates (cold start):** popularity-ordered pool
-* Output: ordered items + reason codes + debug scores (debug only in non-prod)
-
-See migration `20260717_0002_titles_embedding_hnsw` and settings `REC_ANN_CANDIDATES` / `REC_POPULAR_CANDIDATES` / `REC_USE_ANN`.
-
----
+Events are the source of truth; the profile is derived and can be rebuilt after
+any scoring change. That is why Undo is a `clear` event rather than a delete.
 
 ## Recommendation pipeline
 
-```
-┌──────────────┐    ┌─────────────────┐    ┌──────────────┐
-│  Candidates  │ →  │  Score / Rank   │ →  │ Diversify    │
-│  (ANN+rules) │    │  (taste match)  │    │ (MMR / caps) │
-└──────────────┘    └─────────────────┘    └──────┬───────┘
-                                                  │
-                     ┌─────────────────┐    ┌─────▼───────┐
-                     │  Cache slate    │ ←  │  Explain    │
-                     │  (Redis)        │    │  (reasons)  │
-                     └─────────────────┘    └─────────────┘
-```
+1. **Ingest** (`application/catalog_ingest.py`) — TMDb details fetched
+   concurrently in batches, each title upserted in a savepoint. For every title
+   it stores a **sparse feature snapshot** and a **384-d content vector**.
+2. **Signals** (`domain/taste_signals.py`) — one policy table: weight, polarity,
+   tier, resulting state, feed exclusion. Per title the latest event of the
+   strongest tier wins (opinion > intent > implicit), after the last `clear`.
+3. **Profile** (`recommendation/profile.py`) — sparse features accumulate
+   `snapshot × weight`, clamped and normalised per family so keywords can't
+   drown directors; the dense vector is the weighted mean of **positively**
+   rated titles. Strong positives become explanation anchors.
+4. **Candidates** (`application/recommendation_service.py`) — pgvector ANN
+   (cosine, `hnsw.ef_search` raised to match the requested limit) plus a
+   popularity slice; cold start is popularity-ordered.
+5. **Ranking** (`recommendation/pipeline.py`) —
+   `0.42·cosine + 0.40·overlap − 0.12·penalty + gem + cold prior`, then MMR
+   (λ=0.8), a per-genre cap of 40% of the slate, exploration slots interleaved,
+   and score-ordered backfill. Vectorised with numpy and run in a worker thread.
+6. **Explanations** (`recommendation/explanations.py`) — templates fed only by
+   evidence that exists: shared director, shared keywords, shared tone, cited
+   anchor titles.
 
-### Stage details (MVP)
-
-**1. Candidates**
-* ANN: nearest titles to user taste vector (pgvector)
-* Filters: not already disliked / not_interested; optional language; media type
-* Exploration pool: slightly farther neighbors or “high quality / lower popularity”
-* Hard excludes: items already strongly negative
-
-**2. Score**
-* Base: cosine(user_vector, title_vector)
-* Feature boosts: matching top genres, favorite people, preferred runtime/year band
-* Soft penalties: over-represented franchise in recent history
-* Keep formula **documented and unit-tested**
-
-**3. Diversify**
-* MMR (λ tunable) on embedding space
-* Soft caps: max N per primary genre per slate; franchise de-dupe
-* Reserve K slots for exploration (`REC_EXPLORATION_SLOTS`, default 3) with explicit `discovery` reasons
-* Hidden-gem score boost (high rating, lower popularity) → `hidden_gem` reason + For You badge
-
-**4. Explain**
-* Compare user top features vs title features
-* Emit structured reasons:
-
-```json
-{
-  "code": "shared_genre",
-  "message": "Because you like neo-noir thrillers",
-  "evidence": {"genres": ["Thriller", "Crime"]}
-}
-```
-
-* UI renders `message`; analytics use `code`.
-
-**5. Cache**
-* Key: `slate:{user_id}:{context}:{profile_version}`
-* TTL: short (e.g. 5–15 min) + invalidate on significant signal
-
-### Strategy interfaces
-
-```text
-CandidateGenerator.generate(user_ctx) -> list[Candidate]
-Scorer.score(user_ctx, candidates) -> list[Scored]
-Diversifier.diversify(scored, k) -> list[Scored]
-Explainer.explain(user_ctx, item) -> list[Reason]
-```
-
-Swap implementations without rewriting the API.
-
----
-
-## Taste profile model (MVP)
-
-### Feature families (start)
-
-| Family | Examples | Weight source |
-|--------|----------|---------------|
-| Genre | action, drama… | like (+), dislike (−) |
-| Keyword/theme | time-travel, found-footage | title keywords on liked titles |
-| People | directors, lead actors | credits on liked titles |
-| Temporal | decade, recency preference | release years of likes |
-| Form | runtime buckets, movie vs TV | runtime / type |
-| Popularity | blockbuster vs obscure | popularity of liked set |
-
-### Update rule (simple, explainable)
-
-* On **like**: pull title features toward user with learning rate α  
-* On **dislike / not interested**: push away with β (usually smaller than α)  
-* On **watchlist**: mild positive (γ < α)  
-* Decay optional later; not required for MVP  
-* Recompute dense vector from sparse weighted features after each batch of updates
-
-**Why not pure collaborative day one?** Cold-start and data sparsity. Content + explicit taste works with one user. Collab is a Phase 4+ additive strategy.
-
----
-
-## Data model (logical)
-
-### Identity
-* `users` — id, email, password_hash, created_at, onboarding_completed_at
-* `refresh_tokens` — id, user_id, token_hash, expires_at, revoked_at
-
-### Catalog
-* `titles` — id, media_type, name, original_name, overview, release_date, runtime, popularity, vote_average, poster_path, backdrop_path, original_language, external_tmdb_id (unique), embedding vector
-* `genres`, `title_genres`
-* `people`, `credits` (title_id, person_id, job/character, billing_order)
-* `keywords`, `title_keywords`
-
-### Signals
-* `user_title_interactions` — user_id, title_id, type (like|dislike|watchlist|not_interested|skip|view), weight, created_at  
-  Unique constraint on (user_id, title_id, type) or upsert latest + append-only `interaction_events` if we need history
-
-**Recommendation:**  
-* `interaction_events` (append-only) for analytics & future learning  
-* `user_title_state` (current state per user/title) for fast filters
-
-### Taste
-* `taste_profiles` — user_id, version, vector, features_json, updated_at
-
-### Ops / product
-* `onboarding_cards` or derive from curated seed lists
-* `recommendation_impressions` — For You append-only log (user_id, title_id, slate_id, position, score, reason_codes); `REC_LOG_IMPRESSIONS` (default on), fail-open
-
-### Indexing (must-haves)
-* Unique: users.email, titles.external_tmdb_id  
-* FK indexes on all join tables  
-* `user_title_state (user_id, state)`  
-* pgvector IVFFlat/HNSW on `titles.embedding`  
-* Redis keys namespaced by env
-
----
-
-## API surface (MVP)
-
-| Method | Path | Purpose |
-|--------|------|---------|
-| POST | `/auth/register` | Create account |
-| POST | `/auth/login` | Access + refresh |
-| POST | `/auth/refresh` | Rotate tokens |
-| POST | `/auth/logout` | Revoke refresh |
-| GET | `/me` | Current user + onboarding flag |
-| GET | `/onboarding/cards` | Swipe deck |
-| POST | `/onboarding/complete` | Submit likes/dislikes |
-| GET | `/recommendations/for-you` | Main slate + reasons |
-| GET | `/titles/{id}` | Detail |
-| GET | `/titles/{id}/where-to-watch` | Stream/rent/buy by region (TMDb/JustWatch, Redis-cached) |
-| POST | `/titles/{id}/interactions` | like/dislike/watchlist/… |
-| GET | `/me/history` | Paginated history (`items`, `next_cursor`, `has_more`); optional `?state=` + `?cursor=` |
-| GET | `/me/taste` | Interpretable taste summary (top likes / dislikes chips) |
-| GET | `/me/taste/export` | Downloadable taste snapshot (JSON fields + plain-text share body; no embedding) |
-| POST | `/me/taste/import` | Merge snapshot likes/dislikes into durable sparse overlay + recompute |
-| DELETE | `/me/taste/import` | Clear import overlay; recompute from live interactions only |
-| GET | `/watchlist` | Saved titles |
-| GET | `/search?q=` | Title search |
-| GET | `/health` | Liveness |
-| GET | `/ready` | DB + Redis readiness |
-
-All mutating routes: auth required, validated bodies, rate limited.
-
----
-
-## Frontend structure
+## Request path: `GET /recommendations/for-you`
 
 ```
-frontend/
-  src/
-    app/                 # routes, providers
-    pages/               # Onboarding, Home, Title, Search, Watchlist, Auth
-    components/          # UI primitives + domain components
-    features/            # recommendation, auth, catalog hooks
-    api/                 # typed client
-    styles/
+auth (JWT) → profile row → cached slate? ──yes──▶ hydrate titles → respond
+                              │no
+                              ▼
+        excluded states → candidates (ANN + popular) → rank (thread)
+                              │
+                              ▼
+        cache slate (keyed by profile version) → log impressions → respond
 ```
 
-### UX flows (MVP)
+The cache key contains the profile version, so any rating invalidates it
+without an explicit purge; the TTL only bounds memory. Impressions are written
+once per computed slate, not per cache hit.
 
-1. **Land → signup/login**
-2. **Onboarding swipe** (cannot be skipped permanently without weak cold-start; allow “quick start” with 3 mood packs if swipe fatigue)
-3. **Home “For you”** — poster grid/cards, reasons under title or on long-press/expand
-4. **Detail** — overview, cast snippet, actions
-5. **Watchlist / Search** — secondary nav
+## Cross-cutting
 
-**Performance UX:** skeleton loaders, optimistic interaction UI, cached slate stale-while-revalidate.
+- **Config** — `pydantic-settings`, one `Settings` object. `APP_ENV` is
+  validated against a fixed list, and production refuses to start with a weak
+  secret, localhost CORS, default database credentials, or SMTP enabled with a
+  non-https public URL.
+- **Cache / rate limiting** — one `KeyValueStore` interface. Redis when
+  configured, in-process otherwise; a Redis failure degrades to in-process for
+  30 seconds rather than failing requests.
+- **Security** — bcrypt in a thread pool, short-lived access tokens in memory,
+  rotating refresh cookies with reuse detection plus a short grace window for
+  concurrent refreshes, per-IP rate limits, security headers, strict CORS.
+- **Errors** — every failure is `{code, message, request_id}`; validation adds
+  `errors[]`.
+- **Observability** — request-id middleware, structured access logs, optional
+  Sentry on both sides. httpx request logging is capped at WARNING because TMDb
+  v3 puts the API key in the query string.
 
----
-
-## Security baseline
-
-* Password hashing: Argon2id (or bcrypt if deploy constraints)
-* JWT access: short TTL (e.g. 15m), refresh: days, **rotate + hash store**
-* HttpOnly secure cookies **or** bearer with strict XSS hygiene (prefer httpOnly cookies for browser SPA if same-site setup allows; document choice at implement time)
-* CORS allowlist (Vercel prod + localhost)
-* Rate limit: auth endpoints aggressively; rec endpoints moderately (Redis)
-* Pydantic validation everywhere
-* No secrets in repo; `.env.example` only
-* SQLAlchemy parameterization (no raw string SQL)
-* Security headers via reverse proxy / framework middleware
-
----
-
-## Performance baseline
+## Performance notes
 
 | Concern | Approach |
-|---------|----------|
-| Slate latency | Redis cache keyed by profile version |
-| ANN | pgvector HNSW; limit candidate set (e.g. 200) before re-rank |
-| N+1 | Eager load genres/reasons; batch queries |
-| Catalog images | CDN URLs from TMDb; don’t proxy bytes through API |
-| Pagination | Cursor/limit on search & watchlist |
-| Profile updates | Sync for onboarding; debounce for rapid taps if needed |
+|---|---|
+| Slate latency | Cached per profile version; ranking vectorised with numpy and moved off the event loop |
+| Candidate generation | ANN via HNSW with `ef_search` raised so filtering doesn't silently shrink the pool |
+| N+1 queries | Relationships never load implicitly (`lazy="raise"`); each query states what it needs |
+| Password hashing | bcrypt in a worker thread |
+| Profile recompute | Small indexed event scan + a column-only title fetch; O(interactions) per rating |
+| Free-tier Redis | Optional by design: one process uses an in-process store |
 
----
+## Frontend
 
-## Observability
+- React 19 + TypeScript, Vite, React Router, lazy-loaded authenticated routes.
+- `AuthContext` keeps the access token in memory only; session restore and 401
+  retries share one single-flight refresh, so two tabs can't trip reuse detection.
+- The rating scale is defined once (`features/taste/ratingScale.ts`) and used by
+  For You, onboarding, the detail page and the undo toast.
+- Accessibility: skip link, live regions for loading/empty/error, keyboard
+  shortcuts, reduced-motion and forced-colors support, axe checks in CI.
 
-* Structured JSON logs: `request_id`, `user_id`, `route`, `latency_ms`
-* Metrics later: Prometheus/OpenTelemetry when deploy target chosen
-* Error tracking: Sentry (post-MVP ok, stub interface early)
-* Health: `/health` process up; `/ready` dependencies
+## Testing and CI
 
----
-
-## Local & deploy
-
-### Local
-* `docker compose up` → API, Postgres+pgvector, Redis
-* Frontend: `npm run dev` → Vite proxy to API
-
-### Deploy
-* **API + worker + Postgres + Redis:** Railway or Render  
-* **Frontend:** Vercel  
-* **CI:** GitHub Actions — lint, unit tests, build images  
-
-### Environments
-* `local` / `staging` / `production` via env vars only
-
----
-
-## Testing strategy
-
-| Layer | What |
-|-------|------|
-| Unit | Scorer, diversifier, explainer, taste update math |
-| Integration | API + test DB (Postgres service in CI) |
-| Contract | OpenAPI schema stability for critical routes |
-| Manual | Onboarding → first slate → reason quality |
-
-No need for full E2E in Phase 0–1; add Playwright when UI stabilizes.
-
----
-
-## Risks & mitigations
-
-| Risk | Mitigation |
-|------|------------|
-| TMDb rate limits / ToS | Cache aggressively; batch ingest; respect attribution |
-| Cold start | Strong onboarding; mood packs; popular-quality hybrid fallback |
-| Filter bubble | MMR + exploration quota from day one |
-| Over-engineering recs | Single pipeline, strategy hooks, offline eval before complexity |
-| Embeddings quality | Start with structured+text features; re-embed batch when model improves |
-| Cost at scale | Cache slates; don’t recompute ANN every click |
-
----
-
-## Decision log (initial)
-
-| Decision | Choice | Why |
-|----------|--------|-----|
-| Monorepo | Yes | One product, shared types later optional, simpler for small team |
-| Catalog source | TMDb | Best coverage/cost for indie; not the product |
-| Vectors | pgvector in Postgres | One system to operate at MVP scale |
-| Rec approach | Content + taste + diversify | Works with N=1 user; explainable |
-| Collab filtering | Later | Needs density we won’t have at launch |
-| Auth | Email + JWT refresh | Simple, portable; OAuth later |
-| Workers | CLI first | Avoid distributed systems until jobs hurt |
-
----
-
-## What we deliberately reject (for now)
-
-* Microservice split per domain  
-* Kafka/event bus  
-* Separate “ML service” process  
-* GraphQL (REST is enough and clearer for caching)  
-* Building our own user-uploaded video catalog  
-
-Revisit only with a concrete scaling or team pain signal.
+Unit tests (pure logic, no I/O) → integration tests (real Postgres, schema built
+by Alembic, fail rather than skip when the database is missing) → Playwright e2e
+with axe. CI additionally builds the image and boots the container. See
+[TESTING.md](TESTING.md).
