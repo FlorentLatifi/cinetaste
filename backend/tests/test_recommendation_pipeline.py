@@ -11,15 +11,14 @@ from app.recommendation.embeddings import (
     cosine,
     sparse_channel_scores,
 )
+from app.recommendation.explanations import Reason
 from app.recommendation.pipeline import (
     annotate_discovery_reasons,
     gem_boost,
     mmr_select,
     rank_titles,
 )
-from app.recommendation.explanations import Reason
 from tests.conftest import FakeTitle, accumulate_features
-
 
 # ---------------------------------------------------------------------------
 # Signal accumulation → profile shape

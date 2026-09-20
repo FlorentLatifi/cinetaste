@@ -2,16 +2,10 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties } from "re
 import { Link } from "react-router-dom";
 import { ActionToast } from "../components/ActionToast";
 import { useForYouQueue } from "../features/for-you/useForYouQueue";
+import { RATING_SCALE } from "../features/taste/ratingScale";
 import { heroPosterUrl, posterSrcSet, yearOf } from "../lib/poster";
 
-const ACTIONS = [
-  { event: "rate_4" as const, label: "My favorite movie", key: "1", shortcut: "f" },
-  { event: "rate_3" as const, label: "I like it so much", key: "2", shortcut: "s" },
-  { event: "rate_2" as const, label: "I like it", key: "3", shortcut: "i" },
-  { event: "mid" as const, label: "Ok", key: "4", shortcut: "o" },
-  { event: "haven't_seen" as const, label: "I haven't watch it", key: "5", shortcut: "h" },
-  { event: "rate_1" as const, label: "I don't like it", key: "6", shortcut: "d" },
-] as const;
+const ACTIONS = RATING_SCALE;
 
 export function HomePage() {
   const {
@@ -317,7 +311,9 @@ export function HomePage() {
             <div
               className="fy-actions"
               role="group"
-              aria-label={`Rate ${current.title.name}. Keyboard: 1 favorite, 2 like so much, 3 like, 4 ok, 5 haven't watched, 6 don't like.`}
+              aria-label={`Rate ${current.title.name}. Keyboard: ${ACTIONS.map(
+                (a) => `${a.key} ${a.label.toLowerCase()}`,
+              ).join(", ")}.`}
             >
               {ACTIONS.map((a) => {
                 const cls =
@@ -353,8 +349,8 @@ export function HomePage() {
 
             <p className="fy-keys-hint">
               <span className="sr-only">Keyboard shortcuts: </span>
-              <kbd>1</kbd> Fav · <kbd>2</kbd> Love · <kbd>3</kbd> Like ·{" "}
-              <kbd>4</kbd> Ok · <kbd>5</kbd> Unseen · <kbd>6</kbd> Nope
+              <kbd>1</kbd> Loved · <kbd>2</kbd> Really liked · <kbd>3</kbd> Liked ·{" "}
+              <kbd>4</kbd> Ok · <kbd>5</kbd> Not seen · <kbd>6</kbd> Didn't like
               {toast ? (
                 <> · <kbd>U</kbd> Undo</>
               ) : null}

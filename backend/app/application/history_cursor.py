@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import base64
 import binascii
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 
@@ -14,7 +14,7 @@ class CursorError(ValueError):
 
 def encode_history_cursor(updated_at: datetime, title_id: UUID) -> str:
     if updated_at.tzinfo is None:
-        updated_at = updated_at.replace(tzinfo=timezone.utc)
+        updated_at = updated_at.replace(tzinfo=UTC)
     payload = f"{updated_at.isoformat()}|{title_id}"
     raw = base64.urlsafe_b64encode(payload.encode("utf-8")).decode("ascii")
     return raw.rstrip("=")
@@ -35,5 +35,5 @@ def decode_history_cursor(cursor: str) -> tuple[datetime, UUID]:
     except (ValueError, TypeError) as exc:
         raise CursorError("invalid cursor payload") from exc
     if updated_at.tzinfo is None:
-        updated_at = updated_at.replace(tzinfo=timezone.utc)
+        updated_at = updated_at.replace(tzinfo=UTC)
     return updated_at, title_id

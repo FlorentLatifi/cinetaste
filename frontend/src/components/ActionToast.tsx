@@ -1,3 +1,5 @@
+import { RATING_DONE_LABELS } from "../features/taste/ratingScale";
+
 export type FeedbackAction =
   | "like"
   | "dislike"
@@ -13,6 +15,11 @@ export type FeedbackAction =
   | "rate_3"
   | "rate_4";
 
+/**
+ * What the undo toast says after each action. Ratings reuse the wording of the
+ * button the user pressed (features/taste/ratingScale), so the confirmation
+ * never sounds like a different rating was recorded.
+ */
 export const FEEDBACK_ACTION_LABELS: Record<FeedbackAction, string> = {
   like: "Liked",
   dislike: "Passed",
@@ -21,12 +28,7 @@ export const FEEDBACK_ACTION_LABELS: Record<FeedbackAction, string> = {
   watched: "Marked as watched",
   watched_liked: "Watched and liked",
   watched_disliked: "Watched and disliked",
-  mid: "Rated Ok",
-  "haven't_seen": "Haven't seen",
-  rate_1: "Rated Bad",
-  rate_2: "Rated I like it",
-  rate_3: "Rated I like it so much",
-  rate_4: "Rated Favorite",
+  ...RATING_DONE_LABELS,
 };
 
 export const ACTION_TOAST_MS = 8_000;

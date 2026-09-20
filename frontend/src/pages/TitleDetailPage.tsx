@@ -11,6 +11,7 @@ import {
 } from "../components/ActionToast";
 import { DetailSkeleton } from "../components/CatalogSkeleton";
 import { useAuth } from "../features/auth/AuthContext";
+import { POST_WATCH_RATINGS } from "../features/taste/ratingScale";
 import { heroPosterUrl, posterSrcSet } from "../lib/poster";
 
 const WATCH_REGIONS = [
@@ -392,10 +393,7 @@ export function TitleDetailPage() {
               <div className="detail-rate-row">
                 {(
                   [
-                    { event: "rate_1" as const, label: "Bad" },
-                    { event: "rate_2" as const, label: "It's ok" },
-                    { event: "rate_3" as const, label: "Good" },
-                    { event: "rate_4" as const, label: "Favorite" },
+                    ...POST_WATCH_RATINGS,
                   ] as const
                 ).map((opt, i) => (
                   <button
