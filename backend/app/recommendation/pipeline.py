@@ -29,6 +29,7 @@ __all__ = [
     "RankedItem",
     "RankingWeights",
     "annotate_discovery_reasons",
+    "genre_cap_for",
     "explain",
     "gem_boost",
     "mmr_select",
@@ -54,8 +55,17 @@ class RankingWeights:
 
 DEFAULT_WEIGHTS = RankingWeights()
 
-# Diversity: at most this many titles share a primary genre in one slate.
-MAX_PER_PRIMARY_GENRE = 4
+# Diversity: share of one slate that may come from a single primary genre.
+# Measured on the synthetic benchmark (docs/EVALUATION.md): a fixed cap of 4
+# cost ~60% of recall@20, while 40% of the slate keeps most of the accuracy
+# and still shows about four different genres in twenty cards.
+GENRE_CAP_RATIO = 0.4
+MIN_GENRE_CAP = 3
+
+
+def genre_cap_for(slate_size: int) -> int:
+    """Per-genre cap that means the same thing at any slate size."""
+    return max(MIN_GENRE_CAP, round(slate_size * GENRE_CAP_RATIO))
 # Exploration picks must still be well rated.
 EXPLORATION_MIN_VOTE = 6.8
 # Profiles with less positive mass than this get a popularity prior.
@@ -283,7 +293,7 @@ def rank_titles(
     exploration_slots: int = 3,
     explain_memory: dict[str, Any] | None = None,
     weights: RankingWeights = DEFAULT_WEIGHTS,
-    max_per_genre: int = MAX_PER_PRIMARY_GENRE,
+    max_per_genre: int | None = None,
     with_reasons: bool = True,
 ) -> list[RankedItem]:
     """Rank candidate titles for one user.
@@ -298,6 +308,8 @@ def rank_titles(
     """
     if slate_size <= 0:
         return []
+    if max_per_genre is None:
+        max_per_genre = genre_cap_for(slate_size)
     scoring_features, memory_from_features = strip_explain_memory(user_features)
     memory = explain_memory if explain_memory is not None else memory_from_features
 

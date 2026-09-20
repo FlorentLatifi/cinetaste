@@ -63,7 +63,9 @@ class Settings(BaseSettings):
 
     rec_slate_size: int = 20
     rec_cache_ttl_seconds: int = 600
-    rec_mmr_lambda: float = 0.7
+    # 1.0 = pure relevance, lower = more diversity. 0.8 keeps most of the
+    # measured accuracy while cutting near-duplicates (docs/EVALUATION.md).
+    rec_mmr_lambda: float = 0.8
     # Soft quota of exploration / stretch picks reserved in each For You slate
     rec_exploration_slots: int = 3
     # Candidate generation (pgvector ANN + popularity exploration pool)
