@@ -126,7 +126,7 @@ once per computed slate, not per cache hit.
 
 | Concern | Approach |
 |---|---|
-| Slate latency | Cached per profile version; ranking vectorised with numpy and moved off the event loop |
+| Slate latency | Cached per profile version; ranking vectorised with numpy (370 candidates: 246 ms → 22 ms) and run in a worker thread |
 | Candidate generation | ANN via HNSW with `ef_search` raised so filtering doesn't silently shrink the pool |
 | N+1 queries | Relationships never load implicitly (`lazy="raise"`); each query states what it needs |
 | Password hashing | bcrypt in a worker thread |
