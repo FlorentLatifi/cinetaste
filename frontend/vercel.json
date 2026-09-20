@@ -1,6 +1,10 @@
 {
   "rewrites": [
-    { "source": "/((?!assets/).*)", "destination": "/index.html" }
+    {
+      "source": "/api/:path*",
+      "destination": "https://cinetaste-api.onrender.com/api/:path*"
+    },
+    { "source": "/((?!api/|assets/).*)", "destination": "/index.html" }
   ],
   "headers": [
     {

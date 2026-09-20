@@ -76,7 +76,7 @@ async def refresh(
     response: Response,
     auth: Annotated[AuthService, Depends(get_auth_service)],
     settings: Annotated[Settings, Depends(get_settings_dep)],
-    body: RefreshRequest = RefreshRequest(),
+    body: RefreshRequest | None = None,
 ) -> TokenResponse:
     raw = _refresh_from_request(request, body)
     user, access, new_refresh = await auth.refresh(refresh_token=raw)
@@ -90,7 +90,7 @@ async def logout(
     response: Response,
     auth: Annotated[AuthService, Depends(get_auth_service)],
     settings: Annotated[Settings, Depends(get_settings_dep)],
-    body: LogoutRequest = LogoutRequest(),
+    body: LogoutRequest | None = None,
 ) -> None:
     try:
         raw = _refresh_from_request(request, body)

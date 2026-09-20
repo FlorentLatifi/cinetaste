@@ -172,14 +172,15 @@ class OnboardingReaction(BaseModel):
     Policy (docs/TASTE_SIGNALS.md):
     - haven't_seen — zero taste signal (does not count as a rating)
     - not_interested — mild negative
-    - rate_1 … rate_4 — Bad / It's ok / Good / Favorite
+    - rate_1, mid, rate_2, rate_3, rate_4 — didn't like → loved (all count as
+      ratings; mid is not a *positive* rating)
     - like / dislike — legacy aliases (mapped to rate_3 / rate_1)
     """
 
     title_id: UUID
     action: str = Field(
         pattern=(
-            "^(haven't_seen|not_interested|rate_1|rate_2|rate_3|rate_4|like|dislike)$"
+            "^(haven't_seen|not_interested|mid|rate_1|rate_2|rate_3|rate_4|like|dislike)$"
         )
     )
 

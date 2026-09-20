@@ -4,15 +4,18 @@ on:
   push:
     branches: [master, main]
   pull_request:
-    branches: [master, main]
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  PYTHON_VERSION: "3.13"
+  NODE_VERSION: "22"
+
 jobs:
   backend:
-    name: Backend (lint + test)
+    name: Backend (lint, unit, integration)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -47,38 +50,87 @@ jobs:
       APP_DEBUG: "false"
       JWT_SECRET: ci-test-secret-key-at-least-32-characters-long
       DATABASE_URL: postgresql+asyncpg://cinetaste:cinetaste@localhost:5432/cinetaste
-      REDIS_URL: redis://localhost:6379/0
       CORS_ORIGINS: http://localhost:5173
+      TMDB_API_KEY: ""
+      # Fail instead of skipping when Postgres is unreachable.
+      INTEGRATION_REQUIRED: "1"
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
-          python-version: "3.13"
+          python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
-          cache-dependency-path: backend/requirements.txt
+          cache-dependency-path: backend/requirements*.txt
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
 
-      - name: Ruff check
-        run: ruff check app tests
+      - name: Lint
+        run: ruff check .
 
       - name: Unit tests
         run: pytest -q -m "not integration"
 
-      - name: Integration tests (Postgres + Redis)
-        run: pytest -q tests/integration -m integration
+      # Production runs without Redis, so the default path is tested that way.
+      - name: Integration tests (in-process cache)
+        env:
+          REDIS_URL: ""
+        run: pytest -q -m integration
 
-      - name: Import app
-        run: python -c "from app.main import app; print(app.title)"
+      - name: Integration tests (Redis cache)
+        env:
+          REDIS_URL: redis://localhost:6379/0
+        run: pytest -q -m integration
+
+      # Reported, not gated: pick a floor from a measured run before enforcing.
+      - name: Coverage report
+        env:
+          REDIS_URL: ""
+        run: pytest -q --cov=app --cov-report=term-missing
+
+      - name: App imports with production-like settings
+        env:
+          APP_ENV: production
+          JWT_SECRET: ${{ github.sha }}-${{ github.run_id }}-production-length-secret
+          CORS_ORIGINS: https://cinetaste.vercel.app
+          DATABASE_URL: postgresql+asyncpg://prod:strong@db:5432/cinetaste
+        run: python -c "from app.main import create_app; print(create_app().title)"
+
+  docker:
+    name: Backend image builds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          push: false
+          load: true
+          tags: cinetaste-api:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Container starts and reports not-ready without a database
+        run: |
+          docker run -d --name api -p 8000:8000 \
+            -e APP_ENV=test -e JWT_SECRET=ci-test-secret-key-at-least-32-characters-long \
+            -e DATABASE_URL=postgresql+asyncpg://nobody:nobody@127.0.0.1:5432/none \
+            --entrypoint uvicorn cinetaste-api:ci app.main:app --host 0.0.0.0 --port 8000
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/api/v1/health || true)
+            [ "$code" = "200" ] && break
+            sleep 1
+          done
+          curl -fsS http://localhost:8000/api/v1/health
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8000/api/v1/ready)" = "503"
+          docker rm -f api
 
   frontend:
-    name: Frontend (typecheck + build)
+    name: Frontend (typecheck, build, a11y)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -87,17 +139,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Node
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: ${{ env.NODE_VERSION }}
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
       - name: Install
         run: npm ci
 
-      - name: Build
+      - name: Build (typecheck + bundle)
         run: npm run build
         env:
           VITE_API_BASE_URL: /api/v1
@@ -105,7 +156,7 @@ jobs:
       - name: Install Playwright Chromium
         run: npx playwright install --with-deps chromium
 
-      - name: Accessibility (axe on guest routes)
-        run: npm run test:a11y
+      - name: End-to-end + accessibility (axe)
+        run: npx playwright test
         env:
           CI: true

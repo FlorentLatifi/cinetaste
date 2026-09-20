@@ -1,26 +1,37 @@
-FROM python:3.13-slim
+# ---- build ---------------------------------------------------------------
+# Wheels are built here so the runtime image ships no compilers.
+FROM python:3.13-slim AS build
 
 WORKDIR /app
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1
 
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+RUN python -m venv /opt/venv \
+    && /opt/venv/bin/pip install --no-cache-dir -r requirements.txt
+
+# ---- runtime -------------------------------------------------------------
+FROM python:3.13-slim AS runtime
+
+WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
+    PATH="/opt/venv/bin:$PATH" \
     PORT=8000 \
     WEB_CONCURRENCY=2
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    libpq-dev \
     curl \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && adduser --disabled-password --gecos "" appuser
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY --from=build /opt/venv /opt/venv
+COPY --chown=appuser:appuser . .
 
-COPY . .
-
-RUN chmod +x /app/entrypoint.sh \
-    && adduser --disabled-password --gecos "" appuser \
-    && chown -R appuser:appuser /app
+RUN chmod +x /app/entrypoint.sh
 USER appuser
 
 EXPOSE 8000

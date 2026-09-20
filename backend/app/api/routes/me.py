@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Response, status
@@ -93,7 +93,7 @@ async def export_taste(
     """
     taste = TasteService(session)
     profile = await taste.get_profile(user.id)
-    exported_at = datetime.now(timezone.utc).isoformat()
+    exported_at = datetime.now(UTC).isoformat()
     if profile is None:
         empty = build_taste_export(
             profile_version=0,

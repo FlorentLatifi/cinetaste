@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 import pytest
@@ -11,7 +11,7 @@ from app.application.history_cursor import (
 
 
 def test_encode_decode_roundtrip() -> None:
-    ts = datetime(2026, 3, 15, 12, 30, 0, tzinfo=timezone.utc)
+    ts = datetime(2026, 3, 15, 12, 30, 0, tzinfo=UTC)
     tid = uuid4()
     cursor = encode_history_cursor(ts, tid)
     out_ts, out_id = decode_history_cursor(cursor)
@@ -34,4 +34,4 @@ def test_decode_rejects_garbage() -> None:
     with pytest.raises(CursorError):
         decode_history_cursor("")
     with pytest.raises(CursorError):
-        decode_history_cursor(encode_history_cursor(datetime.now(timezone.utc), uuid4())[:-4] + "xxxx")
+        decode_history_cursor(encode_history_cursor(datetime.now(UTC), uuid4())[:-4] + "xxxx")

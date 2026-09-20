@@ -27,6 +27,7 @@ ONBOARDING_ACTIONS = frozenset(
     {
         "haven't_seen",  # zero taste signal
         "not_interested",  # mild negative
+        "mid",  # "It was ok" — counts as a rating, not a positive one
         "rate_1",  # Bad
         "rate_2",  # It's ok
         "rate_3",  # Good
