@@ -14,20 +14,28 @@ from app.domain.exceptions import UnauthorizedError
 from app.infrastructure.db.models.user import User
 from app.infrastructure.db.session import get_db
 
+# The session commits when the dependency exits. scope="function" makes that
+# happen *before* the response is sent. With FastAPI's default (request scope,
+# >= 0.118) the exit runs after the response, so a failed commit still returned
+# 200 to the client — a silently lost write. Every route must use this alias:
+# two declarations of get_db with different scopes would give one request two
+# separate sessions.
+DbSession = Annotated[AsyncSession, Depends(get_db, scope="function")]
+
 
 async def get_settings_dep() -> Settings:
     return get_settings()
 
 
 async def get_auth_service(
-    session: Annotated[AsyncSession, Depends(get_db)],
+    session: DbSession,
     settings: Annotated[Settings, Depends(get_settings_dep)],
 ) -> AuthService:
     return AuthService(session, settings)
 
 
 async def get_current_user(
-    session: Annotated[AsyncSession, Depends(get_db)],
+    session: DbSession,
     settings: Annotated[Settings, Depends(get_settings_dep)],
     authorization: Annotated[str | None, Header()] = None,
 ) -> User:
@@ -48,5 +56,4 @@ async def get_current_user(
 
 
 CurrentUser = Annotated[User, Depends(get_current_user)]
-DbSession = Annotated[AsyncSession, Depends(get_db)]
 AppSettings = Annotated[Settings, Depends(get_settings_dep)]
