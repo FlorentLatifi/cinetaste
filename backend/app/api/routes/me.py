@@ -2,9 +2,8 @@ from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Response, status
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import CurrentUser, get_auth_service, get_settings_dep
+from app.api.deps import CurrentUser, DbSession, get_auth_service, get_settings_dep
 from app.api.schemas.auth import (
     DeleteAccountRequest,
     TasteAnchorOut,
@@ -28,7 +27,6 @@ from app.core.config import Settings
 from app.core.cookies import clear_refresh_cookie
 from app.domain.exceptions import AppError
 from app.domain.taste_signals import label_for_state
-from app.infrastructure.db.session import get_db
 
 router = APIRouter()
 
@@ -74,7 +72,7 @@ async def me(user: CurrentUser) -> UserResponse:
 @router.get("/me/taste", response_model=TasteSummaryOut)
 async def my_taste(
     user: CurrentUser,
-    session: Annotated[AsyncSession, Depends(get_db)],
+    session: DbSession,
 ) -> TasteSummaryOut:
     """Top positive/negative taste features for the Account profile card."""
     taste = TasteService(session)
@@ -85,7 +83,7 @@ async def my_taste(
 @router.get("/me/taste/export", response_model=TasteExportOut)
 async def export_taste(
     user: CurrentUser,
-    session: Annotated[AsyncSession, Depends(get_db)],
+    session: DbSession,
 ) -> TasteExportOut:
     """Downloadable taste snapshot (JSON fields + plain-text share body).
 
@@ -148,7 +146,7 @@ async def export_taste(
 async def import_taste(
     body: TasteImportRequest,
     user: CurrentUser,
-    session: Annotated[AsyncSession, Depends(get_db)],
+    session: DbSession,
     settings: Annotated[Settings, Depends(get_settings_dep)],
 ) -> TasteImportResultOut:
     """Merge an exported taste snapshot into a durable sparse overlay.
@@ -190,7 +188,7 @@ async def import_taste(
 @router.delete("/me/taste/import", response_model=TasteSummaryOut)
 async def clear_taste_import(
     user: CurrentUser,
-    session: Annotated[AsyncSession, Depends(get_db)],
+    session: DbSession,
     settings: Annotated[Settings, Depends(get_settings_dep)],
 ) -> TasteSummaryOut:
     """Remove merged snapshot overlay; recompute from live interactions only."""
@@ -204,7 +202,7 @@ async def clear_taste_import(
 @router.get("/me/history", response_model=HistoryPageOut)
 async def my_history(
     user: CurrentUser,
-    session: Annotated[AsyncSession, Depends(get_db)],
+    session: DbSession,
     settings: Annotated[Settings, Depends(get_settings_dep)],
     limit: int = Query(default=20, ge=1, le=100),
     state: str | None = Query(

@@ -11,19 +11,19 @@
     "test:a11y:ui": "playwright test --ui"
   },
   "dependencies": {
-    "@sentry/react": "^9.47.1",
-    "react": "^19.1.0",
-    "react-dom": "^19.1.0",
+    "@sentry/react": "^10.75.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
     "react-helmet-async": "^3.0.0",
-    "react-router-dom": "^7.5.0"
+    "react-router-dom": "^7.18.4"
   },
   "devDependencies": {
-    "@axe-core/playwright": "^4.12.1",
-    "@playwright/test": "^1.61.1",
-    "@types/react": "^19.1.0",
-    "@types/react-dom": "^19.1.0",
-    "@vitejs/plugin-react": "^4.4.0",
-    "typescript": "~5.8.3",
-    "vite": "^6.3.0"
+    "@axe-core/playwright": "^4.13.0",
+    "@playwright/test": "^1.63.0",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.1",
+    "typescript": "~7.0.2",
+    "vite": "^8.3.0"
   }
 }

@@ -200,7 +200,7 @@ Errors share one shape: `{code, message, request_id}` (validation adds `errors[]
 ## Testing
 
 ```bash
-cd backend && pytest -m "not integration"   # 160 unit tests
+cd backend && pytest -m "not integration"   # 162 unit tests
 docker compose up -d db                      # integration needs Postgres
 INTEGRATION_REQUIRED=1 pytest -m integration # 15 API + DB tests, run the migrations
 cd frontend && npx playwright test           # 34 e2e + axe accessibility tests
