@@ -19,7 +19,7 @@ numpy==2.5.1
 redis==5.2.1
 
 # Security
-bcrypt==4.0.1
+bcrypt==5.0.0
 PyJWT==2.10.1
 
 # HTTP client (TMDb later)
