@@ -1,32 +1,32 @@
 # Web
-fastapi==0.115.12
-uvicorn[standard]==0.34.2
-python-multipart==0.0.20
+fastapi==0.141.1
+uvicorn[standard]==0.53.0
+python-multipart==0.0.32
 
 # Settings & validation
-pydantic==2.11.3
-pydantic-settings==2.9.1
-email-validator==2.2.0
+pydantic==2.13.5
+pydantic-settings==2.15.0
+email-validator==2.3.0
 
 # Database
-SQLAlchemy[asyncio]==2.0.40
-asyncpg==0.30.0
-alembic==1.15.2
-pgvector==0.4.1
-numpy==2.5.1
+SQLAlchemy[asyncio]==2.0.54
+asyncpg==0.31.0
+alembic==1.20.0
+pgvector==0.5.0
+numpy==2.5.3
 
 # Cache
 redis==5.2.1
 
 # Security
 bcrypt==4.0.1
-PyJWT==2.10.1
+PyJWT==2.14.0
 
 # HTTP client (TMDb later)
 httpx==0.28.1
 
 # Utils
-python-dotenv==1.1.0
+python-dotenv==1.2.3
 
 # Observability (optional at runtime — no-op without SENTRY_DSN)
-sentry-sdk[fastapi]==2.22.0
+sentry-sdk[fastapi]==2.69.2
