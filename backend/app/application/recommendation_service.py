@@ -2,22 +2,54 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import dataclass
+from functools import partial
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import or_, select
+from anyio import to_thread
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.application.history_cursor import (
+    CursorError,
+    decode_history_cursor,
+    encode_history_cursor,
+)
 from app.core.config import Settings
-from app.domain.taste_signals import FEED_EXCLUDE_STATES
-from app.infrastructure.db.models.catalog import Title
+from app.data.onboarding_seed import (
+    load_onboarding_seed_deck,
+    order_titles_by_seed,
+    pick_diverse_fallback,
+)
+from app.domain.exceptions import AppError
+from app.domain.taste_signals import FEED_EXCLUDE_STATES, HISTORY_VISIBLE_STATES
+from app.infrastructure.cache import get_store
+from app.infrastructure.db.models.catalog import Credit, Title
 from app.infrastructure.db.models.interaction import RecommendationImpression, UserTitleState
 from app.infrastructure.db.models.taste import TasteProfile
-from app.infrastructure.db.redis import get_redis
+from app.recommendation.explanations import Reason, strip_explain_memory
 from app.recommendation.pipeline import RankedItem, rank_titles
 
 logger = logging.getLogger(__name__)
+
+# pgvector's HNSW search only explores ``hnsw.ef_search`` candidates (default 40)
+# and filters afterwards, so LIMIT 250 would silently return ≤ 40 rows.
+_HNSW_EF_SEARCH_MAX = 1000
+_WATCHLIST_LIMIT = 200
+
+
+def _escape_like(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+@dataclass(slots=True)
+class Slate:
+    items: list[tuple[Title, RankedItem]]
+    slate_id: UUID
+    # True when ranked for this request, False when served from cache.
+    fresh: bool
 
 
 class RecommendationService:
@@ -27,20 +59,7 @@ class RecommendationService:
         self._session = session
         self._settings = settings
 
-    async def _cache_get(self, key: str) -> str | None:
-        try:
-            redis = await get_redis()
-            return await redis.get(key)
-        except Exception:
-            logger.warning("redis_cache_get_failed key=%s", key, exc_info=True)
-            return None
-
-    async def _cache_set(self, key: str, value: str, ex: int) -> None:
-        try:
-            redis = await get_redis()
-            await redis.set(key, value, ex=ex)
-        except Exception:
-            logger.warning("redis_cache_set_failed key=%s", key, exc_info=True)
+    # ------------------------------------------------------------------ For You
 
     async def _load_candidates(
         self,
@@ -50,113 +69,106 @@ class RecommendationService:
     ) -> list[Title]:
         """Build a candidate pool for ranking.
 
-        Warm profiles: pgvector ANN (cosine) via HNSW index + a small popular
-        exploration slice so we do not overfit nearest-neighbor only.
-
+        Warm profiles: pgvector nearest neighbours (cosine, HNSW index) plus a
+        popular slice so we don't overfit to nearest neighbours only.
         Cold start (no vector): popularity-ordered pool.
         """
-        options = (
-            selectinload(Title.genres),
-            selectinload(Title.keywords),
-        )
-        base = select(Title).where(Title.embedding.is_not(None)).options(*options)
+        base = select(Title).where(Title.embedding.is_not(None)).options(selectinload(Title.genres))
         if exclude_ids:
-            # Keep SQL filter small; ranking also filters for safety.
             base = base.where(Title.id.notin_(list(exclude_ids)))
 
-        use_ann = (
-            self._settings.rec_use_ann
-            and user_vector is not None
-            and len(user_vector) > 0
-        )
-
-        if use_ann:
+        if self._settings.rec_use_ann and user_vector:
             ann_limit = max(self._settings.rec_ann_candidates, self._settings.rec_slate_size * 4)
             pop_limit = max(self._settings.rec_popular_candidates, 20)
+            ann_rows: list[Title] = []
             try:
-                ann_rows = (
-                    await self._session.scalars(
-                        base.order_by(Title.embedding.cosine_distance(user_vector)).limit(ann_limit)
+                # Savepoint: a failed query aborts the whole Postgres transaction,
+                # which would also break the popularity fallback below.
+                async with self._session.begin_nested():
+                    ef_search = min(max(ann_limit, 40), _HNSW_EF_SEARCH_MAX)
+                    await self._session.execute(
+                        select(func.set_config("hnsw.ef_search", str(ef_search), True))
                     )
-                ).all()
+                    ann_rows = list(
+                        (
+                            await self._session.scalars(
+                                base.order_by(Title.embedding.cosine_distance(user_vector)).limit(
+                                    ann_limit
+                                )
+                            )
+                        ).all()
+                    )
             except Exception:
-                # Index missing / empty table / driver issue → popularity fallback
                 logger.warning("ann_candidate_query_failed; falling back to popularity", exc_info=True)
-                ann_rows = []
 
             pop_rows = (
-                await self._session.scalars(
-                    base.order_by(Title.popularity.desc()).limit(pop_limit)
-                )
+                await self._session.scalars(base.order_by(Title.popularity.desc()).limit(pop_limit))
             ).all()
-
             merged: dict[UUID, Title] = {}
-            for t in list(ann_rows) + list(pop_rows):
-                merged[t.id] = t
+            for title in [*ann_rows, *pop_rows]:
+                merged[title.id] = title
             if merged:
                 return list(merged.values())
 
-        # Cold start or ANN fallback
-        pool = max(
-            self._settings.rec_ann_candidates + self._settings.rec_popular_candidates,
-            400,
-        )
+        pool = max(self._settings.rec_ann_candidates + self._settings.rec_popular_candidates, 400)
         return list(
+            (await self._session.scalars(base.order_by(Title.popularity.desc()).limit(pool))).all()
+        )
+
+    async def for_you(self, user_id: UUID, *, limit: int | None = None) -> Slate:
+        slate_size = limit or self._settings.rec_slate_size
+        profile = await self._session.get(TasteProfile, user_id)
+        profile_version = profile.version if profile else 0
+        # The profile version changes on every interaction, so a new action never
+        # serves a stale slate; the TTL only bounds memory.
+        cache_key = f"slate:{user_id}:{profile_version}:{slate_size}"
+        store = get_store()
+
+        cached = await store.get(cache_key)
+        if cached:
+            try:
+                payload = json.loads(cached)
+                return Slate(
+                    items=await self._hydrate(payload["items"]),
+                    slate_id=UUID(payload["slate_id"]),
+                    fresh=False,
+                )
+            except Exception:
+                logger.warning("slate_cache_payload_invalid key=%s", cache_key, exc_info=True)
+
+        exclude_ids = set(
             (
                 await self._session.scalars(
-                    base.order_by(Title.popularity.desc()).limit(pool)
+                    select(UserTitleState.title_id).where(
+                        UserTitleState.user_id == user_id,
+                        UserTitleState.state.in_(list(FEED_EXCLUDE_STATES)),
+                    )
                 )
             ).all()
         )
 
-    async def for_you(self, user_id: UUID, *, limit: int | None = None) -> list[tuple[Title, RankedItem]]:
-        slate_size = limit or self._settings.rec_slate_size
-        profile = await self._session.get(TasteProfile, user_id)
-        profile_version = profile.version if profile else 0
-        cache_key = f"slate:{user_id}:{profile_version}:{slate_size}"
-
-        # Redis is optional: cache miss or Redis down both fall through to compute.
-        cached = await self._cache_get(cache_key)
-        if cached:
-            try:
-                payload = json.loads(cached)
-                return await self._hydrate(payload)
-            except Exception:
-                logger.warning("redis_cache_payload_invalid key=%s", cache_key, exc_info=True)
-
-        # States derived from taste signal policy (haven't_seen is never excluded).
-        exclude_states = (
-            await self._session.scalars(
-                select(UserTitleState).where(
-                    UserTitleState.user_id == user_id,
-                    UserTitleState.state.in_(list(FEED_EXCLUDE_STATES)),
-                )
-            )
-        ).all()
-        exclude_ids = {row.title_id for row in exclude_states}
-
-        from app.recommendation.explanations import strip_explain_memory
-
-        user_vector = None
-        if profile is not None and profile.vector is not None:
-            user_vector = list(profile.vector)
+        user_vector = list(profile.vector) if profile is not None and profile.vector is not None else None
         raw_features = dict(profile.features) if profile and profile.features else {}
         user_features, explain_memory = strip_explain_memory(raw_features)
 
         titles = await self._load_candidates(user_vector=user_vector, exclude_ids=exclude_ids)
-
-        ranked = rank_titles(
-            user_vector=user_vector,
-            user_features=user_features,
-            titles=list(titles),
-            exclude_ids=exclude_ids,
-            slate_size=slate_size,
-            mmr_lambda=self._settings.rec_mmr_lambda,
-            exploration_slots=self._settings.rec_exploration_slots,
-            explain_memory=explain_memory,
+        # Ranking is CPU work (numpy + Python); keep it off the event loop.
+        ranked = await to_thread.run_sync(
+            partial(
+                rank_titles,
+                user_vector=user_vector,
+                user_features=user_features,
+                titles=titles,
+                exclude_ids=exclude_ids,
+                slate_size=slate_size,
+                mmr_lambda=self._settings.rec_mmr_lambda,
+                exploration_slots=self._settings.rec_exploration_slots,
+                explain_memory=explain_memory,
+            )
         )
 
-        cache_payload = [
+        slate_id = uuid4()
+        items_payload = [
             {
                 "title_id": str(item.title_id),
                 "score": item.score,
@@ -167,20 +179,20 @@ class RecommendationService:
             }
             for item in ranked
         ]
-        await self._cache_set(
+        await store.set(
             cache_key,
-            json.dumps(cache_payload),
-            ex=self._settings.rec_cache_ttl_seconds,
+            json.dumps({"slate_id": str(slate_id), "items": items_payload}),
+            ttl_seconds=self._settings.rec_cache_ttl_seconds,
         )
-        return await self._hydrate(cache_payload)
+        by_id = {t.id: t for t in titles}
+        return Slate(
+            items=[(by_id[item.title_id], item) for item in ranked],
+            slate_id=slate_id,
+            fresh=True,
+        )
 
     async def invalidate_user(self, user_id: UUID) -> None:
-        try:
-            redis = await get_redis()
-            async for key in redis.scan_iter(match=f"slate:{user_id}:*"):
-                await redis.delete(key)
-        except Exception:
-            logger.warning("redis_invalidate_failed user_id=%s", user_id, exc_info=True)
+        await get_store().delete_prefix(f"slate:{user_id}:")
 
     async def log_impressions(
         self,
@@ -213,12 +225,34 @@ class RecommendationService:
             return sid
         except Exception:
             logger.warning(
-                "impression_log_failed user_id=%s slate_id=%s",
-                user_id,
-                sid,
-                exc_info=True,
+                "impression_log_failed user_id=%s slate_id=%s", user_id, sid, exc_info=True
             )
             return None
+
+    async def _hydrate(self, payload: list[dict[str, Any]]) -> list[tuple[Title, RankedItem]]:
+        ids = [UUID(item["title_id"]) for item in payload]
+        if not ids:
+            return []
+        titles = (
+            await self._session.scalars(
+                select(Title).where(Title.id.in_(ids)).options(selectinload(Title.genres))
+            )
+        ).all()
+        by_id = {t.id: t for t in titles}
+        result: list[tuple[Title, RankedItem]] = []
+        for item in payload:
+            tid = UUID(item["title_id"])
+            title = by_id.get(tid)
+            if title is None:
+                continue
+            reasons = [
+                Reason(code=r["code"], message=r["message"], evidence=r.get("evidence") or {})
+                for r in item.get("reasons", [])
+            ]
+            result.append((title, RankedItem(title_id=tid, score=float(item["score"]), reasons=reasons)))
+        return result
+
+    # --------------------------------------------------------------- Onboarding
 
     async def onboarding_cards(
         self,
@@ -233,15 +267,8 @@ class RecommendationService:
         2. If the seed is missing from the catalog or exhausted, fill with a
            quality + diversity scorer (not pure popularity).
         """
-        from app.data.onboarding_seed import (
-            load_onboarding_seed_deck,
-            order_titles_by_seed,
-            pick_diverse_fallback,
-        )
-
         skip = exclude_ids or set()
-        deck = load_onboarding_seed_deck()
-        seed_ids = deck.tmdb_ids()
+        seed_ids = load_onboarding_seed_deck().tmdb_ids()
 
         seeded_rows = (
             await self._session.scalars(
@@ -254,17 +281,14 @@ class RecommendationService:
                 .options(selectinload(Title.genres))
             )
         ).all()
-        seeded_ordered = [
+        picked = [
             t for t in order_titles_by_seed(list(seeded_rows), seed_ids) if t.id not in skip
-        ]
-        picked: list[Title] = seeded_ordered[:limit]
+        ][:limit]
         if len(picked) >= limit:
             return picked
 
-        # Fallback pool: broader catalog, quality-aware diversity (not chart dump).
         need = limit - len(picked)
         picked_ids = {t.id for t in picked} | skip
-        pool_size = max(200, limit * 10 + len(skip))
         pool = (
             await self._session.scalars(
                 select(Title)
@@ -275,39 +299,58 @@ class RecommendationService:
                 )
                 .options(selectinload(Title.genres))
                 .order_by(Title.vote_count.desc())
-                .limit(pool_size)
+                .limit(max(200, limit * 10 + len(skip)))
             )
         ).all()
-        fill = pick_diverse_fallback(
-            list(pool),
-            limit=need,
-            exclude_ids=picked_ids,
-            max_per_genre=2,
-            max_per_decade=3,
-            max_per_language=4,
+        picked.extend(
+            pick_diverse_fallback(
+                list(pool),
+                limit=need,
+                exclude_ids=picked_ids,
+                max_per_genre=2,
+                max_per_decade=3,
+                max_per_language=4,
+            )
         )
-        picked.extend(fill)
         return picked
 
+    # ------------------------------------------------------------------ Catalog
+
     async def search(self, query: str, *, limit: int = 20) -> list[Title]:
-        q = f"%{query.strip()}%"
-        if len(query.strip()) < 2:
+        """Title search: substring match plus pg_trgm fuzzy match (typos),
+        ordered by trigram similarity, then popularity."""
+        raw = query.strip()
+        if len(raw) < 2:
             return []
+        pattern = f"%{_escape_like(raw)}%"
+        similarity = func.greatest(
+            func.similarity(Title.name, raw),
+            func.similarity(func.coalesce(Title.original_name, ""), raw),
+        )
         return list(
             (
                 await self._session.scalars(
                     select(Title)
-                    .where(or_(Title.name.ilike(q), Title.original_name.ilike(q)))
+                    .where(
+                        or_(
+                            Title.name.ilike(pattern, escape="\\"),
+                            Title.original_name.ilike(pattern, escape="\\"),
+                            Title.name.op("%")(raw),
+                        )
+                    )
                     .options(selectinload(Title.genres))
-                    .order_by(Title.popularity.desc())
+                    .order_by(similarity.desc(), Title.popularity.desc())
                     .limit(limit)
                 )
             ).all()
         )
 
-    async def get_title(self, title_id: UUID) -> Title | None:
-        from app.infrastructure.db.models.catalog import Credit
+    async def title_exists(self, title_id: UUID) -> bool:
+        return (
+            await self._session.scalar(select(func.count()).select_from(Title).where(Title.id == title_id))
+        ) == 1
 
+    async def get_title(self, title_id: UUID) -> Title | None:
         return await self._session.scalar(
             select(Title)
             .where(Title.id == title_id)
@@ -319,86 +362,50 @@ class RecommendationService:
         )
 
     async def similar_titles(self, title_id: UUID, *, limit: int = 12) -> list[Title]:
-        """Nearest neighbors in embedding space (uses HNSW when available)."""
+        """Nearest neighbours in embedding space (uses HNSW when available)."""
         source = await self._session.get(Title, title_id)
         if source is None:
             return []
+        neighbours = (
+            select(Title)
+            .where(Title.id != title_id, Title.embedding.is_not(None))
+            .options(selectinload(Title.genres))
+            .limit(limit)
+        )
         if source.embedding is None:
-            # No vector — fall back to same primary genre by popularity
-            genres = (
-                await self._session.scalar(
-                    select(Title)
-                    .where(Title.id == title_id)
-                    .options(selectinload(Title.genres))
-                )
-            )
-            genre_names = [g.name for g in (genres.genres if genres else [])]
-            if not genre_names:
-                return []
-            # Simple popular neighbors sharing any genre name via SQL is heavy;
-            # return popular titles excluding self.
             return list(
-                (
-                    await self._session.scalars(
-                        select(Title)
-                        .where(Title.id != title_id, Title.embedding.is_not(None))
-                        .options(selectinload(Title.genres))
-                        .order_by(Title.popularity.desc())
-                        .limit(limit)
-                    )
-                ).all()
+                (await self._session.scalars(neighbours.order_by(Title.popularity.desc()))).all()
             )
-
-        emb = list(source.embedding)
         try:
-            rows = (
-                await self._session.scalars(
-                    select(Title)
-                    .where(
-                        Title.id != title_id,
-                        Title.embedding.is_not(None),
-                    )
-                    .options(selectinload(Title.genres))
-                    .order_by(Title.embedding.cosine_distance(emb))
-                    .limit(limit)
+            async with self._session.begin_nested():
+                return list(
+                    (
+                        await self._session.scalars(
+                            neighbours.order_by(Title.embedding.cosine_distance(list(source.embedding)))
+                        )
+                    ).all()
                 )
-            ).all()
-            return list(rows)
         except Exception:
             logger.warning("similar_titles_ann_failed title_id=%s", title_id, exc_info=True)
             return list(
-                (
-                    await self._session.scalars(
-                        select(Title)
-                        .where(Title.id != title_id, Title.embedding.is_not(None))
-                        .options(selectinload(Title.genres))
-                        .order_by(Title.popularity.desc())
-                        .limit(limit)
-                    )
-                ).all()
+                (await self._session.scalars(neighbours.order_by(Title.popularity.desc()))).all()
             )
 
+    # ------------------------------------------------------------------ Library
+
     async def watchlist(self, user_id: UUID) -> list[Title]:
-        states = (
-            await self._session.scalars(
-                select(UserTitleState).where(
-                    UserTitleState.user_id == user_id,
-                    UserTitleState.state == "watchlist",
-                )
-            )
-        ).all()
-        if not states:
-            return []
-        ids = [s.title_id for s in states]
-        titles = (
-            await self._session.scalars(
-                select(Title)
-                .where(Title.id.in_(ids))
+        """Saved titles, most recently saved first."""
+        rows = (
+            await self._session.execute(
+                select(Title, UserTitleState.updated_at)
+                .join(UserTitleState, UserTitleState.title_id == Title.id)
+                .where(UserTitleState.user_id == user_id, UserTitleState.state == "watchlist")
                 .options(selectinload(Title.genres))
+                .order_by(UserTitleState.updated_at.desc(), Title.id)
+                .limit(_WATCHLIST_LIMIT)
             )
         ).all()
-        by_id = {t.id: t for t in titles}
-        return [by_id[i] for i in ids if i in by_id]
+        return [row[0] for row in rows]
 
     async def history(
         self,
@@ -412,15 +419,6 @@ class RecommendationService:
 
         Returns ``(rows, next_cursor)``. ``next_cursor`` is None when no more pages.
         """
-        from sqlalchemy import and_, or_
-
-        from app.application.history_cursor import (
-            CursorError,
-            decode_history_cursor,
-            encode_history_cursor,
-        )
-        from app.domain.taste_signals import HISTORY_VISIBLE_STATES
-
         allowed = list(HISTORY_VISIBLE_STATES)
         if state is not None:
             if state not in HISTORY_VISIBLE_STATES:
@@ -436,8 +434,6 @@ class RecommendationService:
             try:
                 cursor_ts, cursor_title_id = decode_history_cursor(cursor)
             except CursorError as exc:
-                from app.domain.exceptions import AppError
-
                 raise AppError(str(exc), status_code=400, code="invalid_cursor") from exc
             # updated_at DESC, title_id DESC keyset
             filters.append(
@@ -454,10 +450,7 @@ class RecommendationService:
             await self._session.scalars(
                 select(UserTitleState)
                 .where(*filters)
-                .order_by(
-                    UserTitleState.updated_at.desc(),
-                    UserTitleState.title_id.desc(),
-                )
+                .order_by(UserTitleState.updated_at.desc(), UserTitleState.title_id.desc())
                 .limit(page_size + 1)
             )
         ).all()
@@ -466,11 +459,10 @@ class RecommendationService:
         if not page:
             return [], None
 
-        ids = [s.title_id for s in page]
         titles = (
             await self._session.scalars(
                 select(Title)
-                .where(Title.id.in_(ids))
+                .where(Title.id.in_([s.title_id for s in page]))
                 .options(selectinload(Title.genres))
             )
         ).all()
@@ -478,42 +470,7 @@ class RecommendationService:
         rows = [(by_id[s.title_id], s) for s in page if s.title_id in by_id]
 
         next_cursor = None
-        if has_more and page:
+        if has_more:
             last = page[-1]
             next_cursor = encode_history_cursor(last.updated_at, last.title_id)
         return rows, next_cursor
-
-    async def _hydrate(self, payload: list[dict[str, Any]]) -> list[tuple[Title, RankedItem]]:
-        from app.recommendation.pipeline import Reason
-
-        ids = [UUID(item["title_id"]) for item in payload]
-        if not ids:
-            return []
-        titles = (
-            await self._session.scalars(
-                select(Title)
-                .where(Title.id.in_(ids))
-                .options(selectinload(Title.genres), selectinload(Title.keywords))
-            )
-        ).all()
-        by_id = {t.id: t for t in titles}
-        result: list[tuple[Title, RankedItem]] = []
-        for item in payload:
-            tid = UUID(item["title_id"])
-            title = by_id.get(tid)
-            if not title:
-                continue
-            ranked = RankedItem(
-                title_id=tid,
-                score=float(item["score"]),
-                reasons=[
-                    Reason(
-                        code=r["code"],
-                        message=r["message"],
-                        evidence=r.get("evidence") or {},
-                    )
-                    for r in item.get("reasons", [])
-                ],
-            )
-            result.append((title, ranked))
-        return result

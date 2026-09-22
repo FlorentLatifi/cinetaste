@@ -138,7 +138,7 @@ class RecommendationSlateOut(BaseModel):
     items: list[RecommendationItemOut]
     slate_id: UUID | None = Field(
         default=None,
-        description="Impression slate id when rec_log_impressions is enabled",
+        description="Identifies this slate (same id while served from cache)",
     )
 
 
@@ -152,12 +152,12 @@ class InteractionRequest(BaseModel):
     event_type: str = Field(
         pattern=(
             "^(like|dislike|watchlist|not_interested|clear|skip|view|"
-            "haven't_seen|rate_1|rate_2|rate_3|rate_4|"
+            "haven't_seen|mid|rate_1|rate_2|rate_3|rate_4|"
             "watched|watched_liked|watched_disliked)$"
         ),
         description=(
             "Active signals only. "
-            "haven't_seen=0 taste; not_interested=mild−; "
+            "haven't_seen=0 taste; mid=very mild+; "
             "rate_1…rate_4=Bad…Favorite; watchlist=mild+; "
             "like/dislike=feed shortcuts; clear=undo title state + prior taste; "
             "watched / watched_liked / watched_disliked=post-watch completion. "
@@ -172,14 +172,15 @@ class OnboardingReaction(BaseModel):
     Policy (docs/TASTE_SIGNALS.md):
     - haven't_seen — zero taste signal (does not count as a rating)
     - not_interested — mild negative
-    - rate_1 … rate_4 — Bad / It's ok / Good / Favorite
+    - rate_1, mid, rate_2, rate_3, rate_4 — didn't like → loved (all count as
+      ratings; mid is not a *positive* rating)
     - like / dislike — legacy aliases (mapped to rate_3 / rate_1)
     """
 
     title_id: UUID
     action: str = Field(
         pattern=(
-            "^(haven't_seen|not_interested|rate_1|rate_2|rate_3|rate_4|like|dislike)$"
+            "^(haven't_seen|not_interested|mid|rate_1|rate_2|rate_3|rate_4|like|dislike)$"
         )
     )
 

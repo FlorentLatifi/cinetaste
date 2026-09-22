@@ -1,0 +1,90 @@
+.shell { min-height: 100vh; display: flex; flex-direction: column; }
+
+.topbar {
+  border-bottom: 1px solid var(--border);
+  backdrop-filter: blur(14px);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--topbar-bg, rgba(11, 12, 16, 0.82));
+}
+.topbar-inner {
+  width: min(1200px, calc(100% - 1.5rem));
+  margin: 0 auto;
+  padding: 0.75rem 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem 1rem;
+}
+
+.brand { display: flex; align-items: center; gap: 0.75rem; min-width: 0; }
+.brand-text { min-width: 0; }
+.brand-mark { width: 2.25rem; height: 2.25rem; border-radius: 0.75rem; display: grid; place-items: center; background: linear-gradient(145deg, var(--accent), #9a6b2f); color: #1a1208; font-weight: 700; }
+.brand-name { font-weight: 600; }
+.brand-tag { color: var(--muted); font-size: 0.8rem; }
+
+.topbar-nav { display: flex; align-items: center; gap: 0.35rem; flex-wrap: wrap; }
+.nav-link { color: var(--muted); text-decoration: none; font-weight: 600; font-size: 0.9rem; padding: 0.45rem 0.7rem; border-radius: 999px; border: 1px solid transparent; }
+.nav-link:hover { color: var(--text); text-decoration: none; background: rgba(255, 255, 255, 0.04); }
+.nav-link.active { color: var(--accent-strong); border-color: rgba(232, 194, 122, 0.35); background: rgba(232, 194, 122, 0.08); }
+.topbar-right { display: flex; align-items: center; gap: 0.75rem; }
+
+.user-chip { color: var(--muted); font-size: 0.9rem; max-width: 9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.bottom-nav { display: none; }
+
+@media (max-width: 720px) {
+  .topbar-nav { display: none !important; }
+  .bottom-nav {
+    display: flex;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 30;
+    justify-content: space-around;
+    gap: 0.15rem;
+    padding: 0.35rem 0.25rem calc(0.35rem + env(safe-area-inset-bottom, 0px));
+    border-top: 1px solid var(--border);
+    background: var(--bottom-nav-bg, rgba(11, 12, 16, 0.94));
+    backdrop-filter: blur(14px);
+  }
+  .bottom-nav-link {
+    flex: 1 1 0;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.1rem;
+    padding: 0.45rem 0.2rem;
+    border-radius: 12px;
+    color: var(--muted);
+    text-decoration: none;
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    line-height: 1.15;
+    text-align: center;
+  }
+  .bottom-nav-link:hover { color: var(--text); text-decoration: none; background: rgba(255, 255, 255, 0.04); }
+  .bottom-nav-link.active { color: var(--accent-strong); background: rgba(232, 194, 122, 0.1); }
+  .bottom-nav-label { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .main { padding-bottom: calc(5.25rem + env(safe-area-inset-bottom, 0px)); }
+  .feed-toast { bottom: calc(4.5rem + env(safe-area-inset-bottom, 0px)); }
+}
+
+::view-transition-old(root), ::view-transition-new(root) { animation-duration: 0.28s; }
+::view-transition-old(title-poster), ::view-transition-new(title-poster) { animation-duration: 0.32s; mix-blend-mode: normal; height: 100%; object-fit: cover; }
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; }
+}
+
+.modal-root { position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; padding: 1rem; }
+.modal-backdrop { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.55); }
+.modal-panel { position: relative; z-index: 1; width: min(28rem, 100%); padding: 1.25rem 1.35rem; border-radius: var(--radius); border: 1px solid var(--border); background: var(--bg-elevated); box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 0.75rem; }
+.modal-title { margin: 0; font-size: 1.35rem; }
+.modal-desc { margin: 0; color: var(--muted); font-size: 0.95rem; line-height: 1.45; }
+.modal-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 0.5rem; margin-top: 0.35rem; }

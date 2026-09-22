@@ -70,13 +70,13 @@ test("Onboarding: Rate opens scale and records a rating", async ({ page }) => {
 
   await page.getByRole("button", { name: `Rate ${mockTitle.name}` }).click();
   await expect(page.getByText("How was it for you?")).toBeVisible();
-  await page.getByRole("button", { name: /Good:/i }).click();
+  await page.getByRole("button", { name: /Really liked it:/i }).click();
   // Progress should reflect at least one rating
   await expect(page.getByText(/of 6 rated/i)).toBeVisible();
   await expect(page.locator(".ob-progress-count strong")).toHaveText("1");
 });
 
-test("For You: Pass removes card and Undo restores it", async ({ page }) => {
+test("For You: rating removes the card and Undo restores it", async ({ page }) => {
   await installApiMock(page, { onboardingComplete: true });
   await page.goto("/");
   await page.getByRole("heading", { name: /Picks matched/i }).waitFor();
@@ -84,25 +84,25 @@ test("For You: Pass removes card and Undo restores it", async ({ page }) => {
   const cardTitle = page.getByRole("heading", { name: mockTitle.name });
   await expect(cardTitle).toBeVisible();
 
-  await page.getByRole("button", { name: `Pass on ${mockTitle.name}` }).click();
-  await expect(page.getByText(new RegExp(`Passed · ${mockTitle.name}`))).toBeVisible();
+  await page.getByRole("button", { name: `Didn't like it — ${mockTitle.name}` }).click();
+  await expect(page.getByText(new RegExp(`Didn't like it · ${mockTitle.name}`))).toBeVisible();
   await expect(cardTitle).toHaveCount(0);
 
   await page.getByRole("button", { name: "Undo" }).click();
   await expect(page.getByRole("heading", { name: mockTitle.name })).toBeVisible();
 });
 
-test("For You: keyboard 1 passes the current pick", async ({ page }) => {
+test("For You: keyboard 1 records the top rating", async ({ page }) => {
   await installApiMock(page, { onboardingComplete: true });
   await page.goto("/");
   await page.getByRole("heading", { name: mockTitle.name }).waitFor();
 
   await page.keyboard.press("1");
-  await expect(page.getByText(new RegExp(`Passed · ${mockTitle.name}`))).toBeVisible();
+  await expect(page.getByText(new RegExp(`Loved it · ${mockTitle.name}`))).toBeVisible();
   await expect(page.getByRole("heading", { name: mockTitle.name })).toHaveCount(0);
 });
 
-test("For You: double-click Pass only posts one interaction", async ({ page }) => {
+test("For You: double-click only posts one interaction", async ({ page }) => {
   const mock = await installApiMock(page, {
     onboardingComplete: true,
     interactionDelayMs: 250,
@@ -110,16 +110,16 @@ test("For You: double-click Pass only posts one interaction", async ({ page }) =
   await page.goto("/");
   await page.getByRole("heading", { name: mockTitle.name }).waitFor();
 
-  const pass = page.getByRole("button", { name: `Pass on ${mockTitle.name}` });
-  await pass.dblclick();
-  await expect(page.getByText(new RegExp(`Passed · ${mockTitle.name}`))).toBeVisible({
+  const rate = page.getByRole("button", { name: `Didn't like it — ${mockTitle.name}` });
+  await rate.dblclick();
+  await expect(page.getByText(new RegExp(`Didn't like it · ${mockTitle.name}`))).toBeVisible({
     timeout: 10_000,
   });
   // busy/exiting guards must collapse double activation to a single POST
   expect(mock.interactionPosts()).toBe(1);
 });
 
-test("For You: dead session on Pass returns guest to landing", async ({ page }) => {
+test("For You: dead session on rating returns guest to landing", async ({ page }) => {
   await installApiMock(page, {
     onboardingComplete: true,
     sessionDeadOnInteraction: true,
@@ -127,7 +127,7 @@ test("For You: dead session on Pass returns guest to landing", async ({ page }) 
   await page.goto("/");
   await page.getByRole("heading", { name: mockTitle.name }).waitFor();
 
-  await page.getByRole("button", { name: `Pass on ${mockTitle.name}` }).click();
+  await page.getByRole("button", { name: `Didn't like it — ${mockTitle.name}` }).click();
   // Session cleared → RootRoute renders public LandingPage
   await expect(
     page.getByRole("heading", {
@@ -308,6 +308,47 @@ test("Account: open snapshot previews export JSON", async ({ page }) => {
   await expect(page.getByText(/Cleared merged snapshot overlay/i)).toBeVisible();
 });
 
+
+
+test("For You: malformed item with null poster does not crash", async ({
+  page,
+}) => {
+  const handle = await installApiMock(page, { onboardingComplete: true });
+  // Override For You response with null poster
+  await page.route("**/api/v1/recommendations/for-you**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        items: [
+          {
+            title: {
+              ...mockTitle,
+              poster_url: null,
+              poster_path: null,
+              backdrop_path: null,
+            },
+            score: 0.85,
+            reasons: [
+              {
+                code: "shared_genre",
+                message: "Fits your taste",
+                evidence: {},
+              },
+            ],
+          },
+        ],
+      }),
+    });
+  });
+  await page.goto("/");
+  await page.getByRole("heading", { name: mockTitle.name }).waitFor();
+  // No crash = page rendered without poster
+  await expect(
+    page.getByRole("button", { name: /Didn't like it —/i }),
+  ).toBeVisible();
+});
+
 test("Title detail: Watched opens rate panel", async ({ page }) => {
   await installApiMock(page, { onboardingComplete: true });
   await page.goto(`/titles/${mockTitle.id}`);
@@ -315,6 +356,6 @@ test("Title detail: Watched opens rate panel", async ({ page }) => {
 
   await page.getByRole("button", { name: /Mark .* as watched and rate/i }).click();
   await expect(page.getByText("How was it?")).toBeVisible();
-  await page.getByRole("button", { name: `Rate ${mockTitle.name}: Good` }).click();
-  await expect(page.getByText(`Rated Good · ${mockTitle.name}`)).toBeVisible();
+  await page.getByRole("button", { name: `Rate ${mockTitle.name}: Really liked it` }).click();
+  await expect(page.getByText(`Really liked it · ${mockTitle.name}`)).toBeVisible();
 });

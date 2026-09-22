@@ -13,13 +13,17 @@ IMPORT_OVERLAY_KEY = "__import_overlay__"
 # Soften imported weights so live ratings still dominate.
 IMPORT_MERGE_SCALE = 0.65
 
+# Keyword features are stored as "kw:<keyword>" (see recommendation.embeddings).
+# "keyword:" was used by older exported snapshots; imports map it to "kw:".
+_LEGACY_PREFIX_ALIASES = {"keyword:": "kw:"}
+
 _ALLOWED_FEATURE_PREFIXES = (
     "person:director:",
     "person:writer:",
     "person:cast:",
     "genre:",
     "tone:",
-    "keyword:",
+    "kw:",
     "lang:",
     "country:",
     "decade:",
@@ -42,7 +46,7 @@ _FAMILY_LABELS = {
     "person:writer:": "Writer",
     "person:cast:": "Cast",
     "tone:": "Tone",
-    "keyword:": "Theme",
+    "kw:": "Theme",
     "lang:": "Language",
     "country:": "Country",
     "decade:": "Decade",
@@ -60,7 +64,7 @@ def feature_family_name(key: str) -> str:
         "person:cast:",
         "genre:",
         "tone:",
-        "keyword:",
+        "kw:",
         "lang:",
         "country:",
         "decade:",
@@ -206,6 +210,14 @@ def build_taste_export(
     }
 
 
+def canonical_feature_key(key: str) -> str:
+    """Map legacy prefixes in imported snapshots onto current feature keys."""
+    for legacy, current in _LEGACY_PREFIX_ALIASES.items():
+        if key.startswith(legacy):
+            return current + key[len(legacy) :]
+    return key
+
+
 def is_allowed_feature_key(key: str) -> bool:
     if not key or key.startswith("__"):
         return False
@@ -223,10 +235,11 @@ def merge_import_overlay(
     out: dict[str, float] = {}
     if existing_overlay:
         for k, v in existing_overlay.items():
-            if not is_allowed_feature_key(str(k)):
+            key = canonical_feature_key(str(k))
+            if not is_allowed_feature_key(key):
                 continue
             try:
-                out[str(k)] = float(v)
+                out[key] = float(v)
             except (TypeError, ValueError):
                 continue
 
@@ -235,7 +248,10 @@ def merge_import_overlay(
             if not isinstance(row, dict):
                 continue
             key = row.get("key")
-            if not isinstance(key, str) or not is_allowed_feature_key(key):
+            if not isinstance(key, str):
+                continue
+            key = canonical_feature_key(key)
+            if not is_allowed_feature_key(key):
                 continue
             try:
                 weight = float(row.get("weight", 0))

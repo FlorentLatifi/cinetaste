@@ -87,8 +87,6 @@ async def main(*, limit: int | None, force: bool) -> int:
                 media_type=title.media_type,
                 release_year=year,
                 runtime=title.runtime,
-                popularity=float(title.popularity or 0.0),
-                vote_average=float(title.vote_average or 0.0),
                 original_language=title.original_language,
                 countries=countries,
             )

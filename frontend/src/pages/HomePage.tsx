@@ -1,8 +1,11 @@
-import { useEffect, useRef, type CSSProperties } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import { Link } from "react-router-dom";
 import { ActionToast } from "../components/ActionToast";
 import { useForYouQueue } from "../features/for-you/useForYouQueue";
+import { RATING_SCALE } from "../features/taste/ratingScale";
 import { heroPosterUrl, posterSrcSet, yearOf } from "../lib/poster";
+
+const ACTIONS = RATING_SCALE;
 
 export function HomePage() {
   const {
@@ -25,10 +28,13 @@ export function HomePage() {
   } = useForYouQueue();
 
   const titleRef = useRef<HTMLHeadingElement>(null);
+  const [posterError, setPosterError] = useState(false);
   const poster = current ? heroPosterUrl(current.title) : null;
   const posterSet = current ? posterSrcSet(current.title) : null;
+  const onPosterError = useCallback(() => setPosterError(true), []);
 
   useEffect(() => {
+    setPosterError(false);
     if (current && !loading) {
       requestAnimationFrame(() =>
         titleRef.current?.focus({ preventScroll: true }),
@@ -36,7 +42,6 @@ export function HomePage() {
     }
   }, [current?.title.id, loading]);
 
-  // Keyboard: 1/P Pass · 2/S Save · 3/L Like · U Undo (when toast visible)
   useEffect(() => {
     if (!current || loading || needsOnboarding) return;
 
@@ -54,20 +59,12 @@ export function HomePage() {
       }
 
       const key = e.key.toLowerCase();
-      if (key === "1" || key === "p") {
-        e.preventDefault();
-        void act("dislike");
-        return;
-      }
-      if (key === "2" || key === "s") {
-        e.preventDefault();
-        void act("watchlist");
-        return;
-      }
-      if (key === "3" || key === "l") {
-        e.preventDefault();
-        void act("like");
-        return;
+      for (const a of ACTIONS) {
+        if (key === a.key || key === a.shortcut) {
+          e.preventDefault();
+          void act(a.event);
+          return;
+        }
       }
       if (key === "u" && toast && !undoBusy) {
         e.preventDefault();
@@ -103,6 +100,9 @@ export function HomePage() {
           <div className="fy-skeleton-line shimmer" />
           <div className="fy-skeleton-line short shimmer" />
           <div className="fy-skeleton-actions">
+            <span className="shimmer" />
+            <span className="shimmer" />
+            <span className="shimmer" />
             <span className="shimmer" />
             <span className="shimmer" />
             <span className="shimmer" />
@@ -146,7 +146,7 @@ export function HomePage() {
             </p>
           ) : (
             <p className="fy-sub">
-              One poster. Your taste. Pass, save, or like — then the next.
+              One poster. Your taste. Rate each title — then the next.
             </p>
           )}
         </div>
@@ -165,7 +165,7 @@ export function HomePage() {
 
       {error && !current && (
         <div className="fy-empty" role="alert">
-          <p className="eyebrow">Couldn’t load picks</p>
+          <p className="eyebrow">Couldn&rsquo;t load picks</p>
           <h2>Something went wrong</h2>
           <p className="lede form-error" style={{ margin: 0 }}>
             {error}
@@ -222,20 +222,21 @@ export function HomePage() {
             }`}
           >
             <div className="fy-poster-frame">
-              {poster ? (
+              {poster && !posterError ? (
                 <img
                   className="fy-poster"
                   src={poster}
                   srcSet={posterSet ?? undefined}
                   sizes={
                     posterSet
-                      ? "(max-width: 560px) 70vw, 340px"
+                      ? "(max-width: 560px) 85vw, 420px"
                       : undefined
                   }
                   alt=""
                   draggable={false}
                   decoding="async"
                   fetchPriority="high"
+                  onError={onPosterError}
                 />
               ) : (
                 <div className="fy-poster fy-poster-fallback" aria-hidden="true">
@@ -275,7 +276,7 @@ export function HomePage() {
               )}
               {current.title.vote_average > 0 && (
                 <span className="ob-score">
-                  <span className="sr-only">Rating </span>★{" "}
+                  <span className="sr-only">Rating </span>
                   {current.title.vote_average.toFixed(1)}
                 </span>
               )}
@@ -295,7 +296,7 @@ export function HomePage() {
                   Why this pick
                 </p>
                 <ul className="reasons fy-reasons" aria-labelledby="fy-why-label">
-                  {current.reasons.slice(0, 3).map((r, idx) => (
+                  {current.reasons.slice(0, 2).map((r, idx) => (
                     <li
                       key={`${r.code}-${idx}`}
                       className={idx === 0 ? "reason-primary" : undefined}
@@ -310,57 +311,48 @@ export function HomePage() {
             <div
               className="fy-actions"
               role="group"
-              aria-label={`Actions for ${current.title.name}. Keyboard: 1 pass, 2 save, 3 like.`}
+              aria-label={`Rate ${current.title.name}. Keyboard: ${ACTIONS.map(
+                (a) => `${a.key} ${a.label.toLowerCase()}`,
+              ).join(", ")}.`}
             >
-              <button
-                type="button"
-                className="fy-act fy-act-pass"
-                disabled={busy}
-                aria-keyshortcuts="1 p"
-                aria-label={`Pass on ${current.title.name}`}
-                onClick={() => void act("dislike")}
-              >
-                <span className="fy-act-label">
-                  Pass <kbd className="fy-kbd">1</kbd>
-                </span>
-                <span className="fy-act-hint">Not for me</span>
-              </button>
-              <button
-                type="button"
-                className="fy-act fy-act-save"
-                disabled={busy}
-                aria-keyshortcuts="2 s"
-                aria-label={`Save ${current.title.name} to watchlist`}
-                onClick={() => void act("watchlist")}
-              >
-                <span className="fy-act-label">
-                  Save <kbd className="fy-kbd">2</kbd>
-                </span>
-                <span className="fy-act-hint">Watch later</span>
-              </button>
-              <button
-                type="button"
-                className="fy-act fy-act-like"
-                disabled={busy}
-                aria-keyshortcuts="3 l"
-                aria-label={`Like ${current.title.name}`}
-                onClick={() => void act("like")}
-              >
-                <span className="fy-act-label">
-                  Like <kbd className="fy-kbd">3</kbd>
-                </span>
-                <span className="fy-act-hint">More like this</span>
-              </button>
+              {ACTIONS.map((a) => {
+                const cls =
+                  a.event === "rate_4"
+                    ? "fy-act fy-act-fav"
+                    : a.event === "rate_3"
+                      ? "fy-act fy-act-like-so"
+                      : a.event === "rate_2"
+                        ? "fy-act fy-act-like"
+                        : a.event === "mid"
+                          ? "fy-act fy-act-ok"
+                          : a.event === "haven't_seen"
+                            ? "fy-act fy-act-unseen"
+                            : "fy-act fy-act-nope";
+                return (
+                  <button
+                    key={a.event}
+                    type="button"
+                    className={cls}
+                    disabled={busy}
+                    aria-keyshortcuts={`${a.key} ${a.shortcut}`}
+                    aria-label={`${a.label} — ${current.title.name}`}
+                    onClick={() => void act(a.event)}
+                  >
+                    <span className="fy-act-label">{a.label}</span>
+                    <span className="fy-act-kbd">
+                      <kbd>{a.key}</kbd>
+                    </span>
+                  </button>
+                );
+              })}
             </div>
 
             <p className="fy-keys-hint">
               <span className="sr-only">Keyboard shortcuts: </span>
-              <kbd>1</kbd> Pass · <kbd>2</kbd> Save · <kbd>3</kbd> Like
+              <kbd>1</kbd> Loved · <kbd>2</kbd> Really liked · <kbd>3</kbd> Liked ·{" "}
+              <kbd>4</kbd> Ok · <kbd>5</kbd> Not seen · <kbd>6</kbd> Didn't like
               {toast ? (
-                <>
-                  {" "}
-                  · <kbd>U</kbd> Undo
-                </>
+                <> · <kbd>U</kbd> Undo</>
               ) : null}
             </p>
 

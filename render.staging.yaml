@@ -44,11 +44,32 @@ services:
         sync: false
       - key: WATCH_PROVIDER_REGION
         value: "US"
+      # Rate limiting no longer needs Redis: counters live in-process
+      # when REDIS_URL is empty (one worker on the free plan).
       - key: RATE_LIMIT_ENABLED
-        value: "false"
+        value: "true"
+      - key: REDIS_URL
+        value: ""
+      # Vercel rewrite -> Render = two proxies appending X-Forwarded-For.
+      - key: TRUSTED_PROXY_HOPS
+        value: "2"
+      # The SPA proxies /api through its own domain, so the refresh
+      # cookie is first-party (Safari blocks third-party cookies).
+      - key: COOKIE_SAMESITE
+        value: lax
       - key: WEB_CONCURRENCY
         value: "1"
       - key: SENTRY_DSN
+        sync: false
+      # Password reset needs SMTP; without it the endpoint returns 503
+      # (it never logs or returns the token). Any provider works.
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_FROM
         sync: false
       - key: SENTRY_TRACES_SAMPLE_RATE
         value: "0.2"
@@ -59,4 +80,10 @@ databases:
   - name: cinetaste-db-staging
     plan: free
     postgresMajorVersion: "16"
-    # Enable pgvector: CREATE EXTENSION IF NOT EXISTS vector;
+    # After first deploy, run via Render dashboard SQL or psql:
+    #   CREATE EXTENSION IF NOT EXISTS vector;
+    #   CREATE EXTENSION IF NOT EXISTS pg_trgm;
+#
+# After the first deploy (Render shell):
+#   python -m app.scripts.ingest_catalog --pages 10   # needs TMDB_API_KEY
+#   python -m app.scripts.reembed_catalog             # after embedding changes

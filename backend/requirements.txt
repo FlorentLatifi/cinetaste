@@ -13,12 +13,12 @@ SQLAlchemy[asyncio]==2.0.40
 asyncpg==0.30.0
 alembic==1.15.2
 pgvector==0.4.1
+numpy==2.5.1
 
 # Cache
 redis==5.2.1
 
 # Security
-passlib[bcrypt]==1.7.4
 bcrypt==4.0.1
 PyJWT==2.10.1
 
@@ -30,9 +30,3 @@ python-dotenv==1.1.0
 
 # Observability (optional at runtime — no-op without SENTRY_DSN)
 sentry-sdk[fastapi]==2.22.0
-
-# Dev / test
-pytest==8.3.5
-pytest-asyncio==0.26.0
-httpx==0.28.1
-ruff==0.11.6

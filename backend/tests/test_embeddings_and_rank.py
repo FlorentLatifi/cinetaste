@@ -22,8 +22,6 @@ def test_embeddings_are_normalized_and_sensitive_to_genre() -> None:
         media_type="movie",
         release_year=2019,
         runtime=110,
-        popularity=40,
-        vote_average=7.5,
         original_language="en",
         countries=["US"],
     )
@@ -36,8 +34,6 @@ def test_embeddings_are_normalized_and_sensitive_to_genre() -> None:
         media_type="movie",
         release_year=2019,
         runtime=100,
-        popularity=40,
-        vote_average=7.0,
         original_language="en",
         countries=["US"],
     )
@@ -50,8 +46,6 @@ def test_embeddings_are_normalized_and_sensitive_to_genre() -> None:
         media_type="movie",
         release_year=2018,
         runtime=115,
-        popularity=30,
-        vote_average=7.2,
         original_language="en",
         countries=["US"],
     )
@@ -232,8 +226,6 @@ def test_rank_titles_returns_slate() -> None:
         media_type="movie",
         release_year=2019,
         runtime=110,
-        popularity=30,
-        vote_average=8.0,
     )
     titles = [
         _T(["Thriller", "Crime"], base, pop=25, vote=8.0),
@@ -248,8 +240,6 @@ def test_rank_titles_returns_slate() -> None:
                 media_type="movie",
                 release_year=2019,
                 runtime=100,
-                popularity=90,
-                vote_average=6.5,
             ),
             pop=90,
             vote=6.5,
@@ -265,8 +255,6 @@ def test_rank_titles_returns_slate() -> None:
                 media_type="movie",
                 release_year=2018,
                 runtime=105,
-                popularity=20,
-                vote_average=7.4,
             ),
             pop=20,
             vote=7.4,

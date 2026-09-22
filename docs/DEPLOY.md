@@ -93,15 +93,23 @@ Request logs already emit `method path status duration_ms request_id` — pair w
 
 | Feature | Endpoint | Notes |
 |---------|----------|--------|
-| Forgot password | `POST /auth/forgot-password` | Always generic success (no email enumeration). Sends via SMTP if configured, else log-only. |
+| Forgot password | `POST /auth/forgot-password` | Generic success (no email enumeration). Requires SMTP outside local/test — see below. |
 | Reset password | `POST /auth/reset-password` | One-time token; revokes all sessions. |
 | Delete account | `DELETE /me` | Requires password + confirm `DELETE`; cascades taste/interactions via FKs. |
-| Refresh reuse | `POST /auth/refresh` | Reusing a rotated refresh token revokes the **whole family** (`refresh_reuse`). |
+| Refresh reuse | `POST /auth/refresh` | Reusing a rotated refresh token revokes the **whole family** (`refresh_reuse`), except within `REFRESH_REUSE_GRACE_SECONDS` of the rotation, where a sibling token is issued instead (two tabs refreshing at once). |
 
 Set `PUBLIC_APP_URL` to your SPA origin so reset links are correct.
 
-**SMTP (optional):** `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`, `SMTP_USE_TLS`.  
-If `SMTP_HOST` is empty, password-reset messages go to application logs only.
+**SMTP is required for password reset outside local/test.** Set `SMTP_HOST`,
+`SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`, `SMTP_USE_TLS` (Resend,
+SendGrid, Mailgun and a Gmail app password all work).
+
+Without SMTP, `POST /auth/forgot-password` returns **503** in staging and
+production rather than pretending to send. Reset tokens are never written to
+logs and never returned in the response; only `APP_ENV=local`/`test` get a
+`dev_reset_token` back so you can test without a mail server. Production also
+refuses to start if SMTP is on while `PUBLIC_APP_URL` is not a public https URL,
+because that is where reset links point.
 
 ### Auth cookies (SPA)
 
@@ -110,11 +118,19 @@ If `SMTP_HOST` is empty, password-reset messages go to application logs only.
 | Refresh token | **httpOnly** cookie `ct_refresh` (not in JSON / not localStorage) |
 | Access token | Short-lived JWT in SPA memory only |
 | Cookie path | `{API_PREFIX}/auth` |
-| Production | `Secure; SameSite=None` (cross-site Vercel → API host) |
-| Local | `SameSite=Lax` (localhost ports) |
+| Production | `Secure; SameSite=Lax` — the SPA proxies `/api/*` to the API through its own domain, so the cookie is **first-party** |
+| Local | `SameSite=Lax` (Vite proxies `/api` to the backend) |
+| Cross-site fallback | `COOKIE_SAMESITE=none` only if the browser calls the API host directly |
 | CORS | `allow_credentials=true` + explicit `CORS_ORIGINS` (never `*`) |
 
 Frontend must call the API with `credentials: "include"`.
+
+> **Why the proxy matters.** Pointing the SPA straight at
+> `https://your-api.onrender.com` makes `ct_refresh` a third-party cookie.
+> Safari (and Firefox, partitioned) blocks those, so session restore fails and
+> users are logged out on every reload. `frontend/vercel.json` rewrites
+> `/api/:path*` to the API host — set `VITE_API_BASE_URL=/api/v1` and update the
+> rewrite destination to your Render URL.
 
 ### Database URL note
 
@@ -140,11 +156,14 @@ DATABASE_URL=postgresql+asyncpg://user:pass@host:5432/db
 2. **Root directory:** `frontend`
 3. Framework: Vite
 4. Build: `npm run build` · Output: `dist`
-5. Environment variable:
+5. Environment variable — keep it same-origin so the refresh cookie stays
+   first-party (see the cookie note above):
 
 ```
-VITE_API_BASE_URL=https://<your-api-host>/api/v1
+VITE_API_BASE_URL=/api/v1
 ```
+
+   and point the rewrite in `frontend/vercel.json` at your API host.
 
 6. Deploy → copy the production URL into API `CORS_ORIGINS`
 7. Redeploy API if CORS changed
@@ -163,6 +182,26 @@ VITE_API_BASE_URL=https://<your-api-host>/api/v1
 5. Map `PORT` automatically (entrypoint respects `$PORT`)
 
 ---
+
+## 3b. Settings that matter in production
+
+| Variable | Set it to | Why |
+|---|---|---|
+| `APP_ENV` | `production` | Validated against a fixed list; anything else (a typo, `prod-eu`) used to silently disable production safety checks |
+| `REDIS_URL` | empty on free tier | Cache and rate limits fall back to an in-process store; with one worker that is equivalent |
+| `RATE_LIMIT_ENABLED` | `true` | No longer needs Redis. Leaving it off means no brute-force protection on login |
+| `TRUSTED_PROXY_HOPS` | `2` behind Vercel → Render (`1` for Render alone) | Which `X-Forwarded-For` entry is trusted. Too low and every request shares one rate-limit bucket; ignoring it lets clients forge the header |
+| `COOKIE_SAMESITE` | `lax` with the same-origin proxy | `none` only when the browser calls the API cross-site |
+| `PUBLIC_APP_URL` | your SPA origin (https) | Password-reset links point here |
+| `TASTE_HALF_LIFE_DAYS` | `365` (0 disables) | How fast old ratings fade |
+| `WEB_CONCURRENCY` | `1` on free tiers | Each worker keeps its own in-process cache |
+
+After any change to embeddings or feature weights, re-embed the catalog:
+
+```bash
+python -m app.scripts.reembed_catalog        # only stale rows
+python -m app.scripts.reembed_catalog --force
+```
 
 ## 4. Production env checklist
 

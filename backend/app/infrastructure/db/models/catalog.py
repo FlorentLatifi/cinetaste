@@ -56,13 +56,16 @@ class Title(Base):
         nullable=False,
     )
 
+    # Relationships never load implicitly: every query states what it needs with
+    # selectinload(...). Default eager loading pulled keywords + credits into
+    # every Title query, and loading one Genre/Keyword pulled in all its titles.
     genres: Mapped[list[Genre]] = relationship(
-        secondary="title_genres", back_populates="titles", lazy="selectin"
+        secondary="title_genres", back_populates="titles", lazy="raise"
     )
     keywords: Mapped[list[Keyword]] = relationship(
-        secondary="title_keywords", back_populates="titles", lazy="selectin"
+        secondary="title_keywords", back_populates="titles", lazy="raise"
     )
-    credits: Mapped[list[Credit]] = relationship(back_populates="title", lazy="selectin")
+    credits: Mapped[list[Credit]] = relationship(back_populates="title", lazy="raise")
 
 
 class Genre(Base):
@@ -73,7 +76,7 @@ class Genre(Base):
     external_tmdb_id: Mapped[int | None] = mapped_column(Integer, unique=True, nullable=True)
 
     titles: Mapped[list[Title]] = relationship(
-        secondary="title_genres", back_populates="genres", lazy="selectin"
+        secondary="title_genres", back_populates="genres", lazy="raise"
     )
 
 
@@ -132,7 +135,7 @@ class Keyword(Base):
     external_tmdb_id: Mapped[int | None] = mapped_column(Integer, unique=True, nullable=True)
 
     titles: Mapped[list[Title]] = relationship(
-        secondary="title_keywords", back_populates="keywords", lazy="selectin"
+        secondary="title_keywords", back_populates="keywords", lazy="raise"
     )
 
 

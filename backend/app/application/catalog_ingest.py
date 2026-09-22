@@ -1,5 +1,18 @@
+"""TMDb → catalog ingestion.
+
+Design:
+* Title IDs come from the curated onboarding seed deck plus TMDb discover
+  lists (most popular *and* most voted, so the catalog mixes what's current
+  with well-known titles users can actually rate).
+* Details are fetched concurrently (bounded) and written in batches, one
+  commit per batch. Each title is upserted in a savepoint, so one bad payload
+  or a TMDb error skips that title instead of rolling back the whole run.
+* Re-running is safe: titles are upserted by TMDb id.
+"""
+
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import date
 from typing import Any
@@ -7,8 +20,8 @@ from uuid import uuid4
 
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
+from app.data.onboarding_seed import all_seed_tmdb_ids
 from app.infrastructure.db.models.catalog import (
     Credit,
     Genre,
@@ -23,6 +36,13 @@ from app.recommendation.embeddings import PersonSignal, build_title_signals
 
 logger = logging.getLogger(__name__)
 
+DETAIL_CONCURRENCY = 8
+BATCH_SIZE = 25
+DISCOVER_SORTS = ("popularity.desc", "vote_count.desc")
+MAX_KEYWORDS = 25
+MAX_CAST = 8
+CREW_JOBS = {"Director", "Writer", "Screenplay"}
+
 
 def _parse_date(value: str | None) -> date | None:
     if not value:
@@ -34,87 +54,131 @@ def _parse_date(value: str | None) -> date | None:
 
 
 class CatalogIngestService:
-    def __init__(self, session: AsyncSession, tmdb: TmdbClient) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        tmdb: TmdbClient,
+        *,
+        concurrency: int = DETAIL_CONCURRENCY,
+        batch_size: int = BATCH_SIZE,
+    ) -> None:
         self._session = session
         self._tmdb = tmdb
+        self._concurrency = max(1, concurrency)
+        self._batch_size = max(1, batch_size)
         self._genre_cache: dict[int, Genre] = {}
         self._person_cache: dict[int, Person] = {}
         self._keyword_cache: dict[int, Keyword] = {}
+        self._genres_ready = False
+
+    # ------------------------------------------------------------ entrypoints
 
     async def ingest_onboarding_seed(self) -> dict[str, int]:
-        """Upsert curated onboarding movies so cold-start is not pure popularity.
-
-        Always run before (or with) discover-based ingest. IDs live in
-        ``app/data/onboarding_seed_deck.json``.
-        """
-        from app.data.onboarding_seed import all_seed_tmdb_ids
-
+        """Upsert the curated onboarding movies (cold start is not pure popularity)."""
         await self._ensure_genres()
         seed_ids = all_seed_tmdb_ids()
-        created = updated = errors = 0
-        for tmdb_id in seed_ids:
-            try:
-                status = await self.upsert_movie(tmdb_id)
-                created += status == "created"
-                updated += status == "updated"
-            except Exception:  # noqa: BLE001 — keep seed ingest resilient
-                logger.exception("Failed to ingest onboarding seed tmdb_id=%s", tmdb_id)
-                errors += 1
-        await self._session.commit()
-        return {
-            "seed_requested": len(seed_ids),
-            "created": created,
-            "updated": updated,
-            "errors": errors,
-        }
+        stats = await self._ingest_ids([("movie", tmdb_id) for tmdb_id in seed_ids])
+        return {"seed_requested": len(seed_ids), **stats}
 
-    async def ingest_popular(self, *, pages: int = 3, include_tv: bool = True) -> dict[str, int]:
+    async def ingest_popular(self, *, pages: int = 10, include_tv: bool = True) -> dict[str, Any]:
+        """Seed deck + ``pages`` discover pages per sort order and media type."""
         await self._ensure_genres()
-        # Curated cold-start titles first (may not appear on today's popular chart).
         seed_stats = await self.ingest_onboarding_seed()
 
-        movie_ids: list[int] = []
-        tv_ids: list[int] = []
+        targets: dict[tuple[str, int], None] = {}
+        for media_type in ("movie", "tv") if include_tv else ("movie",):
+            for sort_by in DISCOVER_SORTS:
+                for page in range(1, pages + 1):
+                    try:
+                        results = await self._tmdb.discover(media_type, page=page, sort_by=sort_by)
+                    except Exception:
+                        logger.exception(
+                            "tmdb_discover_failed media_type=%s sort=%s page=%s",
+                            media_type,
+                            sort_by,
+                            page,
+                        )
+                        break
+                    if not results:
+                        break
+                    for item in results:
+                        if item.get("id"):
+                            targets[(media_type, int(item["id"]))] = None
 
-        for page in range(1, pages + 1):
-            results = await self._tmdb.discover("movie", page=page)
-            movie_ids.extend(item["id"] for item in results if item.get("id"))
-            if include_tv:
-                tv_results = await self._tmdb.discover("tv", page=page)
-                tv_ids.extend(item["id"] for item in tv_results if item.get("id"))
-
-        created = updated = 0
-        for tmdb_id in dict.fromkeys(movie_ids):
-            status = await self.upsert_movie(tmdb_id)
-            created += status == "created"
-            updated += status == "updated"
-
-        for tmdb_id in dict.fromkeys(tv_ids):
-            status = await self.upsert_tv(tmdb_id)
-            created += status == "created"
-            updated += status == "updated"
-
-        await self._session.commit()
-        return {
-            "onboarding_seed": seed_stats,
-            "movies_seen": len(set(movie_ids)),
-            "tv_seen": len(set(tv_ids)),
-            "created": created,
-            "updated": updated,
-        }
+        stats = await self._ingest_ids(list(targets))
+        return {"onboarding_seed": seed_stats, "discovered": len(targets), **stats}
 
     async def upsert_movie(self, tmdb_id: int) -> str:
-        payload = await self._tmdb.get_movie(tmdb_id)
-        return await self._upsert_from_detail("movie", payload)
+        await self._ensure_genres()
+        return await self._upsert_from_detail("movie", await self._tmdb.get_movie(tmdb_id))
 
     async def upsert_tv(self, tmdb_id: int) -> str:
-        payload = await self._tmdb.get_tv(tmdb_id)
-        return await self._upsert_from_detail("tv", payload)
+        await self._ensure_genres()
+        return await self._upsert_from_detail("tv", await self._tmdb.get_tv(tmdb_id))
+
+    # ------------------------------------------------------------- batch loop
+
+    async def _ingest_ids(self, targets: list[tuple[str, int]]) -> dict[str, int]:
+        created = updated = failed = 0
+        semaphore = asyncio.Semaphore(self._concurrency)
+
+        async def fetch(media_type: str, tmdb_id: int) -> tuple[str, int, dict[str, Any] | None]:
+            async with semaphore:
+                try:
+                    if media_type == "movie":
+                        return media_type, tmdb_id, await self._tmdb.get_movie(tmdb_id)
+                    return media_type, tmdb_id, await self._tmdb.get_tv(tmdb_id)
+                except Exception as exc:  # noqa: BLE001 — one title must not stop the run
+                    logger.warning(
+                        "tmdb_fetch_failed media_type=%s tmdb_id=%s error=%s",
+                        media_type,
+                        tmdb_id,
+                        type(exc).__name__,
+                    )
+                    return media_type, tmdb_id, None
+
+        for start in range(0, len(targets), self._batch_size):
+            batch = targets[start : start + self._batch_size]
+            fetched = await asyncio.gather(*(fetch(m, t) for m, t in batch))
+            for media_type, tmdb_id, payload in fetched:
+                if payload is None:
+                    failed += 1
+                    continue
+                try:
+                    async with self._session.begin_nested():
+                        status = await self._upsert_from_detail(media_type, payload)
+                except Exception:
+                    failed += 1
+                    # Objects created in the rolled-back savepoint are gone; drop
+                    # cached references so later titles look them up again.
+                    self._genre_cache.clear()
+                    self._person_cache.clear()
+                    self._keyword_cache.clear()
+                    logger.exception("title_upsert_failed media_type=%s tmdb_id=%s", media_type, tmdb_id)
+                    continue
+                created += status == "created"
+                updated += status == "updated"
+            await self._session.commit()
+            logger.info(
+                "ingest_progress done=%s/%s created=%s updated=%s failed=%s",
+                min(start + self._batch_size, len(targets)),
+                len(targets),
+                created,
+                updated,
+                failed,
+            )
+        return {"requested": len(targets), "created": created, "updated": updated, "failed": failed}
+
+    # ------------------------------------------------------------ lookups
 
     async def _ensure_genres(self) -> None:
+        if self._genres_ready:
+            return
         for media_type in ("movie", "tv"):
             for item in await self._tmdb.get_genres(media_type):
                 await self._get_or_create_genre(item["id"], item["name"])
+        await self._session.commit()
+        self._genres_ready = True
 
     async def _get_or_create_genre(self, tmdb_id: int, name: str) -> Genre:
         if tmdb_id in self._genre_cache:
@@ -136,12 +200,7 @@ class CatalogIngestService:
             return self._person_cache[tmdb_id]
         person = await self._session.scalar(select(Person).where(Person.external_tmdb_id == tmdb_id))
         if person is None:
-            person = Person(
-                id=uuid4(),
-                name=name,
-                external_tmdb_id=tmdb_id,
-                profile_path=profile_path,
-            )
+            person = Person(id=uuid4(), name=name, external_tmdb_id=tmdb_id, profile_path=profile_path)
             self._session.add(person)
             await self._session.flush()
         self._person_cache[tmdb_id] = person
@@ -150,9 +209,7 @@ class CatalogIngestService:
     async def _get_or_create_keyword(self, tmdb_id: int, name: str) -> Keyword:
         if tmdb_id in self._keyword_cache:
             return self._keyword_cache[tmdb_id]
-        keyword = await self._session.scalar(
-            select(Keyword).where(Keyword.external_tmdb_id == tmdb_id)
-        )
+        keyword = await self._session.scalar(select(Keyword).where(Keyword.external_tmdb_id == tmdb_id))
         if keyword is None:
             keyword = await self._session.scalar(select(Keyword).where(Keyword.name == name))
         if keyword is None:
@@ -162,17 +219,11 @@ class CatalogIngestService:
         self._keyword_cache[tmdb_id] = keyword
         return keyword
 
+    # ------------------------------------------------------------- upsert
+
     async def _upsert_from_detail(self, media_type: str, payload: dict[str, Any]) -> str:
         tmdb_id = int(payload["id"])
-        existing = await self._session.scalar(
-            select(Title)
-            .where(Title.external_tmdb_id == tmdb_id)
-            .options(
-                selectinload(Title.genres),
-                selectinload(Title.keywords),
-                selectinload(Title.credits),
-            )
-        )
+        existing = await self._session.scalar(select(Title).where(Title.external_tmdb_id == tmdb_id))
 
         if media_type == "movie":
             name = payload.get("title") or payload.get("original_title") or f"Movie {tmdb_id}"
@@ -184,10 +235,8 @@ class CatalogIngestService:
             name = payload.get("name") or payload.get("original_name") or f"TV {tmdb_id}"
             original_name = payload.get("original_name")
             release = _parse_date(payload.get("first_air_date"))
-            runtime = None
             episode_run_times = payload.get("episode_run_time") or []
-            if episode_run_times:
-                runtime = int(episode_run_times[0])
+            runtime = int(episode_run_times[0]) if episode_run_times else None
             keyword_items = (payload.get("keywords") or {}).get("results") or []
 
         status = "updated" if existing else "created"
@@ -209,7 +258,7 @@ class CatalogIngestService:
             self._session.add(title)
             await self._session.flush()
 
-        # Replace join rows simply for MVP correctness
+        # Replace join rows wholesale: simple and correct for re-ingest.
         await self._session.execute(delete(TitleGenre).where(TitleGenre.title_id == title.id))
         await self._session.execute(delete(TitleKeyword).where(TitleKeyword.title_id == title.id))
         await self._session.execute(delete(Credit).where(Credit.title_id == title.id))
@@ -221,76 +270,13 @@ class CatalogIngestService:
             genre_names.append(genre.name)
 
         keyword_names: list[str] = []
-        for k in keyword_items[:25]:
+        for k in keyword_items[:MAX_KEYWORDS]:
             keyword = await self._get_or_create_keyword(int(k["id"]), k["name"])
             self._session.add(TitleKeyword(title_id=title.id, keyword_id=keyword.id))
             keyword_names.append(keyword.name)
 
-        credits = payload.get("credits") or {}
-        people_signals: list[PersonSignal] = []
-
-        for cast in (credits.get("cast") or [])[:8]:
-            if not cast.get("id") or not cast.get("name"):
-                continue
-            person = await self._get_or_create_person(
-                int(cast["id"]), cast["name"], cast.get("profile_path")
-            )
-            order = cast.get("order")
-            billing = int(order) if order is not None else None
-            self._session.add(
-                Credit(
-                    id=uuid4(),
-                    title_id=title.id,
-                    person_id=person.id,
-                    credit_type="cast",
-                    job=None,
-                    character=cast.get("character"),
-                    billing_order=billing,
-                )
-            )
-            people_signals.append(
-                PersonSignal(name=person.name, role="cast", billing_order=billing)
-            )
-
-        for crew in credits.get("crew") or []:
-            job = (crew.get("job") or "").strip()
-            if job not in {"Director", "Writer", "Screenplay", "Creator"}:
-                continue
-            if not crew.get("id") or not crew.get("name"):
-                continue
-            person = await self._get_or_create_person(
-                int(crew["id"]), crew["name"], crew.get("profile_path")
-            )
-            self._session.add(
-                Credit(
-                    id=uuid4(),
-                    title_id=title.id,
-                    person_id=person.id,
-                    credit_type="crew",
-                    job=job,
-                    character=None,
-                    billing_order=None,
-                )
-            )
-            role = "director" if job == "Director" else "writer"
-            people_signals.append(PersonSignal(name=person.name, role=role))
-
-        # Production countries (ISO 3166-1) for origin taste signal.
-        countries: list[str] = []
-        for c in payload.get("production_countries") or []:
-            code = (c.get("iso_3166_1") or "").strip().upper()
-            if code and code not in countries:
-                countries.append(code)
-            if len(countries) >= 3:
-                break
-        # TV often uses origin_country list of ISO codes
-        if not countries:
-            for code in payload.get("origin_country") or []:
-                c = str(code).strip().upper()
-                if c and c not in countries:
-                    countries.append(c)
-                if len(countries) >= 3:
-                    break
+        people_signals = await self._add_credits(title, payload)
+        countries = self._countries(payload)
 
         year = release.year if release else None
         embedding, _features, meta = build_title_signals(
@@ -302,13 +288,80 @@ class CatalogIngestService:
             media_type=media_type,
             release_year=year,
             runtime=runtime,
-            popularity=title.popularity,
-            vote_average=title.vote_average,
             original_language=title.original_language,
             countries=countries,
         )
         title.embedding = embedding
         title.extra = meta
         await self._session.flush()
-        logger.info("%s title tmdb_id=%s name=%s", status, tmdb_id, title.name)
+        logger.debug("%s title tmdb_id=%s", status, tmdb_id)
         return status
+
+    async def _add_credits(self, title: Title, payload: dict[str, Any]) -> list[PersonSignal]:
+        credits = payload.get("credits") or {}
+        signals: list[PersonSignal] = []
+        seen: set[tuple[int, str, str | None]] = set()
+
+        def add_credit(person: Person, credit_type: str, job: str | None, **extra: Any) -> bool:
+            key = (int(person.external_tmdb_id or 0), credit_type, job)
+            if key in seen:  # uq_credit_identity: same person twice in one role
+                return False
+            seen.add(key)
+            self._session.add(
+                Credit(
+                    id=uuid4(),
+                    title_id=title.id,
+                    person_id=person.id,
+                    credit_type=credit_type,
+                    job=job,
+                    **extra,
+                )
+            )
+            return True
+
+        for cast in (credits.get("cast") or [])[:MAX_CAST]:
+            if not cast.get("id") or not cast.get("name"):
+                continue
+            person = await self._get_or_create_person(int(cast["id"]), cast["name"], cast.get("profile_path"))
+            order = cast.get("order")
+            billing = int(order) if order is not None else None
+            if add_credit(person, "cast", None, character=cast.get("character"), billing_order=billing):
+                signals.append(PersonSignal(name=person.name, role="cast", billing_order=billing))
+
+        for crew in credits.get("crew") or []:
+            job = (crew.get("job") or "").strip()
+            if job not in CREW_JOBS or not crew.get("id") or not crew.get("name"):
+                continue
+            person = await self._get_or_create_person(int(crew["id"]), crew["name"], crew.get("profile_path"))
+            if add_credit(person, "crew", job):
+                signals.append(
+                    PersonSignal(name=person.name, role="director" if job == "Director" else "writer")
+                )
+
+        # TV creators live in `created_by`, not in the crew list. They are the
+        # closest analogue to a film's writer-director, so they feed the writer
+        # signal (and show as "Creator" on the detail page).
+        for creator in payload.get("created_by") or []:
+            if not creator.get("id") or not creator.get("name"):
+                continue
+            person = await self._get_or_create_person(
+                int(creator["id"]), creator["name"], creator.get("profile_path")
+            )
+            if add_credit(person, "crew", "Creator"):
+                signals.append(PersonSignal(name=person.name, role="writer"))
+        return signals
+
+    @staticmethod
+    def _countries(payload: dict[str, Any]) -> list[str]:
+        """Production countries (ISO 3166-1); TV falls back to origin_country."""
+        countries: list[str] = []
+        for c in payload.get("production_countries") or []:
+            code = (c.get("iso_3166_1") or "").strip().upper()
+            if code and code not in countries:
+                countries.append(code)
+        if not countries:
+            for code in payload.get("origin_country") or []:
+                c = str(code).strip().upper()
+                if c and c not in countries:
+                    countries.append(c)
+        return countries[:3]
