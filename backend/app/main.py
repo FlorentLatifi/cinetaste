@@ -40,7 +40,7 @@ def create_app() -> FastAPI:
     )
 
     # Order: last added = outermost for BaseHTTPMiddleware-style stacks
-    app.add_middleware(SecurityHeadersMiddleware)
+    app.add_middleware(SecurityHeadersMiddleware, settings=settings)
     app.add_middleware(RequestContextMiddleware)
     app.add_middleware(RateLimitMiddleware, settings=settings)
     app.add_middleware(
@@ -60,7 +60,9 @@ def create_app() -> FastAPI:
         content = {"code": exc.code, "message": exc.message}
         if request_id:
             content["request_id"] = request_id
-        return JSONResponse(status_code=exc.status_code, content=content)
+        return JSONResponse(
+            status_code=exc.status_code, content=content, headers=exc.headers or None
+        )
 
     @app.exception_handler(RequestValidationError)
     async def validation_error_handler(

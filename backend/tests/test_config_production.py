@@ -84,3 +84,26 @@ def test_local_allows_dev_defaults() -> None:
         cors_origins="http://localhost:5173",
     )
     assert not settings.is_production
+
+
+def test_production_rejects_wildcard_cors_origin() -> None:
+    """``*`` plus credentials is not a wildcard, it is "allow every site".
+
+    Starlette answers a credentialed request by echoing the caller's Origin when
+    allow_origins is ``*``, so any page could read authenticated responses. The
+    other CORS mistakes were already rejected here; this one was not.
+    """
+    with pytest.raises(ValidationError):
+        Settings(**_base(cors_origins="*"))
+
+    with pytest.raises(ValidationError):
+        Settings(**_base(cors_origins="https://cinetaste.vercel.app,*"))
+
+
+def test_jwt_algorithm_is_restricted_to_hmac_sha2() -> None:
+    """A free-form string would let a deploy pick an algorithm the key is wrong for."""
+    Settings(**_base(jwt_algorithm="HS512"))
+    with pytest.raises(ValidationError):
+        Settings(**_base(jwt_algorithm="none"))
+    with pytest.raises(ValidationError):
+        Settings(**_base(jwt_algorithm="RS256"))
