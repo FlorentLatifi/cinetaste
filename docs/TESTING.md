@@ -4,7 +4,7 @@ Three layers, each answering a different question.
 
 | Layer | Count | Question | Needs |
 |---|---|---|---|
-| Unit (`backend/tests/*.py`) | 159 | Is the logic right? | nothing |
+| Unit (`backend/tests/*.py`) | 160 | Is the logic right? | nothing |
 | Integration (`backend/tests/integration/`) | 15 | Do the API, migrations and database agree? | Postgres + pgvector |
 | End-to-end (`frontend/e2e/`) | 34 | Does the app work in a browser, accessibly? | built SPA |
 

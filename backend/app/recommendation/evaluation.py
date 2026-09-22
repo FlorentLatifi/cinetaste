@@ -17,6 +17,7 @@ Strategies share that protocol, so the numbers compare like with like:
 from __future__ import annotations
 
 import random
+import zlib
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -139,7 +140,9 @@ def popularity_strategy(user: EvalUser, dataset: Dataset, k: int) -> list[UUID]:
 def random_strategy(user: EvalUser, dataset: Dataset, k: int) -> list[UUID]:
     seen = _seen(user)
     pool = [t.id for t in dataset.titles if t.id not in seen]
-    rng = random.Random(hash(user.user_id) & 0xFFFF)
+    # zlib.crc32, not hash(): str hashes are salted per process, which made
+    # the random baseline change between runs.
+    rng = random.Random(zlib.crc32(user.user_id.encode("utf-8")))
     rng.shuffle(pool)
     return pool[:k]
 
@@ -160,6 +163,10 @@ DEFAULT_STRATEGIES: dict[str, Strategy] = {
     "hybrid_no_diversity": make_ranking_strategy(mmr_lambda=1.0, max_per_genre=999),
     "hybrid": make_ranking_strategy(mmr_lambda=0.8),
     "hybrid_with_exploration": make_ranking_strategy(mmr_lambda=0.8, exploration_slots=3),
+    # Not the default: shows what an accuracy-first popularity prior costs in novelty.
+    "hybrid_plus_popularity": make_ranking_strategy(
+        weights=RankingWeights(warm_popularity=0.2), mmr_lambda=0.8
+    ),
 }
 
 
