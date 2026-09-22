@@ -4,7 +4,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import CurrentUser, get_settings_dep
+from app.api.deps import CurrentUser, DbSession, get_settings_dep
 from app.api.schemas.titles import (
     InteractionRequest,
     ProviderOfferOut,
@@ -20,7 +20,6 @@ from app.application.taste_service import TasteService
 from app.application.watch_providers import WatchProvidersService
 from app.core.config import Settings
 from app.domain.exceptions import NotFoundError
-from app.infrastructure.db.session import get_db
 
 router = APIRouter()
 
@@ -32,7 +31,7 @@ def _rec_service(session: AsyncSession, settings: Settings) -> RecommendationSer
 @router.get("/recommendations/for-you", response_model=RecommendationSlateOut)
 async def for_you(
     user: CurrentUser,
-    session: Annotated[AsyncSession, Depends(get_db)],
+    session: DbSession,
     settings: Annotated[Settings, Depends(get_settings_dep)],
     limit: int = Query(default=20, ge=1, le=50),
 ) -> RecommendationSlateOut:
@@ -57,7 +56,7 @@ async def for_you(
 @router.get("/titles/search", response_model=list[TitleSummaryOut])
 async def search_titles(
     user: CurrentUser,
-    session: Annotated[AsyncSession, Depends(get_db)],
+    session: DbSession,
     settings: Annotated[Settings, Depends(get_settings_dep)],
     q: str = Query(min_length=1, max_length=120),
     limit: int = Query(default=20, ge=1, le=50),
@@ -71,7 +70,7 @@ async def search_titles(
 async def similar_titles(
     title_id: UUID,
     user: CurrentUser,
-    session: Annotated[AsyncSession, Depends(get_db)],
+    session: DbSession,
     settings: Annotated[Settings, Depends(get_settings_dep)],
     limit: int = Query(default=12, ge=1, le=30),
 ) -> list[TitleSummaryOut]:
@@ -86,7 +85,7 @@ async def similar_titles(
 async def get_title(
     title_id: UUID,
     user: CurrentUser,
-    session: Annotated[AsyncSession, Depends(get_db)],
+    session: DbSession,
     settings: Annotated[Settings, Depends(get_settings_dep)],
 ) -> TitleDetailOut:
     service = _rec_service(session, settings)
@@ -100,7 +99,7 @@ async def get_title(
 async def where_to_watch(
     title_id: UUID,
     user: CurrentUser,
-    session: Annotated[AsyncSession, Depends(get_db)],
+    session: DbSession,
     settings: Annotated[Settings, Depends(get_settings_dep)],
     region: str | None = Query(
         default=None,
@@ -147,7 +146,7 @@ async def interact(
     title_id: UUID,
     body: InteractionRequest,
     user: CurrentUser,
-    session: Annotated[AsyncSession, Depends(get_db)],
+    session: DbSession,
     settings: Annotated[Settings, Depends(get_settings_dep)],
 ) -> None:
     service = _rec_service(session, settings)
@@ -166,7 +165,7 @@ async def interact(
 @router.get("/watchlist", response_model=list[TitleSummaryOut])
 async def watchlist(
     user: CurrentUser,
-    session: Annotated[AsyncSession, Depends(get_db)],
+    session: DbSession,
     settings: Annotated[Settings, Depends(get_settings_dep)],
 ) -> list[TitleSummaryOut]:
     service = _rec_service(session, settings)

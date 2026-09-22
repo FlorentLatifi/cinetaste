@@ -4,7 +4,7 @@ Three layers, each answering a different question.
 
 | Layer | Count | Question | Needs |
 |---|---|---|---|
-| Unit (`backend/tests/*.py`) | 160 | Is the logic right? | nothing |
+| Unit (`backend/tests/*.py`) | 162 | Is the logic right? | nothing |
 | Integration (`backend/tests/integration/`) | 15 | Do the API, migrations and database agree? | Postgres + pgvector |
 | End-to-end (`frontend/e2e/`) | 34 | Does the app work in a browser, accessibly? | built SPA |
 
@@ -38,6 +38,12 @@ one loop.
 
 **CI runs the integration suite twice** — without Redis (as production runs) and
 with it — because the cache and rate limiter have two backends.
+
+**Upgrades are verified, not assumed.** `test_session_commit_timing.py` pins
+that a failed commit reaches the client as an error: FastAPI >= 0.118 runs a
+yield dependency's exit code after the response is sent, which would turn a
+lost write into a 200. The session dependency uses `scope="function"` for that
+reason, and the test fails if it is dropped.
 
 **Tests assert behaviour, not implementation.** `test_recommender_invariants.py`
 pins the product's promises (a later dislike overrides an earlier like, a slate
