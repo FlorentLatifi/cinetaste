@@ -27,10 +27,10 @@ async def onboarding_cards(
         le=40,
         description="Cards to return. First batch uses the curated primary seed deck (~15).",
     ),
-    exclude: list[UUID] | None = Query(
-        default=None,
-        description="Title IDs already shown (e.g. after many Haven't seen answers).",
-    ),
+    exclude: Annotated[
+        list[UUID] | None,
+        Query(description="Title IDs already shown (e.g. after many Haven't seen answers)."),
+    ] = None,
 ) -> OnboardingCardsOut:
     rec = RecommendationService(session, settings)
     taste = TasteService(session)
