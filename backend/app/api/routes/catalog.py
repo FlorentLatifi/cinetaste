@@ -43,9 +43,11 @@ async def ingest_catalog(
     pages: int = Query(default=2, ge=1, le=5),
     include_tv: bool = True,
 ) -> dict:
-    """Admin-style ingest endpoint for local/dev. Protected by auth; restrict further in prod."""
-    if settings.is_production:
-        raise ForbiddenError("Catalog ingest via API is disabled in production")
+    """Dev-only convenience. Anywhere else (staging included) any registered
+    user could trigger minutes-long TMDb crawls, so use the CLI there:
+    ``python -m app.scripts.ingest_catalog``."""
+    if not settings.is_dev_like:
+        raise ForbiddenError("Catalog ingest via API is only available in local development")
 
     try:
         tmdb = TmdbClient(settings)

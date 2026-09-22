@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { ApiError } from "../../api/client";
-import * as titlesApi from "../../api/titles";
+import { getForYou, interact } from "../../api/titles";
 import type { RecommendationItem } from "../../api/titles";
 import {
   ACTION_TOAST_MS,
@@ -65,7 +65,7 @@ export function useForYouQueue() {
     setError(null);
     (async () => {
       try {
-        const data = await titlesApi.getForYou(accessToken);
+        const data = await getForYou(accessToken);
         if (!cancelled) setItems(data.items);
       } catch (err) {
         if (!cancelled) {
@@ -143,7 +143,7 @@ export function useForYouQueue() {
       });
 
       try {
-        await titlesApi.interact(accessToken, titleId, event);
+        await interact(accessToken, titleId, event);
       } catch (err) {
         setItems((prev) => {
           if (prev.some((i) => i.title.id === titleId)) return prev;
@@ -168,7 +168,7 @@ export function useForYouQueue() {
     setUndoBusy(true);
     setError(null);
     try {
-      await titlesApi.interact(accessToken, item.title.id, "clear");
+      await interact(accessToken, item.title.id, "clear");
       setItems((prev) => {
         if (prev.some((i) => i.title.id === item.title.id)) return prev;
         const next = [...prev];

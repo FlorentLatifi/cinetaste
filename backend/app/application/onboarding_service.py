@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from uuid import UUID
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.recommendation_service import RecommendationService
@@ -13,6 +14,7 @@ from app.domain.taste_signals import (
     RATING_EVENT_TYPES,
     is_supported_event,
 )
+from app.infrastructure.db.models.catalog import Title
 from app.infrastructure.db.models.user import User
 
 # Minimum explicit 1–4 ratings before we trust the profile enough for For You.
@@ -25,6 +27,7 @@ ONBOARDING_ACTIONS = frozenset(
     {
         "haven't_seen",  # zero taste signal
         "not_interested",  # mild negative
+        "mid",  # "It was ok" — counts as a rating, not a positive one
         "rate_1",  # Bad
         "rate_2",  # It's ok
         "rate_3",  # Good
@@ -86,10 +89,9 @@ class OnboardingService:
         - ``rate_1``…``rate_4`` → Bad … Favorite scale
         """
         # Validate first so we never leave partial interactions when gates fail.
-        normalized: list[tuple[UUID, str]] = []
-        rated = 0
-        positive = 0
-
+        # One reaction per title (the last one wins), so repeating a title
+        # cannot inflate the rating count.
+        by_title: dict[UUID, str] = {}
         for reaction in reactions:
             action = reaction["action"]
             if action not in ONBOARDING_ACTIONS:
@@ -98,11 +100,11 @@ class OnboardingService:
             if not is_supported_event(event_type):
                 continue
             title_id = UUID(reaction["title_id"])
-            normalized.append((title_id, event_type))
-            if event_type in RATING_EVENT_TYPES:
-                rated += 1
-            if event_type in POSITIVE_RATING_EVENT_TYPES:
-                positive += 1
+            by_title.pop(title_id, None)
+            by_title[title_id] = event_type
+        normalized = list(by_title.items())
+        rated = sum(1 for _t, e in normalized if e in RATING_EVENT_TYPES)
+        positive = sum(1 for _t, e in normalized if e in POSITIVE_RATING_EVENT_TYPES)
 
         if not normalized:
             raise AppError(
@@ -122,10 +124,20 @@ class OnboardingService:
 
         if positive < MIN_ONBOARDING_POSITIVE:
             raise AppError(
-                f"Mark at least {MIN_ONBOARDING_POSITIVE} titles as It's ok, Good, or Favorite "
+                f"Mark at least {MIN_ONBOARDING_POSITIVE} titles as OK, Good, or Favorite "
                 "so we can recommend things you might like.",
                 status_code=400,
                 code="onboarding_insufficient_positive",
+            )
+
+        missing = {tid for tid, _e in normalized} - await self._known_title_ids(
+            [tid for tid, _e in normalized]
+        )
+        if missing:
+            raise AppError(
+                f"{len(missing)} reaction(s) refer to titles that do not exist.",
+                status_code=400,
+                code="unknown_titles",
             )
 
         # Persist all signals, then recompute the profile once (not per card).
@@ -142,3 +154,9 @@ class OnboardingService:
         await self._session.flush()
         await self._recommendations.invalidate_user(user.id)
         return user
+
+    async def _known_title_ids(self, title_ids: list[UUID]) -> set[UUID]:
+        if not title_ids:
+            return set()
+        rows = await self._session.scalars(select(Title.id).where(Title.id.in_(title_ids)))
+        return set(rows.all())

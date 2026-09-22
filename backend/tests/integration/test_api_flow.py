@@ -11,6 +11,9 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.deps import get_settings_dep
+from app.core.config import get_settings
+from app.main import app
 from tests.integration.conftest import seed_catalog
 
 pytestmark = pytest.mark.integration
@@ -27,7 +30,7 @@ async def test_health_and_ready(client: AsyncClient, api_prefix: str) -> None:
     body = ready.json()
     assert body["status"] == "ok"
     assert body["database"] == "ok"
-    assert body["redis"] == "ok"
+    assert body["cache"] in {"redis", "memory"}
 
 
 @pytest.mark.asyncio
@@ -73,10 +76,19 @@ async def test_register_login_refresh_me(
     assert new_cookie
     assert new_cookie != old_cookie  # rotation
 
-    # Reusing the previous raw cookie value must fail
-    client.cookies.set("ct_refresh", old_cookie, path=f"{api_prefix}/auth")
-    reused = await client.post(f"{api_prefix}/auth/refresh", json={})
-    assert reused.status_code == 401
+    # Reusing the previous raw cookie value must fail once the short grace
+    # window for concurrent refreshes (two tabs) is over.
+    settings = get_settings()
+    app.dependency_overrides[get_settings_dep] = lambda: settings.model_copy(
+        update={"refresh_reuse_grace_seconds": 0}
+    )
+    try:
+        client.cookies.set("ct_refresh", old_cookie, path=f"{api_prefix}/auth")
+        reused = await client.post(f"{api_prefix}/auth/refresh", json={})
+        assert reused.status_code == 401
+        assert reused.json()["code"] == "refresh_reuse"
+    finally:
+        app.dependency_overrides.pop(get_settings_dep, None)
 
 
 @pytest.mark.asyncio

@@ -29,6 +29,15 @@ from uuid import UUID
 
 Polarity = Literal["positive", "negative", "neutral", "zero"]
 
+# How much a signal says about the user's opinion of a title. When a title has
+# several events, the latest event of the strongest tier is the one that counts.
+#   opinion  — explicit judgement (ratings, like/dislike, not interested)
+#   intent   — interest without a judgement (watchlist, watched)
+#   implicit — weak behavioural hints (view, skip)
+#   none     — no taste information (haven't seen, clear)
+SignalTier = Literal["opinion", "intent", "implicit", "none"]
+_TIER_RANK: dict[str, int] = {"opinion": 3, "intent": 2, "implicit": 1, "none": 0}
+
 # Absolute weight below this is treated as no taste influence on recompute.
 ZERO_SIGNAL_EPS = 1e-9
 
@@ -43,6 +52,7 @@ class SignalPolicy:
     event_type: str
     weight: float
     polarity: Polarity
+    tier: SignalTier
     # If False, recompute skips this event even if weight were non-zero.
     updates_taste: bool
     # Resulting UserTitleState.state, or None to leave state as "none"/unchanged mapping.
@@ -65,6 +75,7 @@ def _p(
     weight: float,
     polarity: Polarity,
     *,
+    tier: SignalTier,
     updates_taste: bool | None = None,
     state: str | None,
     exclude_from_feed: bool,
@@ -80,6 +91,7 @@ def _p(
         event_type=event_type,
         weight=weight,
         polarity=polarity,
+        tier=tier,
         updates_taste=affects,
         user_title_state=state,
         exclude_from_feed=exclude_from_feed,
@@ -102,6 +114,7 @@ SIGNAL_POLICIES: dict[str, SignalPolicy] = {
         "rate_1",
         -0.90,
         "negative",
+        tier="opinion",
         state="dislike",
         exclude_from_feed=True,
         counts_as_rating=True,
@@ -113,18 +126,32 @@ SIGNAL_POLICIES: dict[str, SignalPolicy] = {
         "rate_2",
         0.30,
         "positive",
+        tier="opinion",
         state="rated",
         exclude_from_feed=True,
         counts_as_rating=True,
         counts_as_positive_rating=True,
-        label="It's ok",
+        label="I like it",
         summary="Weak positive: familiar but not a favorite.",
         special_handling="Too weak alone for explain anchors; still moves sparse features lightly.",
+    ),
+    "mid": _p(
+        "mid",
+        0.10,
+        "positive",
+        tier="opinion",
+        state="rated",
+        exclude_from_feed=True,
+        counts_as_rating=True,
+        label="Ok",
+        summary="Seen it, neutral — very mild positive.",
+        special_handling="Weaker than rate_2; barely moves profile. Not an explain anchor.",
     ),
     "rate_3": _p(
         "rate_3",
         1.00,
         "positive",
+        tier="opinion",
         state="like",
         exclude_from_feed=True,
         counts_as_rating=True,
@@ -138,6 +165,7 @@ SIGNAL_POLICIES: dict[str, SignalPolicy] = {
         "rate_4",
         1.55,
         "positive",
+        tier="opinion",
         state="like",
         exclude_from_feed=True,
         counts_as_rating=True,
@@ -152,6 +180,7 @@ SIGNAL_POLICIES: dict[str, SignalPolicy] = {
         "haven't_seen",
         0.0,
         "zero",
+        tier="none",
         updates_taste=False,
         state="haven't_seen",
         exclude_from_feed=False,
@@ -167,6 +196,7 @@ SIGNAL_POLICIES: dict[str, SignalPolicy] = {
         "not_interested",
         -0.40,
         "negative",
+        tier="opinion",
         state="not_interested",
         exclude_from_feed=True,
         label="Not interested",
@@ -181,6 +211,7 @@ SIGNAL_POLICIES: dict[str, SignalPolicy] = {
         "watchlist",
         0.45,
         "positive",
+        tier="intent",
         state="watchlist",
         exclude_from_feed=True,
         label="Watchlist / Save",
@@ -194,6 +225,7 @@ SIGNAL_POLICIES: dict[str, SignalPolicy] = {
         "like",
         1.00,
         "positive",
+        tier="opinion",
         state="like",
         exclude_from_feed=True,
         counts_as_positive_rating=True,
@@ -206,6 +238,7 @@ SIGNAL_POLICIES: dict[str, SignalPolicy] = {
         "dislike",
         -0.85,
         "negative",
+        tier="opinion",
         state="dislike",
         exclude_from_feed=True,
         label="Dislike / Pass (shortcut)",
@@ -217,6 +250,7 @@ SIGNAL_POLICIES: dict[str, SignalPolicy] = {
         "clear",
         0.0,
         "zero",
+        tier="none",
         updates_taste=False,
         state="none",
         exclude_from_feed=False,
@@ -231,6 +265,7 @@ SIGNAL_POLICIES: dict[str, SignalPolicy] = {
         "skip",
         -0.15,
         "negative",
+        tier="implicit",
         state=None,
         exclude_from_feed=False,
         label="Skip",
@@ -241,6 +276,7 @@ SIGNAL_POLICIES: dict[str, SignalPolicy] = {
         "view",
         0.05,
         "neutral",
+        tier="implicit",
         state=None,
         exclude_from_feed=False,
         label="View / impression",
@@ -252,6 +288,7 @@ SIGNAL_POLICIES: dict[str, SignalPolicy] = {
         "watched",
         0.20,
         "positive",
+        tier="intent",
         state="watched",
         exclude_from_feed=True,
         label="Watched (no rating)",
@@ -265,6 +302,7 @@ SIGNAL_POLICIES: dict[str, SignalPolicy] = {
         "watched_liked",
         1.10,
         "positive",
+        tier="opinion",
         state="like",
         exclude_from_feed=True,
         counts_as_positive_rating=True,
@@ -277,6 +315,7 @@ SIGNAL_POLICIES: dict[str, SignalPolicy] = {
         "watched_disliked",
         -0.95,
         "negative",
+        tier="opinion",
         state="dislike",
         exclude_from_feed=True,
         label="Watched + disliked",
@@ -329,6 +368,7 @@ ACTIVE_INTERACTION_EVENT_TYPES: frozenset[str] = frozenset(
         "skip",
         "view",
         "haven't_seen",
+        "mid",
         "rate_1",
         "rate_2",
         "rate_3",
@@ -425,16 +465,94 @@ def is_superseded_by_clear(
     return created_at <= cutoff
 
 
+@dataclass(frozen=True, slots=True)
+class EffectiveSignal:
+    """The one event that represents a user's current opinion of a title."""
+
+    title_id: UUID
+    event_type: str
+    # Weight after time decay (what learning uses).
+    weight: float
+    # Stored event weight before decay (what explanations cite).
+    raw_weight: float
+    created_at: datetime
+
+
+def decay_factor(age_days: float, half_life_days: float | None) -> float:
+    """Exponential time decay: an event loses half its influence every half-life."""
+    if not half_life_days or half_life_days <= 0:
+        return 1.0
+    return 0.5 ** (max(age_days, 0.0) / half_life_days)
+
+
+def effective_title_signals(
+    events: Iterable[tuple[UUID, str, float, datetime]],
+    *,
+    now: datetime | None = None,
+    half_life_days: float | None = None,
+) -> dict[UUID, EffectiveSignal]:
+    """Collapse an append-only event log into one signal per title.
+
+    Rules (see docs/TASTE_SIGNALS.md):
+
+    1. Events at or before the latest ``clear`` for a title are ignored.
+    2. Events that carry no taste (haven't seen, zero weight) are ignored.
+    3. Per title, the strongest tier wins (opinion > intent > implicit);
+       within a tier, the latest event wins.
+
+    So *like → dislike* is a dislike, *rate_4 → watched* stays a favourite, and
+    repeated views count once. Summing every event instead would let stale or
+    contradictory clicks leak into the profile.
+    """
+    ordered = sorted(events, key=lambda e: e[3])
+    last_clear = last_clear_timestamps((t, e, c) for t, e, _w, c in ordered)
+
+    best: dict[UUID, tuple[int, UUID, str, float, datetime]] = {}
+    for title_id, event_type, weight, created_at in ordered:
+        if not is_supported_event(event_type):
+            continue
+        if is_superseded_by_clear(
+            title_id=title_id,
+            event_type=event_type,
+            created_at=created_at,
+            last_clear=last_clear,
+        ):
+            continue
+        if not affects_taste(event_type, weight):
+            continue
+        rank = _TIER_RANK[get_policy(event_type).tier]
+        current = best.get(title_id)
+        # ``ordered`` is chronological, so ">=" on rank keeps the latest in a tier.
+        if current is None or rank >= current[0]:
+            best[title_id] = (rank, title_id, event_type, float(weight), created_at)
+
+    reference = now or (ordered[-1][3] if ordered else None)
+    out: dict[UUID, EffectiveSignal] = {}
+    for title_id, (_rank, _tid, event_type, weight, created_at) in best.items():
+        factor = 1.0
+        if reference is not None and half_life_days:
+            age_days = (reference - created_at).total_seconds() / 86_400
+            factor = decay_factor(age_days, half_life_days)
+        out[title_id] = EffectiveSignal(
+            title_id=title_id,
+            event_type=event_type,
+            weight=weight * factor,
+            raw_weight=weight,
+            created_at=created_at,
+        )
+    return out
+
+
 def policy_table_markdown() -> str:
     """Render the policy table (used by docs / debugging)."""
     lines = [
-        "| event_type | label | weight | polarity | updates taste? | state | exclude For You? | notes |",
-        "|------------|-------|--------|----------|----------------|-------|------------------|-------|",
+        "| event_type | label | weight | polarity | tier | updates taste? | state | exclude For You? | notes |",
+        "|------------|-------|--------|----------|------|----------------|-------|------------------|-------|",
     ]
     for name in sorted(SIGNAL_POLICIES.keys()):
         p = SIGNAL_POLICIES[name]
         lines.append(
-            f"| `{p.event_type}` | {p.label} | {p.weight:+.2f} | {p.polarity} | "
+            f"| `{p.event_type}` | {p.label} | {p.weight:+.2f} | {p.polarity} | {p.tier} | "
             f"{'yes' if p.updates_taste else '**no**'} | "
             f"{p.user_title_state or '—'} | "
             f"{'yes' if p.exclude_from_feed else 'no'} | "

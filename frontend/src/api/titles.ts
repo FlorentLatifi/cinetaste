@@ -71,6 +71,7 @@ export type RecommendationItem = {
 export type OnboardingAction =
   | "haven't_seen"
   | "not_interested"
+  | "mid"
   | "rate_1"
   | "rate_2"
   | "rate_3"
@@ -154,6 +155,7 @@ export type InteractionEventType =
   | "skip"
   | "view"
   | "haven't_seen"
+  | "mid"
   | "rate_1"
   | "rate_2"
   | "rate_3"

@@ -9,7 +9,7 @@ import {
 } from "react";
 import * as authApi from "../../api/auth";
 import type { User } from "../../api/auth";
-import { setSessionExpiredHandler, tryRefreshAccessToken } from "../../api/client";
+import { setSessionExpiredHandler, tryRefreshSession } from "../../api/client";
 import { clearLegacyTokenStorage, setAccessToken } from "../../api/tokenStore";
 
 type AuthState = {
@@ -36,10 +36,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const refreshUser = useCallback(async () => {
-    const access = await tryRefreshAccessToken();
-    if (!access) return;
-    const me = await authApi.getMe(access);
-    setAccessTokenState(access);
+    const tokens = await tryRefreshSession();
+    if (!tokens) return;
+    const me = await authApi.getMe(tokens.access_token);
+    setAccessTokenState(tokens.access_token);
     setUser(me);
   }, []);
 
@@ -48,20 +48,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     clearLegacyTokenStorage();
 
     async function bootstrap() {
-      try {
-        // Session restore: httpOnly cookie → new access token
-        const tokens = await authApi.refresh();
-        if (cancelled) return;
+      // Goes through the shared single-flight refresh: StrictMode's double
+      // effect and other tabs reuse one request instead of racing it.
+      const tokens = await tryRefreshSession();
+      if (cancelled) return;
+      if (tokens) {
         applySession(tokens);
-      } catch {
-        if (!cancelled) {
-          setAccessToken(null);
-          setAccessTokenState(null);
-          setUser(null);
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
+      } else {
+        setAccessToken(null);
+        setAccessTokenState(null);
+        setUser(null);
       }
+      setLoading(false);
     }
 
     void bootstrap();

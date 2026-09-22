@@ -1,0 +1,49 @@
+.landing { min-height: 100vh; display: flex; flex-direction: column; }
+.landing-topbar { position: sticky; top: 0; z-index: 20; border-bottom: 1px solid var(--border); background: rgba(11, 12, 16, 0.82); backdrop-filter: blur(14px); }
+.landing-topbar-inner { max-width: 1080px; margin: 0 auto; padding: 0.75rem 1.25rem; display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.landing-brand { text-decoration: none; color: inherit; display: flex; align-items: center; gap: 0.65rem; }
+.landing-topbar-actions { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; justify-content: flex-end; }
+.landing-main { flex: 1; outline: none; }
+.landing-hero { position: relative; max-width: 720px; margin: 0 auto; padding: 2.5rem 1.25rem 3rem; text-align: center; isolation: isolate; }
+.landing-ambient { position: absolute; inset: -5% -30% auto; height: 55%; background: radial-gradient(ellipse at 50% 0%, rgba(232, 194, 122, 0.2), transparent 60%), radial-gradient(ellipse at 30% 40%, rgba(120, 150, 255, 0.12), transparent 55%); z-index: -1; pointer-events: none; filter: blur(8px); }
+.landing-eyebrow { margin-bottom: 0.75rem; }
+.landing-headline { margin: 0 0 0.85rem; font-size: clamp(1.85rem, 5vw, 2.75rem); line-height: 1.12; font-family: "Instrument Serif", Georgia, serif; font-weight: 400; }
+.landing-lede { margin: 0 auto 2rem; max-width: 34rem; color: var(--muted); font-size: 1.05rem; line-height: 1.5; }
+.landing-stage { display: flex; flex-direction: column; align-items: center; gap: 0.85rem; margin: 0 auto 2rem; padding: 1.5rem 1rem 1.25rem; max-width: 28rem; border-radius: calc(var(--radius) + 8px); border: 1px solid var(--border); background: var(--surface-glass); backdrop-filter: blur(12px); box-shadow: var(--shadow); }
+.landing-poster-wrap { width: min(100%, 240px); }
+.landing-poster { aspect-ratio: 2 / 3; border-radius: 16px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.45rem; padding: 1.25rem; text-align: center; color: var(--accent); background: radial-gradient(circle at 30% 20%, rgba(232, 194, 122, 0.22), transparent 55%), linear-gradient(160deg, #1a1d2a, #0e1018); box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2), 0 24px 48px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.06); }
+.landing-poster-letter { font-size: 3.25rem; font-family: "Instrument Serif", Georgia, serif; line-height: 1; }
+.landing-poster-label { font-size: 0.95rem; font-weight: 600; color: var(--text); }
+.landing-poster-year { font-size: 0.8rem; color: var(--muted); }
+.landing-film-title { margin: 0.25rem 0 0; font-size: clamp(1.5rem, 3vw, 1.9rem); font-family: "Instrument Serif", Georgia, serif; font-weight: 400; }
+.landing-film-meta { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 0.4rem 0.65rem; margin: 0; color: var(--muted); font-size: 0.9rem; }
+.landing-why { width: 100%; text-align: left; padding: 0.85rem 1rem; border-radius: 12px; background: rgba(11, 12, 16, 0.55); border: 1px solid var(--border); }
+.landing-why .why-label { margin: 0 0 0.35rem; }
+.landing-demo-actions { display: grid; grid-template-columns: 1fr 1fr 1.2fr; gap: 0.45rem; width: 100%; opacity: 0.92; pointer-events: none; user-select: none; }
+.landing-demo-btn { cursor: default; }
+.landing-demo-note { margin: 0; font-size: 0.8rem; color: var(--muted); }
+.landing-cta { display: flex; flex-wrap: wrap; gap: 0.75rem; justify-content: center; align-items: center; }
+.landing-cta-primary { min-width: 10rem; padding-left: 1.5rem; padding-right: 1.5rem; }
+.landing-steps { max-width: 960px; margin: 0 auto; padding: 0 1.25rem 4rem; }
+.landing-section-title { text-align: center; margin: 0 0 1.75rem; font-size: clamp(1.35rem, 3vw, 1.65rem); font-family: "Instrument Serif", Georgia, serif; font-weight: 400; }
+.landing-step-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; }
+.landing-step-list li { padding: 1.25rem 1.15rem; border-radius: var(--radius); border: 1px solid var(--border); background: var(--surface-glass); text-align: left; }
+.landing-step-num { display: block; font-family: "Instrument Serif", Georgia, serif; font-size: 1.5rem; color: var(--accent); margin-bottom: 0.45rem; }
+.landing-step-list h3 { margin: 0 0 0.4rem; font-size: 1.05rem; }
+.landing-step-list p { margin: 0; color: var(--muted); font-size: 0.92rem; line-height: 1.45; }
+.landing-footer { border-top: 1px solid var(--border); padding: 1.25rem; text-align: center; color: var(--muted); font-size: 0.88rem; }
+.landing-footer p { margin: 0; }
+
+.landing-social { max-width: 720px; margin: 0 auto; padding: 0 1.25rem 3rem; text-align: center; }
+.landing-social-title { font-size: clamp(1.15rem, 2.5vw, 1.45rem); margin-bottom: 1.25rem; }
+.landing-social-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; }
+.landing-social-card { padding: 1.25rem; border-radius: var(--radius); border: 1px solid var(--border); background: var(--surface-glass); text-align: center; }
+.landing-social-card .landing-step-num { margin-bottom: 0.25rem; }
+.landing-social-card p { margin: 0; color: var(--muted); font-size: 0.88rem; }
+
+@media (max-width: 720px) {
+  .landing-step-list { grid-template-columns: 1fr; }
+  .landing-demo-actions { grid-template-columns: 1fr; }
+  .landing-topbar-inner { padding: 0.65rem 1rem; }
+  .brand-tag { display: none; }
+}

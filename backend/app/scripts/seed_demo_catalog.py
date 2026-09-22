@@ -118,8 +118,6 @@ async def main() -> None:
                 media_type=media_type,
                 release_year=year,
                 runtime=runtime,
-                popularity=title.popularity,
-                vote_average=title.vote_average,
                 original_language="en",
                 countries=["US"],
             )

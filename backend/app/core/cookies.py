@@ -18,17 +18,24 @@ def refresh_cookie_path(settings: Settings) -> str:
     return f"{settings.api_prefix.rstrip('/')}/auth"
 
 
+def _secure(settings: Settings) -> bool:
+    # SameSite=None is only accepted by browsers together with Secure.
+    return settings.is_production or settings.cookie_secure or settings.cookie_samesite == "none"
+
+
 def set_refresh_cookie(response: Response, raw_refresh: str, settings: Settings) -> None:
-    """Set rotating refresh token as HttpOnly cookie."""
-    # Cross-site SPA (e.g. Vercel → Render) needs SameSite=None + Secure.
-    # Same-site local (localhost:5173 → localhost:8000) uses Lax without Secure.
-    cross_site = settings.is_production
+    """Set rotating refresh token as HttpOnly cookie.
+
+    Default SameSite=Lax assumes the SPA reaches the API on the same site
+    (Vite proxy locally, Vercel rewrite in production), which keeps the cookie
+    first-party so Safari's third-party cookie blocking doesn't log users out.
+    """
     response.set_cookie(
         key=REFRESH_COOKIE_NAME,
         value=raw_refresh,
         httponly=True,
-        secure=cross_site or settings.cookie_secure,
-        samesite="none" if cross_site else "lax",
+        secure=_secure(settings),
+        samesite=settings.cookie_samesite,
         max_age=int(settings.jwt_refresh_ttl_days) * 24 * 60 * 60,
         path=refresh_cookie_path(settings),
     )
@@ -38,7 +45,7 @@ def clear_refresh_cookie(response: Response, settings: Settings) -> None:
     response.delete_cookie(
         key=REFRESH_COOKIE_NAME,
         path=refresh_cookie_path(settings),
-        secure=settings.is_production or settings.cookie_secure,
+        secure=_secure(settings),
         httponly=True,
-        samesite="none" if settings.is_production else "lax",
+        samesite=settings.cookie_samesite,
     )

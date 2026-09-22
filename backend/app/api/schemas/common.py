@@ -15,4 +15,5 @@ class HealthResponse(BaseModel):
 class ReadyResponse(BaseModel):
     status: str
     database: str
-    redis: str
+    # redis | memory | memory (redis unavailable)
+    cache: str

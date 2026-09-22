@@ -197,6 +197,15 @@ def _genre_phrase(genres: list[str]) -> str:
     return " / ".join(g.lower() for g in labels)
 
 
+def _cite(anchors: list[dict[str, Any]], names: list[str]) -> str:
+    """'rated X highly' only when every cited title was explicitly rated."""
+    joined = _join_names(names)
+    cited = [a for a in anchors if str(a.get("name")) in set(names)]
+    if cited and all(str(a.get("event_type") or "").startswith("rate_") for a in cited):
+        return f"you rated {joined} highly"
+    return f"you liked {joined}"
+
+
 def build_reasons(
     *,
     user_features: dict[str, Any],
@@ -265,6 +274,7 @@ def build_reasons(
     if ranked_anchors:
         top = ranked_anchors[:3]
         # Prefer multi-title cite when same director/theme bridges several favorites
+        top_anchors = [anchor for _s, anchor, _o in top]
         by_director: dict[str, list[str]] = {}
         for _s, anchor, overlap in top:
             for d in overlap["directors"]:
@@ -288,12 +298,11 @@ def build_reasons(
             elif shared_kw:
                 bits.append(_pretty_label(shared_kw[0]) + " threads")
             detail = " + ".join(bits)
-            names = _join_names(liked_unique)
             _add(
                 Reason(
                     code="because_you_liked",
                     message=(
-                        f"Because you rated {names} highly "
+                        f"Because {_cite(top_anchors, liked_unique)} "
                         f"({detail} — {_pretty_person(director)})"
                     ),
                     evidence={
@@ -322,7 +331,7 @@ def build_reasons(
                     "themes like " + ", ".join(_pretty_label(k) for k in best_overlap["keywords"][:2])
                 )
             if best_overlap["cast"]:
-                link_bits.append(f"cast energy from {_pretty_person(best_overlap['cast'][0])}")
+                link_bits.append(f"shared cast ({_pretty_person(best_overlap['cast'][0])})")
             if best_overlap["genres"] and len(link_bits) < 2:
                 link_bits.append(_genre_phrase(best_overlap["genres"]))
             if not link_bits:
@@ -331,7 +340,7 @@ def build_reasons(
             _add(
                 Reason(
                     code="because_you_liked",
-                    message=f"Because you rated {_join_names(liked)} highly — {bridge}",
+                    message=f"Because {_cite(top_anchors, liked)} — {bridge}",
                     evidence={
                         "liked_titles": liked,
                         "overlap": {k: v for k, v in best_overlap.items() if v},
@@ -367,13 +376,9 @@ def build_reasons(
                 )
             )
         ]
+        # Only mention a theme that is an actual keyword on both sides.
         if complex_kw:
             extra = f" with {_pretty_label(complex_kw[0])}"
-        elif any(t in {"tense", "dark", "cerebral", "bleak", "meditative"} for t in tone_hits):
-            gjoin = " ".join(genre_hits)
-            if "thriller" in gjoin or "mystery" in gjoin:
-                if "tense" in tone_hits or "dark" in tone_hits or "cerebral" in tone_hits:
-                    extra = " with moral complexity"
         msg = f"Strong match on {tone_bit} {genre_bit}{extra}".replace("  ", " ").strip()
         _add(
             Reason(
@@ -383,7 +388,7 @@ def build_reasons(
             )
         )
 
-    # --- 3) Dark humor / pacing style from tones + keywords ---
+    # --- 3) Shared tone (satirical, dark, whimsical, ...) ---
     style_tones = [t for t in tone_hits if t in {"satirical", "dark", "comedic", "whimsical", "stylish", "tense"}]
     if style_tones and len(reasons) < max_reasons:
         liked_style = [
@@ -396,10 +401,7 @@ def build_reasons(
             _add(
                 Reason(
                     code="similar_style",
-                    message=(
-                        f"Similar {tone_desc} energy and pacing to "
-                        f"{_join_names(liked_style)} — movies you've enjoyed"
-                    ),
+                    message=f"Same {tone_desc} tone as {_join_names(liked_style)}",
                     evidence={"tones": style_tones, "liked_titles": liked_style},
                 )
             )
@@ -407,7 +409,7 @@ def build_reasons(
             _add(
                 Reason(
                     code="similar_style",
-                    message=f"Similar {tone_desc} humor and pacing to movies you've enjoyed",
+                    message=f"Matches the {tone_desc} tone you tend to enjoy",
                     evidence={"tones": style_tones},
                 )
             )
@@ -562,12 +564,6 @@ def build_reasons(
                     evidence={"candidate": title_name},
                 )
             )
-
-    # Prefer fewer, stronger reasons — drop weak trailing genre if we already have rich ones
-    if len(reasons) >= 2 and reasons[-1].code in {"shared_genre", "genre_fit", "taste_similarity"}:
-        if any(r.code in {"because_you_liked", "taste_blend", "similar_style", "same_director"} for r in reasons[:-1]):
-            # keep if under 2 else ok
-            pass
 
     return reasons[:max_reasons]
 

@@ -27,10 +27,14 @@ function notifySessionExpired() {
   sessionExpiredHandler?.();
 }
 
-/** Single-flight refresh so concurrent 401s share one /auth/refresh call. */
-let refreshInFlight: Promise<string | null> | null = null;
+/**
+ * Single-flight refresh: concurrent 401s *and* session restore on load share
+ * one /auth/refresh call. Two calls with the same cookie would look like token
+ * reuse to the server, which revokes the whole session family.
+ */
+let refreshInFlight: Promise<authApi.TokenResponse | null> | null = null;
 
-export async function tryRefreshAccessToken(): Promise<string | null> {
+export async function tryRefreshSession(): Promise<authApi.TokenResponse | null> {
   if (refreshInFlight) return refreshInFlight;
 
   refreshInFlight = (async () => {
@@ -38,7 +42,7 @@ export async function tryRefreshAccessToken(): Promise<string | null> {
       // Cookie sent automatically with credentials: "include"
       const tokens = await authApi.refresh();
       setAccessToken(tokens.access_token);
-      return tokens.access_token;
+      return tokens;
     } catch {
       setAccessToken(null);
       return null;
@@ -48,6 +52,10 @@ export async function tryRefreshAccessToken(): Promise<string | null> {
   })();
 
   return refreshInFlight;
+}
+
+export async function tryRefreshAccessToken(): Promise<string | null> {
+  return (await tryRefreshSession())?.access_token ?? null;
 }
 
 export async function apiFetch<T>(

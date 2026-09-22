@@ -1,6 +1,6 @@
 """Where-to-watch availability via TMDb (JustWatch data).
 
-Providers change frequently — we fetch live and cache briefly in Redis.
+Providers change frequently — we fetch live and cache briefly (Redis or in-process).
 Missing TMDb key / network errors degrade to an empty payload (never 500 the SPA).
 """
 
@@ -17,8 +17,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
 from app.domain.exceptions import NotFoundError
+from app.infrastructure.cache import get_store
 from app.infrastructure.db.models.catalog import Title
-from app.infrastructure.db.redis import get_redis
 from app.infrastructure.tmdb.client import TmdbClient
 
 logger = logging.getLogger(__name__)
@@ -150,19 +150,10 @@ class WatchProvidersService:
         self._settings = settings
 
     async def _cache_get(self, key: str) -> str | None:
-        try:
-            redis = await get_redis()
-            return await redis.get(key)
-        except Exception:
-            logger.warning("watch_providers_cache_get_failed key=%s", key, exc_info=True)
-            return None
+        return await get_store().get(key)
 
     async def _cache_set(self, key: str, value: str, ex: int) -> None:
-        try:
-            redis = await get_redis()
-            await redis.set(key, value, ex=ex)
-        except Exception:
-            logger.warning("watch_providers_cache_set_failed key=%s", key, exc_info=True)
+        await get_store().set(key, value, ttl_seconds=ex)
 
     async def for_title(
         self,

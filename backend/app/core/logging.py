@@ -11,6 +11,10 @@ def configure_logging(*, debug: bool = False) -> None:
         stream=sys.stdout,
         force=True,
     )
+    # httpx logs every request URL at INFO. TMDb v3 puts the API key in the
+    # query string, so those lines would write the key into the logs.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
     # Quiet noisy default loggers in production-like runs
     if not debug:
         logging.getLogger("uvicorn.access").setLevel(logging.WARNING)

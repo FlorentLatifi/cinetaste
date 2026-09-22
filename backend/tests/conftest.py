@@ -67,8 +67,6 @@ class FakeTitle:
             media_type=self.media_type,
             release_year=self.release_year,
             runtime=self.runtime,
-            popularity=self.popularity,
-            vote_average=self.vote_average,
             original_language=self.original_language,
             countries=self.countries,
         )

@@ -31,7 +31,10 @@ def _service() -> tuple[OnboardingService, AsyncMock, AsyncMock, AsyncMock]:
     rec = AsyncMock()
     rec.invalidate_user = AsyncMock()
     rec.onboarding_cards = AsyncMock(return_value=[MagicMock() for _ in range(10)])
-    return OnboardingService(session, taste, rec), session, taste, rec
+    service = OnboardingService(session, taste, rec)
+    # No DB in unit tests: every referenced title "exists".
+    service._known_title_ids = AsyncMock(side_effect=lambda ids: set(ids))  # type: ignore[method-assign]
+    return service, session, taste, rec
 
 
 def _reactions(actions: list[str]) -> list[dict[str, str]]:
@@ -150,3 +153,26 @@ async def test_complete_ignores_unknown_actions() -> None:
 async def test_min_gates_match_product_constants() -> None:
     assert MIN_ONBOARDING_RATINGS == 6
     assert MIN_ONBOARDING_POSITIVE == 2
+
+
+@pytest.mark.asyncio
+async def test_complete_counts_each_title_once() -> None:
+    """Rating the same title six times must not satisfy the six-rating gate."""
+    service, _, taste, _ = _service()
+    same = str(uuid4())
+    reactions = [{"title_id": same, "action": "rate_4"} for _ in range(MIN_ONBOARDING_RATINGS)]
+    with pytest.raises(AppError) as exc:
+        await service.complete(_user(), reactions)
+    assert exc.value.code == "onboarding_insufficient_ratings"
+    taste.record_interaction.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_complete_rejects_unknown_titles_before_writing() -> None:
+    service, _, taste, _ = _service()
+    service._known_title_ids = AsyncMock(return_value=set())  # type: ignore[method-assign]
+    actions = ["rate_4", "rate_3"] + ["rate_1"] * 4
+    with pytest.raises(AppError) as exc:
+        await service.complete(_user(), _reactions(actions))
+    assert exc.value.code == "unknown_titles"
+    taste.record_interaction.assert_not_awaited()
