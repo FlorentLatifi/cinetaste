@@ -365,3 +365,33 @@ def test_synopsis_filler_words_do_not_create_similarity() -> None:
     c = build_title_embedding(name="C", overview="a detective hunts smugglers", **common)
     d = build_title_embedding(name="D", overview="astronauts repair a failing station", **common)
     assert cosine(c, d) < cosine(a, b) - 0.05
+
+
+def test_warm_popularity_prior_is_off_by_default_and_opt_in() -> None:
+    """The prior trades novelty for accuracy, so production leaves it off."""
+    from app.recommendation.pipeline import DEFAULT_WEIGHTS, RankingWeights
+
+    assert DEFAULT_WEIGHTS.warm_popularity == 0.0
+    # Two equally relevant titles (same features, same vector) that differ only in popularity.
+    niche = FakeTitle(name="Niche", genres=["Drama"], keywords=["family"], popularity=2.0)
+    hit = FakeTitle(name="Hit", genres=["Drama"], keywords=["family"], popularity=400.0)
+    hit.embedding = list(niche.embedding)
+    liked = FakeTitle(name="Liked", genres=["Drama"], keywords=["family"])
+    vector, features = _profile_from([liked])
+
+    def top(weights: RankingWeights):
+        ranked = rank_titles(
+            user_vector=vector,
+            user_features=features,
+            titles=[niche, hit],
+            exclude_ids=set(),
+            slate_size=1,
+            mmr_lambda=1.0,
+            exploration_slots=0,
+            weights=weights,
+        )
+        return ranked[0].title_id
+
+    assert top(RankingWeights(warm_popularity=0.5)) == hit.id
+    # Off: popularity plays no part for an established user; input order breaks the tie.
+    assert top(DEFAULT_WEIGHTS) == niche.id

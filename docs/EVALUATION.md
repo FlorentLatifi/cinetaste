@@ -49,81 +49,104 @@ scores acceptably on accuracy and is useless as a product:
 * `novelty` — mean popularity percentile (0 = blockbusters only, 1 = obscure).
 * `coverage` — share of the catalog that ever gets recommended.
 
-## Results: synthetic benchmark
+## Results: real ratings (MovieLens)
 
-800 titles, 200 users, seed 7, held-out 3 positives each. Generated with
-`build_synthetic_dataset`; reproduce with the commands above.
-
-**k = 20 (the production slate size)**
+193 users from [MovieLens ml-latest-small](https://grouplens.org/datasets/movielens/)
+(100k ratings from real people), temporal split: each user's most recent 20% of
+ratings held out, held-out titles rated ≥ 4 stars are relevant. Slate of 20.
 
 | strategy | recall@20 | ndcg@20 | hit_rate@20 | mrr | diversity | genre_variety | novelty | coverage |
 |---|---|---|---|---|---|---|---|---|
-| random | 0.012 | 0.009 | 0.035 | 0.014 | 0.857 | 0.373 | 0.497 | 0.993 |
+| random | 0.001 | 0.001 | 0.026 | 0.006 | 0.724 | 0.351 | 0.511 | 0.329 |
+| **popular** | **0.072** | **0.070** | **0.415** | **0.169** | 0.817 | 0.309 | 0.002 | 0.015 |
+| dense_only | 0.015 | 0.011 | 0.109 | 0.032 | 0.132 | 0.071 | 0.402 | 0.109 |
+| sparse_only | 0.036 | 0.039 | 0.347 | 0.120 | 0.720 | 0.256 | 0.142 | 0.049 |
+| hybrid_no_diversity | 0.022 | 0.023 | 0.202 | 0.069 | 0.393 | 0.141 | 0.320 | 0.070 |
+| **hybrid (production)** | 0.025 | 0.028 | 0.254 | 0.085 | 0.614 | 0.232 | 0.225 | 0.062 |
+| hybrid_with_exploration | 0.025 | 0.028 | 0.249 | 0.084 | 0.610 | 0.233 | 0.232 | 0.065 |
+| hybrid_plus_popularity | 0.049 | 0.050 | 0.404 | 0.127 | 0.711 | 0.242 | 0.044 | 0.045 |
+
+### What real ratings say
+
+* **Recommending the most popular films beats the recommender on accuracy** —
+  about 3× the recall. This is the most important number in this document.
+* **Why:** MovieLens gives only genres, user tags (on a minority of films) and a
+  year — no cast, director or synopsis. With so little metadata, content-based
+  ranking can barely tell films apart, while "what people rate next" in
+  MovieLens is dominated by popular films. The production TMDb catalog carries
+  directors, cast, writers, keywords and synopses, so this is a floor, not the
+  ceiling — but it is a real warning: content alone is only as good as its
+  metadata.
+* **It changed the default weights.** The hashed content vector alone was the
+  weakest signal here (0.015), the interpretable features the strongest
+  (0.036). Moving weight from the vector to the features (similarity 0.42 → 0.2,
+  feature overlap 0.40 → 0.6) raised the production ranker's hit rate from
+  0.155 to 0.254, NDCG from 0.017 to 0.028 and doubled MRR on the same users —
+  and did not hurt the synthetic benchmark (recall@20 0.088 → 0.095).
+* **A popularity prior closes most of the gap — and was deliberately not made
+  the default.** `hybrid_plus_popularity` (`warm_popularity=0.2`) nearly matches
+  the popularity baseline's hit rate (0.404 vs 0.415), but its novelty falls to
+  0.044: it mostly recommends the charts. For a product whose point is discovery,
+  that trade isn't worth it by default; the knob exists
+  (`RankingWeights.warm_popularity`) for anyone who wants it.
+* **Diversity helps here, unlike on synthetic data** (0.025 vs 0.022 recall with
+  diversity on): real users' held-out favourites span more genres than the
+  synthetic users'.
+
+Sampling noise is large at this size: a different random draw of 99 users gave
+the old defaults 0.008 recall. Compare strategies on the *same* users (every row
+above is), not across runs.
+
+## Results: synthetic benchmark
+
+800 titles, 200 users, seed 7, 3 held-out positives each, slate of 20.
+Generated with `build_synthetic_dataset`.
+
+| strategy | recall@20 | ndcg@20 | hit_rate@20 | mrr | diversity | genre_variety | novelty | coverage |
+|---|---|---|---|---|---|---|---|---|
+| random | 0.027 | 0.011 | 0.080 | 0.009 | 0.859 | 0.377 | 0.499 | 0.995 |
 | popular | 0.022 | 0.010 | 0.065 | 0.010 | 0.872 | 0.399 | 0.012 | 0.028 |
 | dense_only | 0.163 | 0.080 | 0.435 | 0.081 | 0.444 | 0.052 | 0.533 | 0.665 |
 | sparse_only | 0.125 | 0.062 | 0.350 | 0.066 | 0.569 | 0.087 | 0.538 | 0.598 |
-| hybrid_no_diversity | 0.163 | 0.081 | 0.455 | 0.084 | 0.480 | 0.062 | 0.538 | 0.569 |
-| **hybrid (production)** | **0.088** | **0.052** | **0.255** | **0.066** | **0.741** | **0.199** | **0.552** | **0.436** |
-| hybrid_with_exploration | 0.088 | 0.052 | 0.255 | 0.066 | 0.741 | 0.199 | 0.552 | 0.431 |
-
-**k = 10**
-
-| strategy | recall@10 | ndcg@10 | hit_rate@10 | diversity | genre_variety | coverage |
-|---|---|---|---|---|---|---|
-| random | 0.013 | 0.008 | 0.040 | 0.858 | 0.599 | 0.922 |
-| popular | 0.007 | 0.005 | 0.020 | 0.873 | 0.707 | 0.015 |
-| hybrid_no_diversity | 0.087 | 0.054 | 0.250 | 0.446 | 0.111 | 0.403 |
-| **hybrid (production)** | 0.045 | 0.034 | 0.130 | 0.749 | 0.342 | 0.391 |
+| hybrid_no_diversity | 0.143 | 0.071 | 0.395 | 0.072 | 0.529 | 0.077 | 0.538 | 0.542 |
+| **hybrid (production)** | **0.095** | **0.047** | **0.265** | **0.048** | **0.750** | **0.186** | **0.551** | **0.425** |
+| hybrid_with_exploration | 0.095 | 0.047 | 0.265 | 0.048 | 0.751 | 0.186 | 0.551 | 0.420 |
+| hybrid_plus_popularity | 0.098 | 0.057 | 0.260 | 0.071 | 0.762 | 0.195 | 0.193 | 0.357 |
 
 ### What these numbers say
 
-* **The taste model works.** Ranking by taste finds roughly 7× more held-out
-  favourites than random (recall@20 0.163 vs 0.012) and reaches a held-out
-  title for 45% of users in 20 cards.
-* **Both channels contribute.** The content vector alone (0.163) beats the
-  interpretable features alone (0.125); combining them matches the better one
-  and ranks hits slightly higher (NDCG 0.081 vs 0.080). The sparse channel earns
-  its place by making explanations possible, not by lifting accuracy much.
-* **Diversity is expensive, and now the price is known.** MMR plus the genre cap
-  cost about 46% of recall@20 (0.163 → 0.088) and buy 3.2× the genre variety
-  (0.062 → 0.199) and noticeably less repetition (0.480 → 0.741). Without the
-  cap a 20-card slate holds barely more than one distinct primary genre.
-* **That measurement set the defaults.** A fixed cap of 4 per slate cost ~60% of
-  recall@20; a cap proportional to slate size (40%, so 8 of 20) recovers most of
-  it. λ moved 0.7 → 0.8 the same way.
-* **Exploration slots are nearly free** at this slate size: identical accuracy,
-  and they replace 3 near-duplicates with stretch picks.
+* **The taste model learns taste.** Ranking by taste finds 3.5–6× more held-out
+  favourites than random or popular.
+* **Diversity has a measured price here.** MMR plus the genre cap cost about a
+  third of recall (0.143 → 0.095) and buy 2.4× the genre variety. Without the cap
+  a 20-card slate holds barely more than one distinct primary genre. A fixed cap
+  of 4 per slate cost ~60% of recall, which is why the cap is now proportional to
+  slate size (40%) and MMR λ is 0.8.
+* **Popularity is noise in this dataset**, so the popularity prior only costs
+  novelty (0.551 → 0.193) without a meaningful accuracy gain.
 
 ### What this benchmark does *not* prove
 
 * **It is partly circular.** Synthetic users are generated with preferences over
-  the same kinds of features the recommender scores (genres, directors,
-  keywords), so absolute accuracy is optimistic. Use it to compare strategies
-  and catch regressions — not as evidence of real-world quality.
-* **The popularity baseline is unfairly weak here.** Synthetic popularity is
-  random noise, uncorrelated with taste. On real data, popularity is a strong
-  baseline; that is the comparison that matters, and it needs MovieLens.
+  the same kinds of features the recommender scores, so accuracy is optimistic.
+  Use it to compare strategies and catch regressions; use MovieLens for reality.
 * **Offline metrics only reward re-finding what a user already rated.** They say
   nothing about whether a recommendation was a pleasant surprise, which is what
   exploration and hidden gems exist for. `recommendation_impressions` logs what
-  each user was shown so that acting-on-recommendations can be measured once
-  the app has real traffic.
+  each user was shown so acting-on-recommendations can be measured once the app
+  has real traffic.
 
-## MovieLens (real ratings)
+## Reproducing
 
-`--dataset movielens` runs the same protocol over
-[MovieLens ml-latest-small](https://grouplens.org/datasets/movielens/)
-(100k ratings, ~9k films, real people). Download and unzip it to
-`data/ml-latest-small`; it is not committed (GroupLens forbids redistribution).
+```bash
+cd backend
+python -m app.scripts.evaluate_recommender -k 20 --users 200            # synthetic
+python -m app.scripts.evaluate_recommender -k 20 --users 200     --dataset movielens --path ../data/ml-latest-small                   # real ratings
+```
 
-The split is temporal per user: their most recent 20% of ratings are held out,
-and held-out titles rated ≥ 4 stars count as relevant. Caveat: MovieLens has no
-cast, crew or synopses, so the people signals that carry much of the real
-catalog's quality are absent — treat those numbers as a floor, and expect the
-popularity baseline to be far stronger than it is on synthetic data.
-
-> Not yet run here: the dataset needs downloading. The loader is tested and the
-> command above produces the same table.
+MovieLens is not committed (GroupLens forbids redistribution): download
+ml-latest-small and unzip it to `data/`. The MovieLens run takes ~15 minutes
+(every strategy ranks ~9.7k films for every user).
 
 ## Adding a strategy
 

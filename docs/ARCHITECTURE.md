@@ -81,7 +81,7 @@ any scoring change. That is why Undo is a `clear` event rather than a delete.
    (cosine, `hnsw.ef_search` raised to match the requested limit) plus a
    popularity slice; cold start is popularity-ordered.
 5. **Ranking** (`recommendation/pipeline.py`) —
-   `0.42·cosine + 0.40·overlap − 0.12·penalty + gem + cold prior`, then MMR
+   `0.2·cosine + 0.6·overlap − 0.12·penalty + gem + cold prior`, then MMR
    (λ=0.8), a per-genre cap of 40% of the slate, exploration slots interleaved,
    and score-ordered backfill. Vectorised with numpy and run in a worker thread.
 6. **Explanations** (`recommendation/explanations.py`) — templates fed only by

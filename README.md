@@ -46,7 +46,7 @@ rating ──▶ interaction_events (append-only)
    candidates      pgvector ANN (HNSW, cosine) + a popular slice   ~370 titles
              │
              ▼
-   score = 0.42·cosine + 0.40·feature overlap − 0.12·penalty + hidden-gem + cold-start prior
+   score = 0.2·cosine + 0.6·feature overlap − 0.12·penalty + hidden-gem + cold-start prior
              │
              ▼
    MMR (λ=0.8) ──▶ genre cap (40% of slate) ──▶ exploration slots ──▶ reasons
@@ -72,26 +72,37 @@ doesn't erase the rating. Older signals decay with a configurable half-life.
 
 ## Does it actually work?
 
-Measured, not asserted — `python -m app.scripts.evaluate_recommender`
-(800 synthetic titles, 200 users, slate of 20, full method and caveats in
-[docs/EVALUATION.md](docs/EVALUATION.md)):
+Measured, not asserted: `python -m app.scripts.evaluate_recommender` replays
+held-out ratings through the production ranking code and compares it with
+baselines. Full method, all metrics and caveats in
+[docs/EVALUATION.md](docs/EVALUATION.md).
 
-| strategy | recall@20 | ndcg@20 | genre variety | novelty |
-|---|---|---|---|---|
-| random | 0.012 | 0.009 | 0.373 | 0.497 |
-| most popular | 0.022 | 0.010 | 0.399 | 0.012 |
-| taste ranking, diversity off | **0.163** | **0.081** | 0.062 | 0.538 |
-| **production (MMR + genre cap)** | 0.088 | 0.052 | **0.199** | **0.552** |
+**On real ratings (MovieLens, 193 users, slate of 20):**
 
-Taste ranking finds ~7× more held-out favourites than random and ~4× more than
-recommending the most popular titles. Diversity controls cost about 46% of
-recall and buy 3.2× the genre variety — that measurement is what set the
-per-genre cap and λ, which used to be guesses.
+| strategy | recall@20 | hit rate@20 | novelty |
+|---|---|---|---|
+| random | 0.001 | 0.026 | 0.511 |
+| **most popular** | **0.072** | **0.415** | 0.002 |
+| **production** | 0.025 | 0.254 | **0.225** |
+| production + popularity prior (opt-in) | 0.049 | 0.404 | 0.044 |
 
-Honest caveat: synthetic users are generated over the same kinds of features the
-model scores, so absolute numbers are optimistic, and popularity is an unfairly
-weak baseline there. The same harness runs on MovieLens
-(`--dataset movielens`) for real ratings.
+The honest headline: **on MovieLens, recommending the most popular films is more
+accurate than this recommender.** MovieLens only gives genres, a few tags and a
+year — no cast, director or synopsis — so content-based ranking has little to
+work with, and what people rate next there is dominated by popular films.
+
+What the evaluation changed:
+
+- It showed the hashed content vector was the weakest signal on real data, so
+  weight moved to the interpretable features. On the same users, hit rate went
+  from 0.155 to 0.254 and NDCG rose 65%, with no loss on the synthetic benchmark.
+- A popularity prior closes most of the gap (hit rate 0.404) but mostly
+  recommends the charts (novelty 0.044). For a discovery product that is the
+  wrong default, so it ships switched off and documented.
+- On a synthetic benchmark where taste is learnable from metadata, the same
+  ranker finds 3.5× more held-out favourites than random or popular. The
+  diversity controls' cost (about a third of recall) is what set the genre cap
+  and MMR λ.
 
 ## Screenshots
 
@@ -189,7 +200,7 @@ Errors share one shape: `{code, message, request_id}` (validation adds `errors[]
 ## Testing
 
 ```bash
-cd backend && pytest -m "not integration"   # 159 unit tests
+cd backend && pytest -m "not integration"   # 160 unit tests
 docker compose up -d db                      # integration needs Postgres
 INTEGRATION_REQUIRED=1 pytest -m integration # 15 API + DB tests, run the migrations
 cd frontend && npx playwright test           # 34 e2e + axe accessibility tests
@@ -207,9 +218,12 @@ and it can't explain itself. Content-based ranking works for user number one and
 every reason it gives can be traced to a feature.
 
 **Why two representations instead of one?** Sparse features explain; a dense
-vector retrieves. Measured separately, the vector alone scored recall@20 0.163
-and the features alone 0.125 — the features earn their place by making
-explanations possible, not by lifting accuracy.
+vector retrieves cheaply in the database. Which one should dominate the score
+was settled by measurement, not taste: on synthetic data the vector looked
+stronger (recall@20 0.163 vs 0.125), but on real MovieLens ratings the features
+won clearly (0.036 vs 0.015). The score now weights features 0.6 and the vector
+0.2 — the benchmark that flattered the vector was the one generated from the
+same features.
 
 **Why cap a genre at 40% of the slate?** Uncapped, a 20-card slate held barely
 more than one distinct genre. The cap costs measurable recall; that trade is
