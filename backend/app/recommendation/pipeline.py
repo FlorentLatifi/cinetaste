@@ -42,15 +42,24 @@ __all__ = [
 class RankingWeights:
     """Blend of dense similarity, sparse (explainable) overlap and priors.
 
-    Hand-set values; ``python -m app.scripts.evaluate_recommender`` measures
-    how they perform against baselines and ablations (docs/EVALUATION.md).
+    Chosen with ``python -m app.scripts.evaluate_recommender``
+    (docs/EVALUATION.md). On real MovieLens ratings, moving weight from the
+    hashed content vector (0.42 → 0.2) to the interpretable feature overlap
+    (0.40 → 0.6) tripled recall@20 and cost nothing on the synthetic
+    benchmark — the sparse channel is the stronger content signal.
     """
 
-    similarity: float = 0.42
-    sparse_positive: float = 0.40
+    similarity: float = 0.2
+    sparse_positive: float = 0.6
     sparse_negative: float = 0.12
     hidden_gem: float = 1.0
     cold_popularity: float = 1.0
+    # Popularity prior for established users, applied to the popularity
+    # *percentile within the candidate pool* (scale-free across TMDb and other
+    # sources). Off by default on purpose: on MovieLens 0.2 raised recall@20
+    # a further ~70% but dropped novelty to ~0.04 — close to recommending the
+    # charts, which defeats a discovery product. Kept as a documented knob.
+    warm_popularity: float = 0.0
 
 
 DEFAULT_WEIGHTS = RankingWeights()
@@ -353,6 +362,10 @@ def rank_titles(
         dtype=np.float64,
     )
     prior = np.minimum(popularity / 200.0, 0.22) if cold else np.zeros(n)
+    warm_prior = np.zeros(n)
+    if not cold and weights.warm_popularity and n > 1:
+        # Rank-based percentile: 1.0 for the most popular candidate, 0.0 for the least.
+        warm_prior = np.argsort(np.argsort(popularity, kind="stable"), kind="stable") / (n - 1)
 
     scores = (
         weights.similarity * similarity
@@ -360,6 +373,7 @@ def rank_titles(
         - weights.sparse_negative * negative
         + weights.hidden_gem * gems
         + weights.cold_popularity * prior
+        + weights.warm_popularity * warm_prior
     )
     order = [int(i) for i in np.argsort(-scores, kind="stable")]
 

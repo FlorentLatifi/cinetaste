@@ -49,3 +49,6 @@ redis_data/
 *.pem
 auth.json
 .secrets/
+
+# Evaluation datasets (MovieLens may not be redistributed)
+data/
