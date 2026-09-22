@@ -16,7 +16,7 @@ pgvector==0.4.1
 numpy==2.5.1
 
 # Cache
-redis==5.2.1
+redis==8.1.0
 
 # Security
 bcrypt==4.0.1
