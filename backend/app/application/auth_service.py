@@ -17,6 +17,7 @@ from app.core.security import (
     hash_token,
     verify_password_async,
 )
+from app.core.throttle import guard_identity, record_attempt
 from app.domain.exceptions import AppError, ConflictError, UnauthorizedError
 from app.infrastructure.db.models.user import PasswordResetToken, RefreshToken, User
 from app.infrastructure.email import EmailSender, get_email_sender
@@ -56,14 +57,23 @@ class AuthService:
 
     async def login(self, *, email: str, password: str) -> tuple[User, str, str]:
         normalized = email.strip().lower()
+        # Throttle per account as well as per IP: the IP key is only as honest
+        # as the proxy chain, and this one also covers attempts spread over
+        # many addresses. Checked before the lookup so an exhausted budget
+        # answers identically whether or not the account exists.
+        await guard_identity(normalized, scope="login", settings=self._settings)
+
         user = await self._session.scalar(select(User).where(User.email == normalized))
         if user is None:
             # Same cost as a real check, so response time doesn't reveal accounts.
             await burn_password_check(password)
+            await record_attempt(normalized, scope="login", settings=self._settings)
             raise UnauthorizedError("Invalid email or password", code="invalid_credentials")
         if not await verify_password_async(password, user.password_hash):
+            await record_attempt(normalized, scope="login", settings=self._settings)
             raise UnauthorizedError("Invalid email or password", code="invalid_credentials")
 
+        # Only failures are counted, so an active user is never locked out.
         access, refresh, _row_id = await self._issue_tokens(user)
         return user, access, refresh
 
@@ -156,6 +166,13 @@ class AuthService:
             )
 
         normalized = email.strip().lower()
+        # Every request counts here, not just failures: the abuse is mailing a
+        # real address repeatedly, which from the server's side looks like
+        # success. Guard and count before the lookup so the behaviour is
+        # identical for registered and unregistered addresses.
+        await guard_identity(normalized, scope="reset", settings=self._settings)
+        await record_attempt(normalized, scope="reset", settings=self._settings)
+
         user = await self._session.scalar(select(User).where(User.email == normalized))
         if user is None:
             return None
