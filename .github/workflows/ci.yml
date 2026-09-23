@@ -141,7 +141,7 @@ jobs:
           docker rm -f api
 
   frontend:
-    name: Frontend (typecheck, build, a11y)
+    name: Frontend (typecheck, unit, build, a11y)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -158,6 +158,11 @@ jobs:
 
       - name: Install
         run: npm ci
+
+      # Before the build: a broken pure function should fail in two seconds,
+      # not after Playwright has downloaded a browser.
+      - name: Unit tests + coverage gate
+        run: npm run test:coverage
 
       - name: Build (typecheck + bundle)
         run: npm run build

@@ -4,9 +4,40 @@ Three layers, each answering a different question.
 
 | Layer | Count | Question | Needs |
 |---|---|---|---|
-| Unit (`backend/tests/*.py`) | 203 | Is the logic right? | nothing |
-| Integration (`backend/tests/integration/`) | 17 | Do the API, migrations and database agree? | Postgres + pgvector |
+| Unit — backend (`backend/tests/*.py`) | 219 | Is the logic right? | nothing |
+| Unit — frontend (`frontend/src/**/*.test.ts`) | 68 | Do the pure functions hold? | nothing |
+| Integration (`backend/tests/integration/`) | 20 | Do the API, migrations and database agree? | Postgres + pgvector |
 | End-to-end (`frontend/e2e/`) | 40 | Does the app work in a browser, accessibly? | built SPA |
+
+## Coverage
+
+Backend 84%, gated in CI two ways: `--cov-fail-under=80` on the total, and
+`backend/tools/coverage_gate.py` on each package, because a total is easy to
+hold up with well-covered trivia while ranking and taste quietly rot.
+
+One setting makes those numbers mean anything. SQLAlchemy's async layer runs
+database work inside greenlets, and coverage does not follow a greenlet switch
+unless `concurrency` says so — without it the report called the whole body of
+the interactions endpoint dead code while the test driving it passed. It is set
+in `backend/pyproject.toml`; do not remove it.
+
+Frontend unit coverage is scoped to the pure-logic modules (`vite.config.ts`),
+since components and pages are the e2e suite's job and blending the two would
+make one number mean neither.
+
+## The test database
+
+The integration suite TRUNCATEs every table, so it must never point at the
+database the dev server uses. `tests/conftest.py` rewrites `DATABASE_URL` to
+`<name>_test` before anything imports the app, and the integration fixtures
+refuse outright to run against a name that does not end in `_test`.
+`docker compose up db` creates `cinetaste_test` alongside the dev database on a
+fresh volume; if your volume predates that, create it by hand:
+
+```bash
+docker compose exec db psql -U cinetaste -d postgres -c "CREATE DATABASE cinetaste_test OWNER cinetaste"
+docker compose exec db psql -U cinetaste -d cinetaste_test -c "CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS pg_trgm;"
+```
 
 ## Running
 
