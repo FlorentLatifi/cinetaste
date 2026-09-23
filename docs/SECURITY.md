@@ -149,6 +149,11 @@ every account with no path to recovery.
 took an email address would mail anyone on request and confirm which addresses
 are registered.
 
+The SPA handles the `403 email_not_verified` rather than showing it: the router
+sends the user to the account page, which is the only place the state can be
+resolved and whose own calls are not gated. A flag that produces a dead end is
+a flag nobody will turn on.
+
 ## Secrets
 
 No secret has ever been committed: the full git history was scanned for JWT,

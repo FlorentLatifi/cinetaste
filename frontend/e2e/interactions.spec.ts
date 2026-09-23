@@ -400,3 +400,20 @@ test("Verify email: a link with no token says so", async ({ page }) => {
 
   await expect(page.getByRole("alert")).toContainText(/missing its token/i);
 });
+
+test("Enforced verification: a gated page sends the user somewhere they can fix it", async ({
+  page,
+}) => {
+  // A bare 403 on For You would be a dead end — /account has the resend button.
+  await installApiMock(page, {
+    onboardingComplete: true,
+    emailUnverified: true,
+    verificationEnforced: true,
+  });
+  await page.goto("/history");
+
+  await expect(page).toHaveURL(/\/account$/);
+  await expect(
+    page.getByRole("button", { name: "Send confirmation link" }),
+  ).toBeVisible();
+});

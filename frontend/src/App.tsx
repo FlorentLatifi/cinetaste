@@ -1,5 +1,5 @@
 import { lazy, Suspense, type ReactNode } from "react";
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { useAuth } from "./features/auth/AuthContext";
 import { AppShell } from "./components/AppShell";
 import { ErrorBoundary } from "./components/ErrorBoundary";
@@ -43,7 +43,8 @@ function RouteFallback() {
 }
 
 function Protected({ children }: { children: ReactNode }) {
-  const { user, loading } = useAuth();
+  const { user, loading, emailVerificationRequired } = useAuth();
+  const { pathname } = useLocation();
   if (loading) {
     return (
       <div className="center-screen">
@@ -52,6 +53,11 @@ function Protected({ children }: { children: ReactNode }) {
     );
   }
   if (!user) return <Navigate to="/login" replace />;
+  // The server is enforcing email verification. /account is the only page
+  // that can resolve it, and none of its calls are gated, so no loop.
+  if (emailVerificationRequired && pathname !== "/account") {
+    return <Navigate to="/account" replace />;
+  }
   return children;
 }
 
@@ -70,7 +76,7 @@ function GuestOnly({ children }: { children: ReactNode }) {
 
 /** Guests see marketing landing; signed-in users see immersive For You. */
 function RootRoute() {
-  const { user, loading } = useAuth();
+  const { user, loading, emailVerificationRequired } = useAuth();
   if (loading) {
     return (
       <div className="center-screen">
@@ -79,6 +85,7 @@ function RootRoute() {
     );
   }
   if (!user) return <LandingPage />;
+  if (emailVerificationRequired) return <Navigate to="/account" replace />;
   return (
     <AppShell>
       <Suspense fallback={<RouteFallback />}>

@@ -6,7 +6,7 @@ Three layers, each answering a different question.
 |---|---|---|---|
 | Unit (`backend/tests/*.py`) | 203 | Is the logic right? | nothing |
 | Integration (`backend/tests/integration/`) | 17 | Do the API, migrations and database agree? | Postgres + pgvector |
-| End-to-end (`frontend/e2e/`) | 39 | Does the app work in a browser, accessibly? | built SPA |
+| End-to-end (`frontend/e2e/`) | 40 | Does the app work in a browser, accessibly? | built SPA |
 
 ## Running
 

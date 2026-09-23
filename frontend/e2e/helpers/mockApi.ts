@@ -73,6 +73,8 @@ export async function installApiMock(
     emailUnverified?: boolean;
     /** Force POST /auth/verify-email to fail (expired or reused link). */
     verifyEmailFails?: boolean;
+    /** Server enforces REQUIRE_EMAIL_VERIFICATION: gated routes answer 403. */
+    verificationEnforced?: boolean;
   } = {},
 ): Promise<ApiMockHandle> {
   const onboardingComplete = opts.onboardingComplete !== false;
@@ -112,6 +114,27 @@ export async function installApiMock(
 
     if (method === "POST" && path === "/auth/logout") {
       await route.fulfill({ status: 204, body: "" });
+      return;
+    }
+
+    // Gated product routes when the deployment requires a confirmed address.
+    // /me, /me/taste and the auth routes stay open, which is what lets the
+    // account page still work.
+    if (
+      opts.verificationEnforced &&
+      !path.startsWith("/auth/") &&
+      path !== "/me" &&
+      path !== "/me/taste"
+    ) {
+      await route.fulfill(
+        json(
+          {
+            message: "Confirm your email address to use CineTaste.",
+            code: "email_not_verified",
+          },
+          403,
+        ),
+      );
       return;
     }
 
