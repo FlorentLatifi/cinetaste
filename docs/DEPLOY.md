@@ -126,6 +126,9 @@ because that is where reset links point.
 Frontend must call the API with `credentials: "include"`.
 
 > **Why the proxy matters.** Pointing the SPA straight at
+> Three things depend on this one setting: the refresh cookie stays
+> first-party, the CSP can keep `connect-src 'self'`, and CORS stays a
+> single explicit origin. Setting it to
 > `https://your-api.onrender.com` makes `ct_refresh` a third-party cookie.
 > Safari (and Firefox, partitioned) blocks those, so session restore fails and
 > users are logged out on every reload. `frontend/vercel.json` rewrites
@@ -430,9 +433,12 @@ Repo file: **`render.staging.yaml`** (distinct service names from production `re
 4. **Vercel:** create a **second project** or a production branch alias  
    (e.g. `cinetaste-staging` → `https://cinetaste-staging.vercel.app`).  
    Avoid relying on one-off Preview URLs for CORS (`https://*.vercel.app` is not valid).  
-5. Vercel env for that project:  
-   `VITE_API_BASE_URL=https://cinetaste-api-staging.onrender.com/api/v1`  
-   (adjust host to whatever Render assigned).  
+5. Vercel env for that project — same relative base URL as production:  
+   `VITE_API_BASE_URL=/api/v1`  
+   and point the rewrite in that project's `frontend/vercel.json` at the
+   staging API host. An absolute cross-origin URL here would make
+   `ct_refresh` third-party (Safari drops it) **and** be blocked by the
+   SPA's `connect-src 'self'`.  
 6. Smoke the soft-launch path (§6b) against staging before promoting to production.  
 7. **Never** share production `DATABASE_URL` or `JWT_SECRET` with staging.
 
