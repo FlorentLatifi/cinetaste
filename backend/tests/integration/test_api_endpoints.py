@@ -299,3 +299,90 @@ async def test_verify_email_rejects_a_forged_token(client: AsyncClient, api_pref
     )
     assert res.status_code == 400
     assert res.json()["code"] == "invalid_verification_token"
+
+
+async def test_bad_bearer_tokens_are_all_401(client: AsyncClient, api_prefix: str) -> None:
+    """Only the *missing* header was covered; these are the shapes an attacker sends."""
+    from datetime import UTC, datetime, timedelta
+
+    import jwt
+
+    from app.core.config import get_settings
+
+    settings = get_settings()
+    now = datetime.now(UTC)
+
+    def token(**overrides) -> str:
+        payload = {
+            "sub": str(uuid4()),
+            "type": "access",
+            "iat": now,
+            "exp": now + timedelta(minutes=15),
+        }
+        payload.update(overrides)
+        return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
+
+    cases = {
+        "no header": None,
+        "not bearer": "Basic abc123",
+        "bearer with nothing": "Bearer ",
+        "not a jwt": "Bearer not-a-jwt-at-all",
+        "expired": f"Bearer {token(iat=now - timedelta(hours=2), exp=now - timedelta(hours=1))}",
+        "signed with another key": "Bearer "
+        + jwt.encode({"sub": str(uuid4()), "type": "access"}, "a-different-secret-entirely-and-long-enough-for-hs256"),
+        # A refresh token presented as an access token must not be accepted.
+        "wrong token type": f"Bearer {token(type='refresh')}",
+        "sub is not a uuid": f"Bearer {token(sub='not-a-uuid')}",
+        "no sub": "Bearer "
+        + jwt.encode(
+            {"type": "access", "iat": now, "exp": now + timedelta(minutes=5)},
+            settings.jwt_secret,
+            algorithm=settings.jwt_algorithm,
+        ),
+    }
+
+    for label, header in cases.items():
+        res = await client.get(f"{api_prefix}/me", headers={"Authorization": header} if header else {})
+        assert res.status_code == 401, f"{label} -> {res.status_code}: {res.text}"
+        # Same wording every time: the response must not say which check failed.
+        assert res.json()["code"] == "unauthorized", label
+
+
+async def test_a_valid_token_for_a_deleted_user_is_401(client: AsyncClient, api_prefix: str) -> None:
+    """get_current_user reloads the row, so deletion revokes immediately."""
+    user = await _register(client, api_prefix)
+    gone = await client.request(
+        "DELETE",
+        f"{api_prefix}/me",
+        headers=_auth(user),
+        json={"password": PASSWORD, "confirm": "DELETE"},
+    )
+    assert gone.status_code == 204
+
+    stale = await client.get(f"{api_prefix}/me", headers=_auth(user))
+    assert stale.status_code == 401
+
+
+async def test_ready_reports_whether_the_catalog_is_usable(
+    client: AsyncClient, db_session: AsyncSession, api_prefix: str
+) -> None:
+    """Deploy is ingest *then* re-embed. Skipping the second step used to be invisible."""
+    from sqlalchemy import update
+
+    from app.infrastructure.db.models.catalog import Title
+
+    empty = await client.get(f"{api_prefix}/ready")
+    assert empty.status_code == 200
+    assert empty.json()["catalog"] == "empty"
+
+    await seed_catalog(db_session, count=10)
+    seeded = await client.get(f"{api_prefix}/ready")
+    assert seeded.json()["catalog"] == "ok"
+
+    # Exactly what a failed or skipped reembed_catalog leaves behind.
+    await db_session.execute(update(Title).values(embedding=None))
+    await db_session.commit()
+
+    unembedded = await client.get(f"{api_prefix}/ready")
+    assert unembedded.status_code == 200, "an unembedded catalog is not a reason to drain traffic"
+    assert unembedded.json()["catalog"] == "unembedded"

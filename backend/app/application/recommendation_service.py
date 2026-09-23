@@ -152,6 +152,17 @@ class RecommendationService:
         user_features, explain_memory = strip_explain_memory(raw_features)
 
         titles = await self._load_candidates(user_vector=user_vector, exclude_ids=exclude_ids)
+        if titles and not any(t.embedding is not None for t in titles):
+            # Ranking drops every title whose embedding is NULL, so this returns
+            # an empty slate with a 200 and no other sign that anything is
+            # wrong. It means ingest ran and re-embed did not.
+            logger.warning(
+                "slate_candidates_unembedded user_id=%s candidates=%d — "
+                "For You will be empty; run: python -m app.scripts.reembed_catalog",
+                user_id,
+                len(titles),
+            )
+
         # Ranking is CPU work (numpy + Python); keep it off the event loop.
         ranked = await to_thread.run_sync(
             partial(

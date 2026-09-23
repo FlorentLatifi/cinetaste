@@ -133,6 +133,33 @@ def accumulate_features(
     return {k: v for k, v in acc.items() if abs(v) > 0.05}
 
 
+@pytest.fixture(autouse=True)
+def isolated_cache(request: pytest.FixtureRequest):
+    """Give every unit test its own empty cache and rate-limit store.
+
+    Otherwise they share whatever REDIS_URL points at, and a slate cached by an
+    earlier run is served to a later one — which is how a test asserting an
+    empty For You quietly passed for the wrong reason, then failed when the log
+    it was actually checking never appeared.
+
+    Integration tests are left alone: they exercise the real store on purpose
+    and clear it through their own fixture.
+    """
+    if request.node.get_closest_marker("integration"):
+        yield
+        return
+
+    from app.infrastructure import cache
+
+    previous = (cache._store, cache._rate_limit_store)
+    cache._store = cache.MemoryStore()
+    cache._rate_limit_store = cache.MemoryStore()
+    try:
+        yield
+    finally:
+        cache._store, cache._rate_limit_store = previous
+
+
 @pytest.fixture
 def thriller_catalog() -> list[FakeTitle]:
     """Small diverse catalog for ranking tests."""
