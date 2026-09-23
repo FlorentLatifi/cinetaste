@@ -43,8 +43,11 @@ export function VerifyEmailPage() {
         const verified = await authApi.verifyEmail(token);
         if (cancelled) return;
         setState({ status: "done", email: verified.email });
-        // Refresh the cached user so the account page stops prompting.
-        if (user) await refreshUser().catch(() => undefined);
+        // Refresh the cached user so the account page stops prompting. Safe to
+        // call unconditionally: with no refresh cookie it returns early, and
+        // reading `user` here would capture whatever the bootstrap had not
+        // finished loading yet.
+        await refreshUser().catch(() => undefined);
       } catch (err) {
         if (cancelled) return;
         setState({
@@ -60,9 +63,8 @@ export function VerifyEmailPage() {
     return () => {
       cancelled = true;
     };
-    // Runs once for the token in the URL.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token]);
+    // `attempted` guards against a re-run; the token is the only real input.
+  }, [token, refreshUser]);
 
   return (
     <div className="auth-layout">
