@@ -58,7 +58,6 @@ export type Reason = {
   /** User-facing explanation sentence. */
   message: string;
   /** Optional structured support (liked_titles, directors, tones, …). */
-  evidence: Record<string, unknown>;
 };
 
 export type RecommendationItem = {
