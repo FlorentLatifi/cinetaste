@@ -28,6 +28,18 @@ function notifySessionExpired() {
 }
 
 /**
+ * Called when the server requires a confirmed email address and this one is
+ * not. Only fires where REQUIRE_EMAIL_VERIFICATION is on. Without it the
+ * user would get a bare error on a page they cannot fix anything from.
+ */
+type EmailUnverifiedHandler = () => void;
+let emailUnverifiedHandler: EmailUnverifiedHandler | null = null;
+
+export function setEmailUnverifiedHandler(handler: EmailUnverifiedHandler | null) {
+  emailUnverifiedHandler = handler;
+}
+
+/**
  * Single-flight refresh: concurrent 401s *and* session restore on load share
  * one /auth/refresh call. Two calls with the same cookie would look like token
  * reuse to the server, which revokes the whole session family.
@@ -97,6 +109,9 @@ export async function apiFetch<T>(
   const data = await response.json().catch(() => ({}));
 
   if (!response.ok) {
+    if (response.status === 403 && data.code === "email_not_verified") {
+      emailUnverifiedHandler?.();
+    }
     const err = new ApiError(
       response.status,
       typeof data.code === "string" ? data.code : "error",

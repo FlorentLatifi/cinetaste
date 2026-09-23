@@ -21,6 +21,17 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(320), unique=True, index=True, nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     display_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    # Set on every password change. Access tokens are stateless, so this is
+    # what lets us reject ones minted before the change (see api.deps).
+    # NULL = never changed since registration.
+    password_changed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # NULL until the address is proven. Nothing is gated on it unless
+    # REQUIRE_EMAIL_VERIFICATION is on — see api.deps.get_verified_user.
+    email_verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     onboarding_completed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
@@ -38,6 +49,9 @@ class User(Base):
         back_populates="user", cascade="all, delete-orphan"
     )
     password_reset_tokens: Mapped[list[PasswordResetToken]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+    email_verification_tokens: Mapped[list[EmailVerificationToken]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
     taste_profile: Mapped[TasteProfile | None] = relationship(
@@ -87,3 +101,26 @@ class PasswordResetToken(Base):
     )
 
     user: Mapped[User] = relationship(back_populates="password_reset_tokens")
+
+
+class EmailVerificationToken(Base):
+    """One-time email-ownership proof (store hash only).
+
+    Same shape as PasswordResetToken and for the same reason: whoever reads the
+    table must not be able to turn a row back into a working link.
+    """
+
+    __tablename__ = "email_verification_tokens"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    user: Mapped[User] = relationship(back_populates="email_verification_tokens")

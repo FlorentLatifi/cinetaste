@@ -14,6 +14,11 @@ html[data-theme="light"] .account-tab.active { border-color: rgba(154, 107, 47, 
 .account-card input, .account-card select { appearance: none; border: 1px solid var(--border); background: var(--bg-soft); color: var(--text); border-radius: 12px; padding: 0.7rem 0.85rem; font: inherit; }
 .account-card-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
 
+/* Email-confirmation prompt on the Profile tab. */
+.meta-note { color: var(--muted); font-size: 0.85rem; }
+.account-inline-notice { display: flex; flex-direction: column; align-items: flex-start; gap: 0.6rem; padding: 0.85rem 1rem; border-radius: 12px; border: 1px solid rgba(232, 194, 122, 0.22); background: rgba(232, 194, 122, 0.06); }
+.account-inline-notice .lede { margin: 0; font-size: 0.9rem; }
+
 .contrast-choice { display: flex; flex-direction: column; gap: 0.4rem; font-size: 0.9rem; color: var(--muted); max-width: 16rem; }
 
 .taste-block { display: flex; flex-direction: column; gap: 0.45rem; }

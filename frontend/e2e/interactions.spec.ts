@@ -359,3 +359,61 @@ test("Title detail: Watched opens rate panel", async ({ page }) => {
   await page.getByRole("button", { name: `Rate ${mockTitle.name}: Really liked it` }).click();
   await expect(page.getByText(`Really liked it · ${mockTitle.name}`)).toBeVisible();
 });
+
+test("Account: unconfirmed email offers a confirmation link", async ({ page }) => {
+  await installApiMock(page, { onboardingComplete: true, emailUnverified: true });
+  await page.goto("/account");
+
+  await expect(page.getByText("· not confirmed")).toBeVisible();
+  await page.getByRole("button", { name: "Send confirmation link" }).click();
+  await expect(page.getByRole("status")).toContainText(/verification link has been sent/i);
+});
+
+test("Account: a confirmed email shows no prompt", async ({ page }) => {
+  await installApiMock(page, { onboardingComplete: true });
+  await page.goto("/account");
+
+  await expect(page.getByText("· confirmed")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Send confirmation link" }),
+  ).toHaveCount(0);
+});
+
+test("Verify email: a good link confirms the address", async ({ page }) => {
+  await installApiMock(page, { onboardingComplete: true, emailUnverified: true });
+  await page.goto("/verify-email?token=a-valid-looking-token-value");
+
+  await expect(page.getByRole("heading", { name: "Email confirmed" })).toBeVisible();
+});
+
+test("Verify email: an expired link explains itself", async ({ page }) => {
+  await installApiMock(page, { onboardingComplete: true, verifyEmailFails: true });
+  await page.goto("/verify-email?token=a-stale-token-value-here");
+
+  await expect(page.getByRole("heading", { name: "That link did not work" })).toBeVisible();
+  await expect(page.getByRole("alert")).toContainText(/expired/i);
+});
+
+test("Verify email: a link with no token says so", async ({ page }) => {
+  await installApiMock(page, { onboardingComplete: true });
+  await page.goto("/verify-email");
+
+  await expect(page.getByRole("alert")).toContainText(/missing its token/i);
+});
+
+test("Enforced verification: a gated page sends the user somewhere they can fix it", async ({
+  page,
+}) => {
+  // A bare 403 on For You would be a dead end — /account has the resend button.
+  await installApiMock(page, {
+    onboardingComplete: true,
+    emailUnverified: true,
+    verificationEnforced: true,
+  });
+  await page.goto("/history");
+
+  await expect(page).toHaveURL(/\/account$/);
+  await expect(
+    page.getByRole("button", { name: "Send confirmation link" }),
+  ).toBeVisible();
+});

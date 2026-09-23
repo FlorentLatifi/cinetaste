@@ -44,7 +44,9 @@ class Settings(BaseSettings):
     jwt_secret: str = Field(min_length=32)
     jwt_access_ttl_minutes: int = 15
     jwt_refresh_ttl_days: int = 30
-    jwt_algorithm: str = "HS256"
+    # Restricted on purpose: a free-form string would let a deploy select an
+    # algorithm the signing key was never meant for.
+    jwt_algorithm: Literal["HS256", "HS384", "HS512"] = "HS256"
     # A refresh token presented again within this many seconds of being rotated
     # (two tabs, a double-fired effect) gets a sibling token instead of being
     # treated as theft, which would revoke the whole session family.
@@ -84,6 +86,11 @@ class Settings(BaseSettings):
     rate_limit_window_seconds: int = 60
     rate_limit_auth_requests: int = 20
     rate_limit_auth_window_seconds: int = 60
+    # Per-account throttle for login and password reset. Keyed by the email
+    # in the request, not the source IP, so it still holds when the caller
+    # controls X-Forwarded-For or spreads attempts across many addresses.
+    rate_limit_account_failures: int = 10
+    rate_limit_account_window_seconds: int = 900
 
     # Comma-separated hostnames allowed in production (optional)
     trusted_hosts: str = ""
@@ -106,6 +113,11 @@ class Settings(BaseSettings):
 
     # Password reset (token TTL). Real email delivery is optional for MVP.
     password_reset_ttl_minutes: int = 60
+    # Email verification. Off by default: turning it on without working SMTP
+    # would lock every account out, so validate_production_safety refuses
+    # that combination rather than letting it reach users.
+    email_verification_ttl_hours: int = 48
+    require_email_verification: bool = False
     # Public frontend origin used to build reset links in logs (dev/staging).
     public_app_url: str = "http://localhost:5173"
 
@@ -189,11 +201,25 @@ class Settings(BaseSettings):
         if not self.cors_origin_list:
             raise ValueError("CORS_ORIGINS must be set in production")
 
+        if "*" in self.cors_origin_list:
+            # Starlette answers a credentialed request by echoing the caller's
+            # Origin when allow_origins is "*", so any site could read
+            # authenticated responses. Explicit origins only.
+            raise ValueError(
+                "CORS_ORIGINS must list explicit origins in production — "
+                "'*' together with credentials lets any site read authenticated responses"
+            )
+
         if any("localhost" in o or "127.0.0.1" in o for o in self.cors_origin_list):
             raise ValueError("CORS_ORIGINS must not include localhost in production")
 
         if self.database_url.startswith("postgresql+asyncpg://cinetaste:cinetaste@"):
             raise ValueError("Default local DATABASE_URL credentials are not allowed in production")
+
+        if self.require_email_verification and not self.email_configured:
+            raise ValueError(
+                "REQUIRE_EMAIL_VERIFICATION needs SMTP_* configured — without it nobody can verify, and every account is locked out"
+            )
 
         if self.email_configured and (
             not self.public_app_url.startswith("https://") or "localhost" in self.public_app_url

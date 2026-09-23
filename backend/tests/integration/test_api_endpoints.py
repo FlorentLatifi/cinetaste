@@ -39,6 +39,16 @@ async def test_validation_errors_share_the_error_shape(client: AsyncClient, api_
 
 async def test_password_reset_flow_in_test_env(client: AsyncClient, api_prefix: str) -> None:
     user = await _register(client, api_prefix)
+    # Access token minted before the reset — the one an attacker would be holding.
+    assert (await client.get(f"{api_prefix}/me", headers=_auth(user))).status_code == 200
+
+    # A JWT's `iat` is whole seconds, and the cut-off is compared at the same
+    # resolution on purpose: a token minted in the *same* second as the change
+    # has to survive, or a user who logs in right after resetting is bounced
+    # straight back out. So the reset has to land in a later second than the
+    # token above for this test to be testing anything. Do not delete the wait.
+    await asyncio.sleep(1.1)
+
     forgot = await client.post(f"{api_prefix}/auth/forgot-password", json={"email": user["email"]})
     assert forgot.status_code == 200
     token = forgot.json()["dev_reset_token"]
@@ -48,6 +58,12 @@ async def test_password_reset_flow_in_test_env(client: AsyncClient, api_prefix: 
         f"{api_prefix}/auth/reset-password", json={"token": token, "new_password": "brand-new-pass-1"}
     )
     assert reset.status_code == 204
+
+    # Revoking refresh tokens is not enough: an access token is stateless and
+    # would otherwise keep working for the rest of its TTL after the victim
+    # thought they had locked the attacker out.
+    stale = await client.get(f"{api_prefix}/me", headers=_auth(user))
+    assert stale.status_code == 401
     reused = await client.post(
         f"{api_prefix}/auth/reset-password", json={"token": token, "new_password": "another-pass-22"}
     )
@@ -243,3 +259,43 @@ async def test_delete_account(client: AsyncClient, api_prefix: str) -> None:
     assert ok.status_code == 204
     gone = await client.get(f"{api_prefix}/me", headers=headers)
     assert gone.status_code == 401
+
+
+async def test_email_verification_flow(client: AsyncClient, api_prefix: str) -> None:
+    """Register -> request a link -> consume it -> the account is stamped."""
+    user = await _register(client, api_prefix)
+
+    me = await client.get(f"{api_prefix}/me", headers=_auth(user))
+    assert me.status_code == 200
+    assert me.json()["email_verified_at"] is None
+
+    issued = await client.post(f"{api_prefix}/auth/resend-verification", headers=_auth(user))
+    assert issued.status_code == 200, issued.text
+    token = issued.json()["dev_verification_token"]
+    assert token
+
+    verified = await client.post(f"{api_prefix}/auth/verify-email", json={"token": token})
+    assert verified.status_code == 200, verified.text
+    assert verified.json()["email_verified_at"] is not None
+
+    # Single use: the same link must not work twice.
+    replayed = await client.post(f"{api_prefix}/auth/verify-email", json={"token": token})
+    assert replayed.status_code == 400
+    assert replayed.json()["code"] == "invalid_verification_token"
+
+    # And the account stays verified.
+    me_again = await client.get(f"{api_prefix}/me", headers=_auth(user))
+    assert me_again.json()["email_verified_at"] is not None
+
+    # Asking again for an address that is already confirmed is a conflict, not
+    # another email.
+    again = await client.post(f"{api_prefix}/auth/resend-verification", headers=_auth(user))
+    assert again.status_code == 409
+
+
+async def test_verify_email_rejects_a_forged_token(client: AsyncClient, api_prefix: str) -> None:
+    res = await client.post(
+        f"{api_prefix}/auth/verify-email", json={"token": "n" * 40}
+    )
+    assert res.status_code == 400
+    assert res.json()["code"] == "invalid_verification_token"

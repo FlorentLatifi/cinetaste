@@ -5,6 +5,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.api.schemas.common import StrictModel
+
 
 class GenreOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -142,7 +144,7 @@ class RecommendationSlateOut(BaseModel):
     )
 
 
-class InteractionRequest(BaseModel):
+class InteractionRequest(StrictModel):
     """Record a title interaction.
 
     Weights and taste effects: ``docs/TASTE_SIGNALS.md`` and
@@ -166,7 +168,7 @@ class InteractionRequest(BaseModel):
     )
 
 
-class OnboardingReaction(BaseModel):
+class OnboardingReaction(StrictModel):
     """One card decision during onboarding.
 
     Policy (docs/TASTE_SIGNALS.md):
@@ -185,7 +187,7 @@ class OnboardingReaction(BaseModel):
     )
 
 
-class OnboardingCompleteRequest(BaseModel):
+class OnboardingCompleteRequest(StrictModel):
     reactions: list[OnboardingReaction] = Field(min_length=1, max_length=80)
 
 

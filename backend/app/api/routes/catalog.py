@@ -3,7 +3,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
 
-from app.api.deps import CurrentUser, DbSession, get_settings_dep
+from app.api.deps import CurrentUser, DbSession, VerifiedUser, get_settings_dep
 from app.api.schemas.titles import CatalogStatusOut
 from app.application.catalog_ingest import CatalogIngestService
 from app.core.config import Settings
@@ -16,7 +16,7 @@ router = APIRouter(prefix="/catalog")
 
 @router.get("/status", response_model=CatalogStatusOut)
 async def catalog_status(
-    user: CurrentUser,
+    user: VerifiedUser,
     session: DbSession,
 ) -> CatalogStatusOut:
     total = await session.scalar(select(func.count()).select_from(Title)) or 0

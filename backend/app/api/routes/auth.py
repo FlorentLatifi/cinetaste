@@ -2,7 +2,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Request, Response, status
 
-from app.api.deps import get_auth_service, get_settings_dep
+from app.api.deps import CurrentUser, get_auth_service, get_settings_dep
 from app.api.schemas.auth import (
     ForgotPasswordRequest,
     ForgotPasswordResponse,
@@ -10,9 +10,11 @@ from app.api.schemas.auth import (
     LogoutRequest,
     RefreshRequest,
     RegisterRequest,
+    ResendVerificationResponse,
     ResetPasswordRequest,
     TokenResponse,
     UserResponse,
+    VerifyEmailRequest,
 )
 from app.application.auth_service import AuthService
 from app.core.config import Settings
@@ -117,3 +119,27 @@ async def reset_password(
     auth: Annotated[AuthService, Depends(get_auth_service)],
 ) -> None:
     await auth.reset_password(token=body.token, new_password=body.new_password)
+
+
+@router.post("/verify-email", response_model=UserResponse)
+async def verify_email(
+    body: VerifyEmailRequest,
+    auth: Annotated[AuthService, Depends(get_auth_service)],
+) -> UserResponse:
+    """Consume a verification link. Unauthenticated: the link is the proof."""
+    user = await auth.verify_email(token=body.token)
+    return UserResponse.model_validate(user)
+
+
+@router.post("/resend-verification", response_model=ResendVerificationResponse)
+async def resend_verification(
+    user: CurrentUser,
+    auth: Annotated[AuthService, Depends(get_auth_service)],
+) -> ResendVerificationResponse:
+    """Re-issue the link for the signed-in account.
+
+    Authenticated on purpose: an open endpoint taking an email would mail
+    anyone on request, and would confirm which addresses are registered.
+    """
+    dev_token = await auth.request_email_verification(user)
+    return ResendVerificationResponse(dev_verification_token=dev_token)

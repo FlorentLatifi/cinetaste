@@ -5,6 +5,12 @@ on:
     branches: [master, main]
   pull_request:
 
+# Least privilege for GITHUB_TOKEN: this workflow only reads the repo.
+# Without the block it inherits the repository default, which on personal
+# repos is often read/write — handed to every dependency update PR.
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true

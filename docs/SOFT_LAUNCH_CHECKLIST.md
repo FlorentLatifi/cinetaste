@@ -5,10 +5,17 @@ Use this before inviting friends-and-family users. Frontend polish through Wave 
 ## 1. Infrastructure
 
 - [ ] Staging API up (`render.staging.yaml` or equivalent)
-- [ ] Staging SPA points at staging API (`VITE_API_BASE_URL`)
+- [ ] Staging SPA uses `VITE_API_BASE_URL=/api/v1` with the `vercel.json`
+      rewrite pointed at the staging API — an absolute cross-origin URL
+      breaks the refresh cookie on Safari *and* the SPA's `connect-src`
 - [ ] Production secrets set: `JWT_SECRET`, `CORS_ORIGINS`, `TMDB_API_KEY`
+- [ ] `TRUSTED_HOSTS` lists every host the API is reached by — a missing one
+      answers 400, so set it before pointing DNS at a new domain
+- [ ] `curl -sI <api>/api/v1/health | grep -i strict-transport` returns a header
 - [ ] Postgres `vector` extension + migrations applied
-- [ ] Redis reachable (auth rate limits fail closed without it)
+- [ ] Redis reachable **or** `REDIS_URL` empty on purpose — one worker counts
+      in process just as well. (Auth fails closed only when a *configured*
+      store is unreachable, not when there is none.)
 - [ ] Sentry DSN optional but recommended
 
 ## 2. Smoke (manual, 10 minutes)

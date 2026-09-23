@@ -17,8 +17,14 @@ from app.core.security import (
     hash_token,
     verify_password_async,
 )
+from app.core.throttle import guard_identity, record_attempt
 from app.domain.exceptions import AppError, ConflictError, UnauthorizedError
-from app.infrastructure.db.models.user import PasswordResetToken, RefreshToken, User
+from app.infrastructure.db.models.user import (
+    EmailVerificationToken,
+    PasswordResetToken,
+    RefreshToken,
+    User,
+)
 from app.infrastructure.email import EmailSender, get_email_sender
 
 logger = logging.getLogger(__name__)
@@ -51,19 +57,36 @@ class AuthService:
         self._session.add(user)
         await self._session.flush()
 
+        # Best effort: a mail failure must not lose the account the user just
+        # created. They can retry from the account page.
+        if self._settings.email_configured:
+            try:
+                await self.request_email_verification(user)
+            except Exception:  # noqa: BLE001
+                logger.warning("verification_email_failed user_id=%s", user.id, exc_info=True)
+
         access, refresh, _row_id = await self._issue_tokens(user)
         return user, access, refresh
 
     async def login(self, *, email: str, password: str) -> tuple[User, str, str]:
         normalized = email.strip().lower()
+        # Throttle per account as well as per IP: the IP key is only as honest
+        # as the proxy chain, and this one also covers attempts spread over
+        # many addresses. Checked before the lookup so an exhausted budget
+        # answers identically whether or not the account exists.
+        await guard_identity(normalized, scope="login", settings=self._settings)
+
         user = await self._session.scalar(select(User).where(User.email == normalized))
         if user is None:
             # Same cost as a real check, so response time doesn't reveal accounts.
             await burn_password_check(password)
+            await record_attempt(normalized, scope="login", settings=self._settings)
             raise UnauthorizedError("Invalid email or password", code="invalid_credentials")
         if not await verify_password_async(password, user.password_hash):
+            await record_attempt(normalized, scope="login", settings=self._settings)
             raise UnauthorizedError("Invalid email or password", code="invalid_credentials")
 
+        # Only failures are counted, so an active user is never locked out.
         access, refresh, _row_id = await self._issue_tokens(user)
         return user, access, refresh
 
@@ -156,6 +179,13 @@ class AuthService:
             )
 
         normalized = email.strip().lower()
+        # Every request counts here, not just failures: the abuse is mailing a
+        # real address repeatedly, which from the server's side looks like
+        # success. Guard and count before the lookup so the behaviour is
+        # identical for registered and unregistered addresses.
+        await guard_identity(normalized, scope="reset", settings=self._settings)
+        await record_attempt(normalized, scope="reset", settings=self._settings)
+
         user = await self._session.scalar(select(User).where(User.email == normalized))
         if user is None:
             return None
@@ -224,6 +254,10 @@ class AuthService:
             raise AppError("Invalid or expired reset link", status_code=400, code="invalid_reset_token")
 
         user.password_hash = await hash_password_async(new_password)
+        # Revoking refresh tokens below only closes the long-lived door.
+        # Access tokens are stateless and stay valid for their full TTL, so
+        # record the cut-off that api.deps checks them against.
+        user.password_changed_at = now
         stored.used_at = now
 
         await self._session.execute(
@@ -233,6 +267,118 @@ class AuthService:
         )
         await self._session.flush()
 
+
+    # ------------------------------------------------------- email verification
+
+    async def request_email_verification(self, user: User) -> str | None:
+        """Issue a fresh verification link for this account.
+
+        Mirrors the reset flow: with SMTP the link is mailed and nothing is
+        returned; without it, local and test runs get the raw token back so the
+        flow is exercisable, and anywhere else it is a 503 rather than a token
+        handed to whoever asked.
+
+        Any earlier unused token is retired first — a verification link the user
+        already replaced should stop working.
+        """
+        if user.email_verified_at is not None:
+            raise ConflictError("This email is already verified", code="already_verified")
+
+        dev_mode = self._settings.is_dev_like and not self._settings.email_configured
+        if not self._settings.email_configured and not dev_mode:
+            raise AppError(
+                "Email verification is not available on this server.",
+                status_code=503,
+                code="email_unavailable",
+            )
+
+        await guard_identity(user.email, scope="verify", settings=self._settings)
+        await record_attempt(user.email, scope="verify", settings=self._settings)
+
+        await self._session.execute(
+            update(EmailVerificationToken)
+            .where(
+                EmailVerificationToken.user_id == user.id,
+                EmailVerificationToken.used_at.is_(None),
+            )
+            .values(used_at=datetime.now(UTC))
+        )
+
+        raw = secrets.token_urlsafe(32)
+        self._session.add(
+            EmailVerificationToken(
+                user_id=user.id,
+                token_hash=hash_token(raw),
+                expires_at=datetime.now(UTC)
+                + timedelta(hours=self._settings.email_verification_ttl_hours),
+            )
+        )
+        await self._session.flush()
+        logger.info("email_verification_issued user_id=%s", user.id)
+
+        if dev_mode:
+            return raw
+
+        link = f"{self._settings.public_app_url.rstrip('/')}/verify-email?token={raw}"
+        body = (
+            "Hi,\n\n"
+            "Confirm this address to finish setting up your CineTaste account.\n"
+            f"Open this link within {self._settings.email_verification_ttl_hours} hours:\n\n"
+            f"{link}\n\n"
+            "If you did not create an account, you can ignore this email.\n"
+        )
+        try:
+            await self._email.send(
+                to=user.email, subject="Confirm your CineTaste email", text_body=body
+            )
+        except Exception as exc:
+            logger.exception("email_verification_send_failed user_id=%s", user.id)
+            raise AppError(
+                "Could not send the verification email. Try again later.",
+                status_code=503,
+                code="email_unavailable",
+            ) from exc
+        return None
+
+    async def verify_email(self, *, token: str) -> User:
+        """Consume a verification token.
+
+        Every failure answers identically: a caller guessing tokens must not
+        learn whether one existed, had been used, or had merely expired.
+        """
+        stored = await self._session.scalar(
+            select(EmailVerificationToken).where(
+                EmailVerificationToken.token_hash == hash_token(token.strip())
+            )
+        )
+        invalid = AppError(
+            "Invalid or expired verification link",
+            status_code=400,
+            code="invalid_verification_token",
+        )
+        if stored is None or stored.used_at is not None:
+            raise invalid
+
+        now = datetime.now(UTC)
+        expires = stored.expires_at
+        if expires.tzinfo is None:
+            expires = expires.replace(tzinfo=UTC)
+        if expires < now:
+            raise invalid
+
+        user = await self._session.get(User, stored.user_id)
+        if user is None:
+            raise invalid
+
+        stored.used_at = now
+        # Re-verifying is a no-op rather than an error: clicking the link twice
+        # is something people do.
+        if user.email_verified_at is None:
+            user.email_verified_at = now
+        await self._session.flush()
+        logger.info("email_verified user_id=%s", user.id)
+        return user
+
     async def delete_account(self, *, user: User, password: str) -> None:
         """Permanently delete the user and cascaded data (taste, interactions, tokens)."""
         if not await verify_password_async(password, user.password_hash):
@@ -241,6 +387,9 @@ class AuthService:
         await self._session.execute(delete(RefreshToken).where(RefreshToken.user_id == user.id))
         await self._session.execute(
             delete(PasswordResetToken).where(PasswordResetToken.user_id == user.id)
+        )
+        await self._session.execute(
+            delete(EmailVerificationToken).where(EmailVerificationToken.user_id == user.id)
         )
         await self._session.delete(user)
         await self._session.flush()
