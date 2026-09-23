@@ -29,6 +29,7 @@ frontend/dist/
 frontend/.vite/
 frontend/tsconfig.tsbuildinfo
 frontend/test-results/
+frontend/coverage/
 frontend/playwright-report/
 frontend/blob-report/
 frontend/playwright/.cache/
