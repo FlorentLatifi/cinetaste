@@ -5,6 +5,7 @@ export const mockUserComplete = {
   id: "11111111-1111-4111-8111-111111111111",
   email: "a11y@cinetaste.test",
   display_name: "A11y Tester",
+  email_verified_at: "2026-01-02T00:00:00.000Z",
   onboarding_completed_at: "2026-01-15T12:00:00.000Z",
   created_at: "2026-01-01T00:00:00.000Z",
 };
@@ -12,6 +13,12 @@ export const mockUserComplete = {
 export const mockUserNeedsOnboarding = {
   ...mockUserComplete,
   onboarding_completed_at: null,
+};
+
+/** Registered but has not clicked the link in the verification email. */
+export const mockUserUnverified = {
+  ...mockUserComplete,
+  email_verified_at: null,
 };
 
 export const mockTitle = {
@@ -62,10 +69,15 @@ export async function installApiMock(
     sessionDeadOnInteraction?: boolean;
     /** Artificial delay before fulfilling interactions (ms). */
     interactionDelayMs?: number;
+    /** Signed in but the email address has not been confirmed yet. */
+    emailUnverified?: boolean;
+    /** Force POST /auth/verify-email to fail (expired or reused link). */
+    verifyEmailFails?: boolean;
   } = {},
 ): Promise<ApiMockHandle> {
   const onboardingComplete = opts.onboardingComplete !== false;
-  const user = onboardingComplete ? mockUserComplete : mockUserNeedsOnboarding;
+  const base = onboardingComplete ? mockUserComplete : mockUserNeedsOnboarding;
+  const user = opts.emailUnverified ? { ...base, email_verified_at: null } : base;
   let interactionPosts = 0;
   let refreshCalls = 0;
 
@@ -100,6 +112,35 @@ export async function installApiMock(
 
     if (method === "POST" && path === "/auth/logout") {
       await route.fulfill({ status: 204, body: "" });
+      return;
+    }
+
+    if (method === "POST" && path === "/auth/verify-email") {
+      if (opts.verifyEmailFails) {
+        await route.fulfill(
+          json(
+            {
+              message: "Invalid or expired verification link",
+              code: "invalid_verification_token",
+            },
+            400,
+          ),
+        );
+        return;
+      }
+      await route.fulfill(
+        json({ ...user, email_verified_at: "2026-02-01T00:00:00.000Z" }),
+      );
+      return;
+    }
+
+    if (method === "POST" && path === "/auth/resend-verification") {
+      await route.fulfill(
+        json({
+          message: "If this address still needs confirming, a verification link has been sent.",
+          dev_verification_token: null,
+        }),
+      );
       return;
     }
 

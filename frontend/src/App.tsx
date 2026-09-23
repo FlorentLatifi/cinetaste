@@ -9,6 +9,7 @@ import { LoginPage } from "./pages/LoginPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
 import { RegisterPage } from "./pages/RegisterPage";
 import { ResetPasswordPage } from "./pages/ResetPasswordPage";
+import { VerifyEmailPage } from "./pages/VerifyEmailPage";
 
 /** Lazy-load heavier authenticated surfaces to shrink the initial guest bundle. */
 const AccountPage = lazy(() =>
@@ -181,6 +182,10 @@ export default function App() {
           </LazyProtected>
         }
       />
+      {/* Not guest-only and not protected: the link arrives by email and
+          is often opened on a different device from the one used to sign
+          up. The token is the proof. */}
+      <Route path="/verify-email" element={<VerifyEmailPage />} />
       <Route path="/" element={<RootRoute />} />
       <Route path="*" element={<NotFoundPage />} />
     </Routes>

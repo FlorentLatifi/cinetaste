@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.application.auth_service import AuthService
 from app.core.config import Settings, get_settings
 from app.core.security import decode_access_token
-from app.domain.exceptions import UnauthorizedError
+from app.domain.exceptions import ForbiddenError, UnauthorizedError
 from app.infrastructure.db.models.user import User
 from app.infrastructure.db.session import get_db
 
@@ -81,5 +81,25 @@ def _issued_before_password_change(
     return issued_at < changed.replace(microsecond=0)
 
 
+async def get_verified_user(
+    user: Annotated[User, Depends(get_current_user)],
+    settings: Annotated[Settings, Depends(get_settings_dep)],
+) -> User:
+    """A user whose email is confirmed, when the deployment asks for that.
+
+    Deliberately a second dependency rather than a check inside
+    ``get_current_user``: account endpoints (/me, resend, export, delete)
+    have to keep working for an unverified user, or there is no way out of
+    the state. Only the product surface is gated.
+    """
+    if settings.require_email_verification and user.email_verified_at is None:
+        raise ForbiddenError(
+            "Confirm your email address to use CineTaste.",
+            code="email_not_verified",
+        )
+    return user
+
+
 CurrentUser = Annotated[User, Depends(get_current_user)]
+VerifiedUser = Annotated[User, Depends(get_verified_user)]
 AppSettings = Annotated[Settings, Depends(get_settings_dep)]

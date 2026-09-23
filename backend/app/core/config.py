@@ -113,6 +113,11 @@ class Settings(BaseSettings):
 
     # Password reset (token TTL). Real email delivery is optional for MVP.
     password_reset_ttl_minutes: int = 60
+    # Email verification. Off by default: turning it on without working SMTP
+    # would lock every account out, so validate_production_safety refuses
+    # that combination rather than letting it reach users.
+    email_verification_ttl_hours: int = 48
+    require_email_verification: bool = False
     # Public frontend origin used to build reset links in logs (dev/staging).
     public_app_url: str = "http://localhost:5173"
 
@@ -210,6 +215,11 @@ class Settings(BaseSettings):
 
         if self.database_url.startswith("postgresql+asyncpg://cinetaste:cinetaste@"):
             raise ValueError("Default local DATABASE_URL credentials are not allowed in production")
+
+        if self.require_email_verification and not self.email_configured:
+            raise ValueError(
+                "REQUIRE_EMAIL_VERIFICATION needs SMTP_* configured — without it nobody can verify, and every account is locked out"
+            )
 
         if self.email_configured and (
             not self.public_app_url.startswith("https://") or "localhost" in self.public_app_url

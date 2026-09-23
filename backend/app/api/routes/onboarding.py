@@ -3,7 +3,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
 
-from app.api.deps import CurrentUser, DbSession, get_settings_dep
+from app.api.deps import DbSession, VerifiedUser, get_settings_dep
 from app.api.schemas.auth import UserResponse
 from app.api.schemas.titles import OnboardingCardsOut, OnboardingCompleteRequest, TitleSummaryOut
 from app.application.onboarding_service import OnboardingService
@@ -16,7 +16,7 @@ router = APIRouter(prefix="/onboarding")
 
 @router.get("/cards", response_model=OnboardingCardsOut)
 async def onboarding_cards(
-    user: CurrentUser,
+    user: VerifiedUser,
     session: DbSession,
     settings: Annotated[Settings, Depends(get_settings_dep)],
     limit: int = Query(
@@ -47,7 +47,7 @@ async def onboarding_cards(
 @router.post("/complete", response_model=UserResponse)
 async def complete_onboarding(
     body: OnboardingCompleteRequest,
-    user: CurrentUser,
+    user: VerifiedUser,
     session: DbSession,
     settings: Annotated[Settings, Depends(get_settings_dep)],
 ) -> UserResponse:
