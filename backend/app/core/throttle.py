@@ -53,7 +53,15 @@ async def guard_identity(identifier: str, *, scope: str, settings: Settings) -> 
             code="rate_limit_unavailable",
         ) from exc
 
-    if raw is not None and int(raw) >= settings.rate_limit_account_failures:
+    try:
+        failures = int(raw) if raw is not None else 0
+    except (TypeError, ValueError):
+        # Only hit() writes these keys, so this should not happen — but a
+        # surprising value must not turn a login into a 500.
+        logger.warning("account_throttle_unreadable_counter scope=%s", scope)
+        failures = 0
+
+    if failures >= settings.rate_limit_account_failures:
         # Deliberately the same wording for every scope: the response must not
         # confirm that the address belongs to an account.
         raise RateLimitedError(retry_after=window)

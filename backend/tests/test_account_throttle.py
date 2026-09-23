@@ -114,3 +114,48 @@ async def test_disabled_rate_limiting_short_circuits(store) -> None:
         await record_attempt("user@example.com", scope="login", settings=settings)
     await guard_identity("user@example.com", scope="login", settings=settings)
     assert await store.get(_key("login", "user@example.com")) is None
+
+
+@pytest.mark.asyncio
+async def test_a_corrupt_counter_does_not_break_login(store) -> None:
+    """Only hit() writes these keys, but a surprise value must not be a 500."""
+    settings = _settings()
+    await store.set(_key("login", "user@example.com"), "not-a-number", ttl_seconds=60)
+    await guard_identity("user@example.com", scope="login", settings=settings)
+
+
+@pytest.mark.asyncio
+async def test_rate_limited_errors_reach_the_client_with_retry_after() -> None:
+    """The 429 is useless to a well-behaved client without Retry-After.
+
+    Covers the wiring in main.py, not just the exception: AppError carries
+    headers and the handler has to pass them through.
+    """
+    from fastapi.testclient import TestClient
+
+    from app.domain.exceptions import AppError
+    from app.main import create_app
+
+    app = create_app()
+
+    @app.get("/boom-429")
+    async def _boom() -> None:
+        raise RateLimitedError(retry_after=900)
+
+    @app.get("/boom-plain")
+    async def _plain() -> None:
+        raise AppError("nope", status_code=400, code="nope")
+
+    # Deliberately not `with TestClient(app)`: entering the context runs the
+    # real lifespan, whose shutdown closes the *global* cache store that the
+    # rest of the suite shares. Requests work fine without it.
+    client = TestClient(app)
+
+    limited = client.get("/boom-429")
+    assert limited.status_code == 429
+    assert limited.headers["Retry-After"] == "900"
+    assert limited.json()["code"] == "rate_limited"
+
+    plain = client.get("/boom-plain")
+    assert plain.status_code == 400
+    assert "Retry-After" not in plain.headers

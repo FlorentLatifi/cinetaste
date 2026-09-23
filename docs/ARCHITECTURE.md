@@ -60,7 +60,7 @@ ranking code with no database at all.
 | `user_title_state` | current state per user+title | drives feed exclusion, watchlist, history |
 | `taste_profiles` | dense vector + sparse features JSONB + version | version bump invalidates cached slates |
 | `recommendation_impressions` | what each slate showed | offline evaluation and future engagement metrics |
-| `users`, `refresh_tokens`, `password_reset_tokens` | auth | refresh tokens hashed, rotated, with family + successor |
+| `users`, `refresh_tokens`, `password_reset_tokens`, `email_verification_tokens` | auth | every token hashed at rest; refresh tokens rotate with family + successor |
 
 Events are the source of truth; the profile is derived and can be rebuilt after
 any scoring change. That is why Undo is a `clear` event rather than a delete.
@@ -113,9 +113,12 @@ once per computed slate, not per cache hit.
 - **Cache / rate limiting** — one `KeyValueStore` interface. Redis when
   configured, in-process otherwise; a Redis failure degrades to in-process for
   30 seconds rather than failing requests.
-- **Security** — bcrypt in a thread pool, short-lived access tokens in memory,
-  rotating refresh cookies with reuse detection plus a short grace window for
-  concurrent refreshes, per-IP rate limits, security headers, strict CORS.
+- **Security** — bcrypt in a thread pool, short-lived access tokens in memory
+  that expire early when the password changes, rotating refresh cookies with
+  reuse detection plus a short grace window for concurrent refreshes, two
+  rate limiters (per IP *and* per account, because an IP is only as
+  trustworthy as the proxy chain), security headers, strict CORS. Threat
+  model and reasoning: [SECURITY.md](SECURITY.md).
 - **Errors** — every failure is `{code, message, request_id}`; validation adds
   `errors[]`.
 - **Observability** — request-id middleware, structured access logs, optional
