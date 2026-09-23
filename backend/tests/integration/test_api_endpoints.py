@@ -39,6 +39,16 @@ async def test_validation_errors_share_the_error_shape(client: AsyncClient, api_
 
 async def test_password_reset_flow_in_test_env(client: AsyncClient, api_prefix: str) -> None:
     user = await _register(client, api_prefix)
+    # Access token minted before the reset — the one an attacker would be holding.
+    assert (await client.get(f"{api_prefix}/me", headers=_auth(user))).status_code == 200
+
+    # A JWT's `iat` is whole seconds, and the cut-off is compared at the same
+    # resolution on purpose: a token minted in the *same* second as the change
+    # has to survive, or a user who logs in right after resetting is bounced
+    # straight back out. So the reset has to land in a later second than the
+    # token above for this test to be testing anything. Do not delete the wait.
+    await asyncio.sleep(1.1)
+
     forgot = await client.post(f"{api_prefix}/auth/forgot-password", json={"email": user["email"]})
     assert forgot.status_code == 200
     token = forgot.json()["dev_reset_token"]
@@ -48,6 +58,12 @@ async def test_password_reset_flow_in_test_env(client: AsyncClient, api_prefix: 
         f"{api_prefix}/auth/reset-password", json={"token": token, "new_password": "brand-new-pass-1"}
     )
     assert reset.status_code == 204
+
+    # Revoking refresh tokens is not enough: an access token is stateless and
+    # would otherwise keep working for the rest of its TTL after the victim
+    # thought they had locked the attacker out.
+    stale = await client.get(f"{api_prefix}/me", headers=_auth(user))
+    assert stale.status_code == 401
     reused = await client.post(
         f"{api_prefix}/auth/reset-password", json={"token": token, "new_password": "another-pass-22"}
     )

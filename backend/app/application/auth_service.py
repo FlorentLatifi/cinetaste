@@ -241,6 +241,10 @@ class AuthService:
             raise AppError("Invalid or expired reset link", status_code=400, code="invalid_reset_token")
 
         user.password_hash = await hash_password_async(new_password)
+        # Revoking refresh tokens below only closes the long-lived door.
+        # Access tokens are stateless and stay valid for their full TTL, so
+        # record the cut-off that api.deps checks them against.
+        user.password_changed_at = now
         stored.used_at = now
 
         await self._session.execute(

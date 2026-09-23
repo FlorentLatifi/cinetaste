@@ -5,25 +5,27 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
+from app.api.schemas.common import StrictModel
 
-class RegisterRequest(BaseModel):
+
+class RegisterRequest(StrictModel):
     email: EmailStr
     password: str = Field(min_length=8, max_length=128)
     display_name: str | None = Field(default=None, max_length=120)
 
 
-class LoginRequest(BaseModel):
+class LoginRequest(StrictModel):
     email: EmailStr
     password: str = Field(min_length=1, max_length=128)
 
 
-class RefreshRequest(BaseModel):
+class RefreshRequest(StrictModel):
     """Optional body; browser clients should rely on the httpOnly cookie."""
 
     refresh_token: str | None = Field(default=None, min_length=10)
 
 
-class LogoutRequest(BaseModel):
+class LogoutRequest(StrictModel):
     refresh_token: str | None = Field(default=None, min_length=10)
 
 
@@ -44,7 +46,7 @@ class TasteFeatureOut(BaseModel):
     weight: float
 
 
-class TasteFeatureIn(BaseModel):
+class TasteFeatureIn(StrictModel):
     """One feature chip from an exported snapshot (bounded: stored in JSONB)."""
 
     key: str = Field(min_length=3, max_length=200)
@@ -96,7 +98,13 @@ class TasteExportOut(BaseModel):
 
 
 class TasteImportRequest(BaseModel):
-    """Merge a previously exported taste snapshot into the live profile."""
+    """Merge a previously exported taste snapshot into the live profile.
+
+    Not a ``StrictModel``: the documented flow is to upload the file from
+    ``GET /me/taste/export`` as-is, and that file also carries exported_at,
+    anchors and text. Ignoring those keeps the round trip working; the
+    fields that matter are bounded individually.
+    """
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -125,7 +133,7 @@ class TokenResponse(BaseModel):
     user: UserResponse
 
 
-class ForgotPasswordRequest(BaseModel):
+class ForgotPasswordRequest(StrictModel):
     email: EmailStr
 
 
@@ -142,12 +150,12 @@ class ForgotPasswordResponse(BaseModel):
     dev_reset_token: str | None = None
 
 
-class ResetPasswordRequest(BaseModel):
+class ResetPasswordRequest(StrictModel):
     token: str = Field(min_length=10, max_length=200)
     new_password: str = Field(min_length=8, max_length=128)
 
 
-class DeleteAccountRequest(BaseModel):
+class DeleteAccountRequest(StrictModel):
     password: str = Field(min_length=1, max_length=128)
     confirm: str = Field(
         description='Must be the literal string "DELETE"',

@@ -6,6 +6,7 @@ from uuid import uuid4
 
 import pytest
 
+from app.api.deps import _issued_before_password_change
 from app.application.auth_service import AuthService
 from app.core.config import Settings
 from app.core.security import hash_password, hash_token, verify_password
@@ -174,3 +175,42 @@ async def test_delete_account_success() -> None:
     auth = AuthService(session, _settings())
     await auth.delete_account(user=user, password="correct-horse")
     assert session.delete.await_count == 1 or session.delete.call_count == 1
+
+
+# ------------------------------------- access tokens expire with the password
+
+
+def test_token_issued_before_a_password_change_is_rejected() -> None:
+    """Refresh tokens are revoked on reset; access tokens are stateless.
+
+    Without this check a stolen access token kept working for the rest of its
+    TTL after the victim had already reset the password.
+    """
+    changed = datetime(2026, 9, 22, 12, 0, 30, tzinfo=UTC)
+    before = datetime(2026, 9, 22, 12, 0, 29, tzinfo=UTC)
+    after = datetime(2026, 9, 22, 12, 0, 31, tzinfo=UTC)
+
+    assert _issued_before_password_change(before, changed) is True
+    assert _issued_before_password_change(after, changed) is False
+
+
+def test_token_is_kept_when_the_password_never_changed() -> None:
+    assert _issued_before_password_change(datetime(2020, 1, 1, tzinfo=UTC), None) is False
+
+
+def test_naive_change_timestamps_are_treated_as_utc() -> None:
+    """Postgres can hand back a naive datetime; comparing it would raise."""
+    naive = datetime(2026, 9, 22, 12, 0, 30)
+    assert _issued_before_password_change(datetime(2026, 9, 22, 11, 0, tzinfo=UTC), naive) is True
+
+
+def test_same_second_tokens_survive() -> None:
+    """``iat`` is whole seconds.
+
+    A token issued 0.4s *after* the change still carries the truncated second,
+    so comparing against sub-second precision would expire a valid session. One
+    second late is the cheaper error.
+    """
+    changed = datetime(2026, 9, 22, 12, 0, 30, 400000, tzinfo=UTC)
+    issued = datetime(2026, 9, 22, 12, 0, 30, tzinfo=UTC)
+    assert _issued_before_password_change(issued, changed) is False

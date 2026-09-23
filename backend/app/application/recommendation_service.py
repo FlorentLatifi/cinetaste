@@ -432,7 +432,9 @@ class RecommendationService:
         ]
         if cursor:
             try:
-                cursor_ts, cursor_title_id = decode_history_cursor(cursor)
+                cursor_ts, cursor_title_id = decode_history_cursor(
+                    cursor, secret=self._settings.jwt_secret
+                )
             except CursorError as exc:
                 raise AppError(str(exc), status_code=400, code="invalid_cursor") from exc
             # updated_at DESC, title_id DESC keyset
@@ -472,5 +474,7 @@ class RecommendationService:
         next_cursor = None
         if has_more:
             last = page[-1]
-            next_cursor = encode_history_cursor(last.updated_at, last.title_id)
+            next_cursor = encode_history_cursor(
+                last.updated_at, last.title_id, secret=self._settings.jwt_secret
+            )
         return rows, next_cursor
