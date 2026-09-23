@@ -176,8 +176,10 @@ without Redis at all.
 
 ## API
 
-26 endpoints under `/api/v1`. Access tokens are short-lived JWTs held in memory;
+28 endpoints under `/api/v1`. Access tokens are short-lived JWTs held in memory;
 the rotating refresh token lives in an httpOnly cookie scoped to `/auth`.
+The threat model and the controls behind these routes are written up in
+[docs/SECURITY.md](docs/SECURITY.md).
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -185,6 +187,7 @@ the rotating refresh token lives in an httpOnly cookie scoped to `/auth`.
 | POST | `/auth/register` · `/auth/login` | Create a session |
 | POST | `/auth/refresh` · `/auth/logout` | Rotate / end a session |
 | POST | `/auth/forgot-password` · `/auth/reset-password` | One-time reset tokens |
+| POST | `/auth/verify-email` · `/auth/resend-verification` | One-time email-ownership tokens |
 | GET | `/me` · `/me/taste` · `/me/history` | Account, learned taste, activity (keyset paginated) |
 | GET/POST/DELETE | `/me/taste/export` · `/me/taste/import` | Portable taste snapshot |
 | DELETE | `/me` | Delete the account and its data |

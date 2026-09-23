@@ -63,7 +63,31 @@ export function AccountPage() {
   const [importBusy, setImportBusy] = useState(false);
   const [confirmMerge, setConfirmMerge] = useState(false);
   const [confirmClearImport, setConfirmClearImport] = useState(false);
+  const [verifyBusy, setVerifyBusy] = useState(false);
+  const [verifyStatus, setVerifyStatus] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  async function resendVerification() {
+    if (!accessToken) return;
+    setVerifyBusy(true);
+    setVerifyStatus(null);
+    try {
+      const res = await authApi.resendVerification(accessToken);
+      setVerifyStatus(
+        res.dev_verification_token
+          ? // No mail server in local dev, so show the link instead of
+            // pretending one was sent.
+            `Dev link: /verify-email?token=${res.dev_verification_token}`
+          : res.message,
+      );
+    } catch (err) {
+      setVerifyStatus(
+        err instanceof ApiError ? err.message : 'Could not send a verification link.',
+      );
+    } finally {
+      setVerifyBusy(false);
+    }
+  }
 
   function setTab(next: AccountTab) {
     setSearchParams(
@@ -296,8 +320,34 @@ export function AccountPage() {
         >
           <h2>Details</h2>
           <p className="meta-line">
-            <strong>Email</strong> · {user?.email}
+            <strong>Email</strong> · {user?.email}{" "}
+            {user?.email_verified_at ? (
+              <span className="meta-note">· confirmed</span>
+            ) : (
+              <span className="meta-note">· not confirmed</span>
+            )}
           </p>
+          {user && !user.email_verified_at && (
+            <div className="account-inline-notice">
+              <p className="lede">
+                Confirm this address so you can recover the account if you lose
+                the password.
+              </p>
+              <button
+                type="button"
+                className="btn ghost"
+                onClick={resendVerification}
+                disabled={verifyBusy}
+              >
+                {verifyBusy ? "Sending…" : "Send confirmation link"}
+              </button>
+              {verifyStatus && (
+                <p className="meta-line" role="status" aria-live="polite">
+                  {verifyStatus}
+                </p>
+              )}
+            </div>
+          )}
           {user?.display_name && (
             <p className="meta-line">
               <strong>Name</strong> · {user.display_name}

@@ -35,6 +35,9 @@ class UserResponse(BaseModel):
     id: UUID
     email: EmailStr
     display_name: str | None
+    # NULL = the address has not been proven. The SPA shows a prompt; the
+    # API only enforces it when REQUIRE_EMAIL_VERIFICATION is on.
+    email_verified_at: datetime | None = None
     onboarding_completed_at: datetime | None
     created_at: datetime
 
@@ -153,6 +156,23 @@ class ForgotPasswordResponse(BaseModel):
 class ResetPasswordRequest(StrictModel):
     token: str = Field(min_length=10, max_length=200)
     new_password: str = Field(min_length=8, max_length=128)
+
+
+class VerifyEmailRequest(StrictModel):
+    token: str = Field(min_length=10, max_length=200)
+
+
+class ResendVerificationResponse(StrictModel):
+    """Same shape as the password-reset response, for the same reason.
+
+    ``dev_verification_token`` is only populated outside production, where
+    there is no mail server to click a link from.
+    """
+
+    message: str = (
+        "If this address still needs confirming, a verification link has been sent."
+    )
+    dev_verification_token: str | None = None
 
 
 class DeleteAccountRequest(StrictModel):

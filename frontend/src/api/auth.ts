@@ -4,6 +4,8 @@ export type User = {
   id: string;
   email: string;
   display_name: string | null;
+  /** null until the address is confirmed. */
+  email_verified_at: string | null;
   onboarding_completed_at: string | null;
   created_at: string;
 };
@@ -50,6 +52,27 @@ export function logout() {
 
 export function getMe(accessToken: string) {
   return apiFetch<User>("/me", {}, accessToken);
+}
+
+/** Consume a link from the verification email. No session required. */
+export function verifyEmail(token: string) {
+  return apiFetch<User>("/auth/verify-email", {
+    method: "POST",
+    body: JSON.stringify({ token }),
+  });
+}
+
+/**
+ * Ask for a fresh verification link for the signed-in account.
+ * Authenticated on purpose: an endpoint that took an email would mail anyone
+ * on request and confirm which addresses are registered.
+ */
+export function resendVerification(accessToken: string) {
+  return apiFetch<{ message: string; dev_verification_token?: string | null }>(
+    "/auth/resend-verification",
+    { method: "POST", body: JSON.stringify({}) },
+    accessToken,
+  );
 }
 
 export function forgotPassword(email: string) {

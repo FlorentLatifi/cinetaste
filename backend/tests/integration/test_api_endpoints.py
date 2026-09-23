@@ -259,3 +259,43 @@ async def test_delete_account(client: AsyncClient, api_prefix: str) -> None:
     assert ok.status_code == 204
     gone = await client.get(f"{api_prefix}/me", headers=headers)
     assert gone.status_code == 401
+
+
+async def test_email_verification_flow(client: AsyncClient, api_prefix: str) -> None:
+    """Register -> request a link -> consume it -> the account is stamped."""
+    user = await _register(client, api_prefix)
+
+    me = await client.get(f"{api_prefix}/me", headers=_auth(user))
+    assert me.status_code == 200
+    assert me.json()["email_verified_at"] is None
+
+    issued = await client.post(f"{api_prefix}/auth/resend-verification", headers=_auth(user))
+    assert issued.status_code == 200, issued.text
+    token = issued.json()["dev_verification_token"]
+    assert token
+
+    verified = await client.post(f"{api_prefix}/auth/verify-email", json={"token": token})
+    assert verified.status_code == 200, verified.text
+    assert verified.json()["email_verified_at"] is not None
+
+    # Single use: the same link must not work twice.
+    replayed = await client.post(f"{api_prefix}/auth/verify-email", json={"token": token})
+    assert replayed.status_code == 400
+    assert replayed.json()["code"] == "invalid_verification_token"
+
+    # And the account stays verified.
+    me_again = await client.get(f"{api_prefix}/me", headers=_auth(user))
+    assert me_again.json()["email_verified_at"] is not None
+
+    # Asking again for an address that is already confirmed is a conflict, not
+    # another email.
+    again = await client.post(f"{api_prefix}/auth/resend-verification", headers=_auth(user))
+    assert again.status_code == 409
+
+
+async def test_verify_email_rejects_a_forged_token(client: AsyncClient, api_prefix: str) -> None:
+    res = await client.post(
+        f"{api_prefix}/auth/verify-email", json={"token": "n" * 40}
+    )
+    assert res.status_code == 400
+    assert res.json()["code"] == "invalid_verification_token"

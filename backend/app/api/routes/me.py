@@ -3,7 +3,13 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Response, status
 
-from app.api.deps import CurrentUser, DbSession, get_auth_service, get_settings_dep
+from app.api.deps import (
+    CurrentUser,
+    DbSession,
+    VerifiedUser,
+    get_auth_service,
+    get_settings_dep,
+)
 from app.api.schemas.auth import (
     DeleteAccountRequest,
     TasteAnchorOut,
@@ -145,7 +151,7 @@ async def export_taste(
 @router.post("/me/taste/import", response_model=TasteImportResultOut)
 async def import_taste(
     body: TasteImportRequest,
-    user: CurrentUser,
+    user: VerifiedUser,
     session: DbSession,
     settings: Annotated[Settings, Depends(get_settings_dep)],
 ) -> TasteImportResultOut:
@@ -201,7 +207,7 @@ async def clear_taste_import(
 
 @router.get("/me/history", response_model=HistoryPageOut)
 async def my_history(
-    user: CurrentUser,
+    user: VerifiedUser,
     session: DbSession,
     settings: Annotated[Settings, Depends(get_settings_dep)],
     limit: int = Query(default=20, ge=1, le=100),
