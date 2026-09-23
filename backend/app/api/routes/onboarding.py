@@ -27,7 +27,14 @@ async def onboarding_cards(
     ),
     exclude: Annotated[
         list[UUID] | None,
-        Query(description="Title IDs already shown (e.g. after many Haven't seen answers)."),
+        Query(
+            max_length=200,
+            description=(
+                "Title IDs already shown (e.g. after many Haven't seen answers). "
+                "Bounded: the seed deck is ~15 cards, so a longer list is a client bug "
+                "or someone probing how large a query we will build."
+            ),
+        ),
     ] = None,
 ) -> OnboardingCardsOut:
     rec = RecommendationService(session, settings)
