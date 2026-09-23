@@ -33,3 +33,10 @@ class ReadyResponse(BaseModel):
     database: str
     # redis | memory | memory (redis unavailable)
     cache: str
+    # ok | unembedded | empty | unknown
+    #
+    # Deploying is two steps — ingest, then re-embed — and ranking drops
+    # every title whose embedding is NULL. Skip the second step and For You
+    # is empty for everyone while the service looks perfectly healthy. This
+    # is the field that says so.
+    catalog: str = "unknown"

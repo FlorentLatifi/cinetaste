@@ -29,7 +29,8 @@ FLOORS: dict[str, int] = {
     "app/application": 80,
     "app/api": 85,
     "app/core": 80,
-    "app/infrastructure": 70,
+    # Was 70 while the SMTP sender was untested; it now sits at 92.
+    "app/infrastructure": 85,
 }
 
 # Not production code: operator CLIs and the offline-evaluation loader, which
