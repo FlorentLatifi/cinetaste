@@ -45,7 +45,7 @@ async def for_you(
             title=TitleSummaryOut.from_title(title),
             score=round(item.score, 4),
             reasons=[
-                ReasonOut(code=r.code, message=r.message, evidence=r.evidence) for r in item.reasons
+                ReasonOut(code=r.code, message=r.message) for r in item.reasons
             ],
         )
         for title, item in slate.items

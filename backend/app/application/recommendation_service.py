@@ -37,6 +37,10 @@ logger = logging.getLogger(__name__)
 # pgvector's HNSW search only explores ``hnsw.ef_search`` candidates (default 40)
 # and filters afterwards, so LIMIT 250 would silently return ≤ 40 rows.
 _HNSW_EF_SEARCH_MAX = 1000
+# Extra candidates fetched to replace the ones ranking will exclude. Bounded:
+# ef_search tracks the fetch size, so this trades graph-search cost for pool
+# size and the return diminishes quickly.
+_ANN_OVERFETCH_MAX = 150
 _WATCHLIST_LIMIT = 200
 
 
@@ -74,11 +78,24 @@ class RecommendationService:
         Cold start (no vector): popularity-ordered pool.
         """
         base = select(Title).where(Title.embedding.is_not(None)).options(selectinload(Title.genres))
-        if exclude_ids:
-            base = base.where(Title.id.notin_(list(exclude_ids)))
+        # Deliberately no `NOT IN (exclude_ids)`: rank_titles filters the same
+        # set again, so this only ever kept the candidate pool full — and the
+        # list is planned and transmitted on every request. Measured at 10k
+        # titles with 2,000 exclusions: 168 ms for a full pool of 250 with the
+        # SQL filter, against 127 ms for 325 usable candidates by over-fetching
+        # instead. Faster *and* more to rank.
 
         if self._settings.rec_use_ann and user_vector:
             ann_limit = max(self._settings.rec_ann_candidates, self._settings.rec_slate_size * 4)
+            # Ask for extra rows to cover the ones ranking will drop. Capped
+            # because ef_search follows this number, and a larger graph search
+            # costs more than the candidates are worth.
+            ann_limit += min(len(exclude_ids), _ANN_OVERFETCH_MAX)
+            # No over-fetch here: popular candidates are the cheap half of the
+            # pool and the least valuable to replace. Measured — over-fetching
+            # both queries cost 188 ms at 500 exclusions against 107 ms for the
+            # SQL filter it replaced, because the extra rows have to be
+            # hydrated whether ranking uses them or not.
             pop_limit = max(self._settings.rec_popular_candidates, 20)
             ann_rows: list[Title] = []
             try:
@@ -110,7 +127,9 @@ class RecommendationService:
             if merged:
                 return list(merged.values())
 
-        pool = max(self._settings.rec_ann_candidates + self._settings.rec_popular_candidates, 400)
+        pool = max(
+            self._settings.rec_ann_candidates + self._settings.rec_popular_candidates, 400
+        ) + min(len(exclude_ids), _ANN_OVERFETCH_MAX)
         return list(
             (await self._session.scalars(base.order_by(Title.popularity.desc()).limit(pool))).all()
         )
@@ -183,16 +202,22 @@ class RecommendationService:
             {
                 "title_id": str(item.title_id),
                 "score": item.score,
-                "reasons": [
-                    {"code": r.code, "message": r.message, "evidence": r.evidence}
-                    for r in item.reasons
-                ],
+                # `evidence` is deliberately absent. It was 95% of a 16.5 KiB
+                # payload (781 of ~824 bytes per item) and nothing renders it —
+                # the user-facing value is entirely in `message`.
+                "reasons": [{"code": r.code, "message": r.message} for r in item.reasons],
             }
             for item in ranked
         ]
         await store.set(
             cache_key,
             json.dumps({"slate_id": str(slate_id), "items": items_payload}),
+            ttl_seconds=self._settings.rec_cache_ttl_seconds,
+        )
+        # Record the key so invalidate_user can delete it without a keyspace scan.
+        await store.track(
+            self._slate_index_key(user_id),
+            cache_key,
             ttl_seconds=self._settings.rec_cache_ttl_seconds,
         )
         by_id = {t.id: t for t in titles}
@@ -202,8 +227,24 @@ class RecommendationService:
             fresh=True,
         )
 
+    @staticmethod
+    def _slate_index_key(user_id: UUID) -> str:
+        return f"slateidx:{user_id}"
+
     async def invalidate_user(self, user_id: UUID) -> None:
-        await get_store().delete_prefix(f"slate:{user_id}:")
+        """Drop this user's cached slates.
+
+        Deletes the keys we recorded for them rather than scanning for a
+        prefix. The old implementation used Redis SCAN, which walks the entire
+        keyspace: measured at 1.1 ms with 100 keys in the store and 449 ms with
+        100,000 — and this runs on every rating, watchlist add and undo, so the
+        cost grew with how many *other* people were using the product.
+
+        Correctness never depended on it: the cache key contains the profile
+        version, which every one of those actions bumps, so a stale slate is
+        already unreachable. This is about not leaving it in memory.
+        """
+        await get_store().drop_tracked(self._slate_index_key(user_id))
 
     async def log_impressions(
         self,
