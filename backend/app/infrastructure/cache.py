@@ -23,6 +23,9 @@ logger = logging.getLogger(__name__)
 
 _REDIS_RETRY_SECONDS = 30.0
 _MEMORY_MAX_ENTRIES = 20_000
+# Rate-limit counters get their own budget so cached slates can never evict
+# them: dropping a counter silently resets someone's attempt budget to zero.
+_RATE_LIMIT_MAX_ENTRIES = 50_000
 
 
 class KeyValueStore(Protocol):
@@ -205,9 +208,11 @@ class FallbackStore:
 
 
 _store: KeyValueStore | None = None
+_rate_limit_store: KeyValueStore | None = None
 
 
 def get_store() -> KeyValueStore:
+    """Shared store for response caching (For You slates, watch providers)."""
     global _store
     if _store is None:
         url = get_settings().redis_url.strip()
@@ -215,16 +220,36 @@ def get_store() -> KeyValueStore:
     return _store
 
 
+def get_rate_limit_store() -> KeyValueStore:
+    """Store for rate-limit counters.
+
+    With Redis this is the same connection — keys are namespaced and Redis has
+    its own eviction policy. Without Redis it is a *separate* in-process map:
+    the shared one evicts by LRU at 20k entries, so a burst of cached slates
+    could quietly drop the counter that was holding a brute-force attempt back.
+    """
+    global _rate_limit_store
+    if _rate_limit_store is None:
+        url = get_settings().redis_url.strip()
+        _rate_limit_store = (
+            get_store() if url else MemoryStore(max_entries=_RATE_LIMIT_MAX_ENTRIES)
+        )
+    return _rate_limit_store
+
+
 async def close_store() -> None:
-    global _store
+    global _store, _rate_limit_store
+    # The rate-limit store is either the shared one (Redis) or its own memory
+    # map; close it first and only close the shared one once.
+    if _rate_limit_store is not None and _rate_limit_store is not _store:
+        await _rate_limit_store.close()
+    _rate_limit_store = None
     if _store is not None:
         await _store.close()
         _store = None
 
 
-async def reset_cache_for_tests() -> None:
-    """Empty every cache/rate-limit bucket (test isolation only)."""
-    store = get_store()
+async def _empty(store: KeyValueStore) -> None:
     if isinstance(store, FallbackStore):
         try:
             await store._primary.flush()
@@ -233,3 +258,11 @@ async def reset_cache_for_tests() -> None:
         await store._fallback.close()
     else:
         await store.close()
+
+
+async def reset_cache_for_tests() -> None:
+    """Empty every cache/rate-limit bucket (test isolation only)."""
+    await _empty(get_store())
+    rate_store = get_rate_limit_store()
+    if rate_store is not get_store():
+        await _empty(rate_store)

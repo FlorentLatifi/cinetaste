@@ -40,6 +40,13 @@ services:
         value: "true"
       - key: REDIS_URL
         value: ""
+      # Reject requests with a Host we do not serve. The list must cover every
+      # way the API is legitimately reached: its own Render hostname, the SPA
+      # domain (Vercel proxies /api through it), Vercel preview domains, and
+      # localhost for the container health check. Add a custom domain here
+      # before pointing DNS at it, or the API will answer 400.
+      - key: TRUSTED_HOSTS
+        value: cinetaste-api.onrender.com,cinetaste.vercel.app,*.vercel.app,localhost,127.0.0.1
       # Vercel rewrite -> Render = two proxies appending X-Forwarded-For.
       - key: TRUSTED_PROXY_HOPS
         value: "2"
