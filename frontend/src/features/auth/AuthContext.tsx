@@ -9,13 +9,19 @@ import {
 } from "react";
 import * as authApi from "../../api/auth";
 import type { User } from "../../api/auth";
-import { setSessionExpiredHandler, tryRefreshSession } from "../../api/client";
+import {
+  setEmailUnverifiedHandler,
+  setSessionExpiredHandler,
+  tryRefreshSession,
+} from "../../api/client";
 import { clearLegacyTokenStorage, setAccessToken } from "../../api/tokenStore";
 
 type AuthState = {
   user: User | null;
   accessToken: string | null;
   loading: boolean;
+  /** The API refused something because this address is not confirmed. */
+  emailVerificationRequired: boolean;
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, password: string, displayName?: string) => Promise<void>;
   logout: () => Promise<void>;
@@ -28,11 +34,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [accessToken, setAccessTokenState] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [emailVerificationRequired, setEmailVerificationRequired] = useState(false);
 
   const applySession = useCallback((tokens: authApi.TokenResponse) => {
     setAccessToken(tokens.access_token);
     setAccessTokenState(tokens.access_token);
     setUser(tokens.user);
+    if (tokens.user.email_verified_at) setEmailVerificationRequired(false);
   }, []);
 
   const refreshUser = useCallback(async () => {
@@ -41,6 +49,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const me = await authApi.getMe(tokens.access_token);
     setAccessTokenState(tokens.access_token);
     setUser(me);
+    if (me.email_verified_at) setEmailVerificationRequired(false);
   }, []);
 
   useEffect(() => {
@@ -74,9 +83,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setAccessToken(null);
       setAccessTokenState(null);
       setUser(null);
+      setEmailVerificationRequired(false);
       clearLegacyTokenStorage();
     });
     return () => setSessionExpiredHandler(null);
+  }, []);
+
+  // A 403 the user can actually resolve, unlike the rest of them.
+  useEffect(() => {
+    setEmailUnverifiedHandler(() => setEmailVerificationRequired(true));
+    return () => setEmailUnverifiedHandler(null);
   }, []);
 
   const login = useCallback(
@@ -108,12 +124,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setAccessToken(null);
     setAccessTokenState(null);
     setUser(null);
+    setEmailVerificationRequired(false);
     clearLegacyTokenStorage();
   }, []);
 
   const value = useMemo(
-    () => ({ user, accessToken, loading, login, register, logout, refreshUser }),
-    [user, accessToken, loading, login, register, logout, refreshUser],
+    () => ({
+      user,
+      accessToken,
+      loading,
+      emailVerificationRequired,
+      login,
+      register,
+      logout,
+      refreshUser,
+    }),
+    [
+      user,
+      accessToken,
+      loading,
+      emailVerificationRequired,
+      login,
+      register,
+      logout,
+      refreshUser,
+    ],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
