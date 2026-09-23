@@ -1,17 +1,53 @@
 """Shared fixtures and fakes for recommendation / taste unit tests.
 
 No database required — pure ranking and service-mock tests only.
+
+This module also redirects the whole session at a disposable database, before
+anything imports the app. It has to happen here: ``app.infrastructure.db.session``
+builds its engine at import time, and pytest loads this file before any test
+module.
 """
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
 
-from app.recommendation.embeddings import (
+
+def _redirect_to_test_database() -> None:
+    """Point the session at ``<name>_test`` unless it already is one.
+
+    The integration suite TRUNCATEs every table. The configured URL is the same
+    one the dev server uses, so running it locally erased whatever you were
+    working on. Deriving the name here makes the safe thing the default; the
+    guard in ``tests/integration/conftest.py`` is the backstop for anyone who
+    overrides DATABASE_URL by hand.
+
+    Resolved through Settings rather than os.environ because the URL usually
+    comes from .env, and then written *back* to os.environ so that subprocesses
+    — alembic, in particular — inherit it.
+    """
+    from app.core.config import get_settings
+
+    url = get_settings().database_url
+    base, sep, query = url.partition("?")
+    if base.rstrip("/").endswith("_test"):
+        return
+
+    os.environ["DATABASE_URL"] = f"{base.rstrip('/')}_test{sep}{query}"
+    # Settings is lru_cached and the engine is built from it at import time.
+    get_settings.cache_clear()
+
+
+_redirect_to_test_database()
+
+# Imported after the redirect on purpose: anything under `app` may pull in the
+# database session, which builds its engine from Settings at import time.
+from app.recommendation.embeddings import (  # noqa: E402
     PersonSignal,
     build_title_embedding,
     features_from_title,
