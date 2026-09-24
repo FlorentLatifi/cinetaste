@@ -23,6 +23,7 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
+from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -35,6 +36,37 @@ from app.recommendation.embeddings import PersonSignal, build_title_signals
 
 API = get_settings().api_prefix
 BACKEND_DIR = Path(__file__).resolve().parents[2]
+
+
+def _assert_disposable_database() -> None:
+    """Refuse to run against a database we are not allowed to empty.
+
+    ``integration_ready`` TRUNCATEs every table in the metadata. That is correct
+    for a throwaway database and catastrophic for the one the dev server uses —
+    and by default both were the same URL, so running the integration suite
+    locally wiped whatever you had been working with.
+
+    The rule is the database *name*: it must end in ``_test``. Set
+    ``ALLOW_UNSAFE_TEST_DB=1`` to override, which exists for one-off debugging
+    and should never be in a script.
+    """
+    if os.environ.get("ALLOW_UNSAFE_TEST_DB") == "1":
+        return
+
+    url = make_url(get_settings().database_url)
+    name = (url.database or "").rsplit("/", 1)[-1]
+    if name.endswith("_test"):
+        return
+
+    pytest.fail(
+        f"Refusing to TRUNCATE database {name!r}: the integration suite empties every "
+        "table, and this name does not end in '_test'. Point DATABASE_URL at a "
+        "disposable database — docker-compose creates 'cinetaste_test' alongside the "
+        "dev one:\n"
+        "    DATABASE_URL=postgresql+asyncpg://cinetaste:cinetaste@localhost:5432/cinetaste_test\n"
+        "Set ALLOW_UNSAFE_TEST_DB=1 only if you genuinely mean to erase it.",
+        pytrace=False,
+    )
 
 
 def _unavailable(reason: str) -> None:
@@ -52,6 +84,8 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
 
 @pytest.fixture(scope="session")
 def migrated_database() -> None:
+    # Before alembic, not before TRUNCATE: the migration itself writes.
+    _assert_disposable_database()
     result = subprocess.run(
         [sys.executable, "-m", "alembic", "upgrade", "head"],
         cwd=BACKEND_DIR,
