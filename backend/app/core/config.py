@@ -112,8 +112,14 @@ class Settings(BaseSettings):
     rate_limit_account_failures: int = 10
     rate_limit_account_window_seconds: int = 900
 
-    # Comma-separated hostnames allowed in production (optional)
+    # Comma-separated hostnames allowed in production (optional).
+    # The service's own hostname does not belong here — see trusted_host_list.
     trusted_hosts: str = ""
+    # Injected by Render into every service. Reading it means the deployment
+    # does not have to guess the name the platform will assign: a blueprint
+    # that finds "cinetaste-api" taken creates "cinetaste-api-mtqp", and a
+    # hardcoded list would then reject every request with a 400.
+    render_external_hostname: str = ""
 
     # Reverse proxies in front of the API that append to X-Forwarded-For
     # (0 = ignore the header). Render alone: 1. Vercel rewrite → Render: 2.
@@ -187,9 +193,24 @@ class Settings(BaseSettings):
 
     @property
     def trusted_host_list(self) -> list[str]:
-        if not self.trusted_hosts.strip():
+        """Hosts the API will answer for.
+
+        Empty configuration means "any", which is what keeps local development
+        and tests simple. Once a list exists it is extended with two things the
+        operator should not have to remember: the hostname the platform gave
+        this service, and loopback for the container's own health check. Both
+        are legitimate ways in, and forgetting either turns every request into
+        a 400 that looks nothing like a configuration mistake.
+        """
+        configured = [h.strip() for h in self.trusted_hosts.split(",") if h.strip()]
+        if not configured:
             return ["*"]
-        return [h.strip() for h in self.trusted_hosts.split(",") if h.strip()]
+
+        hosts = list(configured)
+        for implicit in (self.render_external_hostname.strip(), "localhost", "127.0.0.1"):
+            if implicit and implicit not in hosts:
+                hosts.append(implicit)
+        return hosts
 
     @property
     def is_production(self) -> bool:
