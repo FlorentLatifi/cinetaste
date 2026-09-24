@@ -4,6 +4,59 @@ Lightweight ADR-style log. Newest first.
 
 ---
 
+## 2026-09-24 — The taste rebuild happens after the response
+
+### Decision
+`POST /titles/{id}/interactions` writes the event, bumps `profile.version` and
+invalidates the cache inside the request; the profile itself is rebuilt in a
+FastAPI background task afterwards. `TASTE_RECOMPUTE_DEFERRED=false` restores
+the old inline behaviour.
+
+### Rationale
+The rebuild re-reads the entire interaction history and every title it
+mentions, so the people who use the product most waited longest for the
+simplest action:
+
+    history    inline    deferred
+        100   92.8 ms     19.4 ms
+        500  177.1 ms     18.1 ms
+      1,000  311.7 ms     16.3 ms
+      2,000  558.0 ms     17.8 ms
+
+Deferred is flat, because what stays in the request no longer depends on how
+much the user has rated.
+
+### Why `recompute=False` alone was not the answer
+The For You cache is keyed by `profile.version`. A rating that skips the
+rebuild also skips the bump, so the next slate is byte-identical — the user
+rates a film and nothing on screen changes. Slower is better than that. The
+two jobs are separated instead: bump now, rebuild behind.
+
+Nothing the user sees immediately came from the profile anyway. The rated
+title leaves the feed because of `user_title_state`, undo reads the event log,
+and history reads the same rows.
+
+### Known failure mode
+If the process dies between the response and the task, that rebuild is lost:
+the profile is one interaction stale while its version says otherwise. Nothing
+is corrupted, and the next rating rebuilds it. `taste_recompute_deferred_failed`
+in the logs is how you would know. Accepted rather than solved, because solving
+it properly means a durable queue — more moving parts than this trade is worth
+at this scale.
+
+### Rejected alternative
+**Incremental vector updates.** A rating is a weighted vector add, so in
+principle the profile could be nudged rather than rebuilt. But
+`effective_title_signals` keeps only the strongest event per title and applies
+time decay across the whole history, so a new event can *replace* an older
+one — undoing its contribution needs that contribution stored per title. Real
+work for a path that is now ~18 ms.
+
+### Status
+Active, on by default.
+
+---
+
 ## 2026-09-23 — Two rate limiters, because an IP is not an identity
 
 ### Decision
