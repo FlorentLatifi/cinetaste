@@ -1,6 +1,7 @@
 import { lazy, Suspense, type ReactNode } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { useAuth } from "./features/auth/AuthContext";
+import { AppLoading } from "./components/AppLoading";
 import { AppShell } from "./components/AppShell";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { ForgotPasswordPage } from "./pages/ForgotPasswordPage";
@@ -44,13 +45,12 @@ function RouteFallback() {
 }
 
 function Protected({ children }: { children: ReactNode }) {
-  const { user, loading, emailVerificationRequired } = useAuth();
+  const { user, loading, emailVerificationRequired, bootstrapSlow, bootstrapFailed, retryBootstrap } =
+    useAuth();
   const { pathname } = useLocation();
   if (loading) {
     return (
-      <div className="center-screen">
-        <div className="spinner" aria-label="Loading" />
-      </div>
+      <AppLoading slow={bootstrapSlow} failed={bootstrapFailed} onRetry={retryBootstrap} />
     );
   }
   if (!user) return <Navigate to="/login" replace />;
@@ -63,12 +63,10 @@ function Protected({ children }: { children: ReactNode }) {
 }
 
 function GuestOnly({ children }: { children: ReactNode }) {
-  const { user, loading } = useAuth();
+  const { user, loading, bootstrapSlow, bootstrapFailed, retryBootstrap } = useAuth();
   if (loading) {
     return (
-      <div className="center-screen">
-        <div className="spinner" aria-label="Loading" />
-      </div>
+      <AppLoading slow={bootstrapSlow} failed={bootstrapFailed} onRetry={retryBootstrap} />
     );
   }
   if (user) return <Navigate to="/" replace />;
@@ -77,12 +75,11 @@ function GuestOnly({ children }: { children: ReactNode }) {
 
 /** Guests see marketing landing; signed-in users see immersive For You. */
 function RootRoute() {
-  const { user, loading, emailVerificationRequired } = useAuth();
+  const { user, loading, emailVerificationRequired, bootstrapSlow, bootstrapFailed, retryBootstrap } =
+    useAuth();
   if (loading) {
     return (
-      <div className="center-screen">
-        <div className="spinner" aria-label="Loading" />
-      </div>
+      <AppLoading slow={bootstrapSlow} failed={bootstrapFailed} onRetry={retryBootstrap} />
     );
   }
   if (!user) return <LandingPage />;

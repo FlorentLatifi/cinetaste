@@ -4,14 +4,29 @@ import { clearLegacyTokenStorage, getAccessToken, setAccessToken } from "./token
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "/api/v1";
 
+/**
+ * A request with no deadline can hang forever, and `fetch` has none by
+ * default. Sixty seconds is deliberately generous: the API sleeps on its free
+ * tier and a cold start costs about fifty, so a tighter bound would abort
+ * requests that were seconds from succeeding. This is the backstop for a
+ * connection that has actually died, not a latency budget.
+ */
+const DEFAULT_TIMEOUT_MS = 60_000;
+
 export class ApiError extends Error {
   constructor(
     public status: number,
     public code: string,
     message: string,
+    options?: ErrorOptions,
   ) {
-    super(message);
+    super(message, options);
     this.name = "ApiError";
+  }
+
+  /** No response at all — a timeout or a dead connection, not a rejection. */
+  get isTransport(): boolean {
+    return this.status === 0;
   }
 }
 
@@ -85,11 +100,31 @@ export async function apiFetch<T>(
     headers.set("Authorization", `Bearer ${token}`);
   }
 
-  const response = await fetch(`${API_BASE}${path}`, {
-    ...options,
-    headers,
-    credentials: "include",
-  });
+  const timeout = new AbortController();
+  const deadline = setTimeout(() => timeout.abort(), DEFAULT_TIMEOUT_MS);
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}${path}`, {
+      ...options,
+      headers,
+      credentials: "include",
+      signal: options.signal ?? timeout.signal,
+    });
+  } catch (cause) {
+    // Abort and connection failure land here alike, and both mean the same
+    // thing to the person waiting: it did not arrive.
+    const timedOut = timeout.signal.aborted;
+    throw new ApiError(
+      0,
+      timedOut ? "timeout" : "network_error",
+      timedOut
+        ? "The server took too long to answer."
+        : "Could not reach the server. Check your connection.",
+      { cause },
+    );
+  } finally {
+    clearTimeout(deadline);
+  }
 
   // Attempt one silent refresh on expired access token (skip auth endpoints
   // except we allow refresh itself only once).

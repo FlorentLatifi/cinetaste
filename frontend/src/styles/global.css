@@ -243,3 +243,16 @@ p { margin: 0 0 1rem; }
 @media (max-width: 560px) {
   .history-filters { margin-bottom: 1rem; }
 }
+
+/* Failed load with a way out of it — Search, watchlist, history, title detail.
+   The recovery sits next to the explanation, because a red line on its own
+   leaves the only option as navigating away. */
+.load-failed { margin: 1.5rem auto; padding: 1.5rem 1.35rem; max-width: 34rem; text-align: center; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-elevated); display: flex; flex-direction: column; gap: 0.7rem; align-items: center; }
+.load-failed-title { margin: 0; font-size: 1.25rem; }
+.load-failed-message { margin: 0; color: var(--muted); font-size: 0.95rem; line-height: 1.55; }
+.load-failed-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; justify-content: center; }
+
+/* Session bootstrap: the wait before we know whether you are signed in. */
+.boot-card { display: flex; flex-direction: column; align-items: center; gap: 0.9rem; padding: 1.5rem; max-width: 26rem; text-align: center; }
+.boot-title { margin: 0; font-size: 1.35rem; }
+.boot-message { margin: 0; color: var(--muted); font-size: 0.92rem; line-height: 1.55; }

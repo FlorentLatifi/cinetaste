@@ -4,6 +4,7 @@ import { ApiError } from "../api/client";
 import * as titlesApi from "../api/titles";
 import type { Title } from "../api/titles";
 import { CatalogSkeleton } from "../components/CatalogSkeleton";
+import { LoadFailed } from "../components/LoadFailed";
 import { PosterCard } from "../components/PosterCard";
 import { useAuth } from "../features/auth/AuthContext";
 
@@ -15,6 +16,7 @@ export function SearchPage() {
   const [results, setResults] = useState<Title[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
   const [searched, setSearched] = useState(false);
   const errorId = useId();
   const statusId = useId();
@@ -52,7 +54,7 @@ export function SearchPage() {
     return () => {
       cancelled = true;
     };
-  }, [params, accessToken]);
+  }, [params, accessToken, reloadKey]);
 
   function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -112,10 +114,12 @@ export function SearchPage() {
         {statusText}
       </p>
 
-      {error && (
-        <p id={errorId} className="form-error" role="alert">
-          {error}
-        </p>
+      {error && !loading && (
+        <LoadFailed
+          what="those results"
+          message={error}
+          onRetry={() => setReloadKey((n) => n + 1)}
+        />
       )}
 
       {loading && (
