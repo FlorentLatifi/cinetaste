@@ -88,3 +88,17 @@
 .modal-title { margin: 0; font-size: 1.35rem; }
 .modal-desc { margin: 0; color: var(--muted); font-size: 0.95rem; line-height: 1.45; }
 .modal-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 0.5rem; margin-top: 0.35rem; }
+
+/* Site footer — carries the TMDb attribution their terms require, so it has to
+   be on every page that shows their data, not just the landing page. */
+.site-footer { border-top: 1px solid var(--border); padding: 1rem 1.25rem 1.5rem; display: flex; flex-direction: column; align-items: center; gap: 0.4rem; color: var(--muted); font-size: 0.8rem; text-align: center; }
+.site-footer p { margin: 0; }
+.site-footer-tmdb { display: flex; align-items: center; justify-content: center; gap: 0.5rem; flex-wrap: wrap; max-width: 44rem; }
+.tmdb-mark { height: 0.85rem; width: auto; opacity: 0.85; }
+.site-footer a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+.site-footer a:hover { color: var(--text); }
+
+@media (max-width: 720px) {
+  /* Clear of the bottom nav. */
+  .site-footer { padding-bottom: calc(5.5rem + env(safe-area-inset-bottom, 0px)); }
+}

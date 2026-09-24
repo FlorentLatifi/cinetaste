@@ -417,3 +417,26 @@ test("Enforced verification: a gated page sends the user somewhere they can fix 
     page.getByRole("button", { name: "Send confirmation link" }),
   ).toBeVisible();
 });
+
+test("Privacy: reachable signed out and says what is stored", async ({ page }) => {
+  // A policy you can only read after registering is not a policy.
+  await page.goto("/privacy");
+
+  await expect(page.getByRole("heading", { name: "Privacy", level: 1 })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "What is stored" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "What you can do" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Back to CineTaste" })).toBeVisible();
+});
+
+test("TMDb attribution appears on the landing page and behind sign-in", async ({ page }) => {
+  // Their terms require this wording wherever their data is shown.
+  const required = /uses the TMDB API but is not endorsed or certified by TMDB/i;
+
+  await page.goto("/");
+  await expect(page.getByText(required)).toBeVisible();
+  await expect(page.getByRole("link", { name: "Privacy" })).toBeVisible();
+
+  await installApiMock(page, { onboardingComplete: true });
+  await page.goto("/account");
+  await expect(page.getByText(required)).toBeVisible();
+});

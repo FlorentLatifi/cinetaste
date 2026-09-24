@@ -16,6 +16,7 @@ import "./styles/posters.css";
 import "./styles/history.css";
 import "./styles/title-detail.css";
 import "./styles/account.css";
+import "./styles/legal.css";
 import "./styles/forced-colors.css";
 
 initColorScheme();

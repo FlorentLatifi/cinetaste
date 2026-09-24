@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { Link, NavLink } from "react-router-dom";
+import { SiteFooter } from "./SiteFooter";
 import { useAuth } from "../features/auth/AuthContext";
 import { ContrastToggle } from "./ContrastToggle";
 
@@ -67,6 +68,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <main id="main-content" className="main" tabIndex={-1}>
         {children}
       </main>
+      <SiteFooter />
       <nav className="bottom-nav" aria-label="Primary">
         {PRIMARY_NAV.map((item) => (
           <NavLink

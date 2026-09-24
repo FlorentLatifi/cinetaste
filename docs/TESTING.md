@@ -7,7 +7,7 @@ Three layers, each answering a different question.
 | Unit — backend (`backend/tests/*.py`) | 226 | Is the logic right? | nothing |
 | Unit — frontend (`frontend/src/**/*.test.ts`) | 68 | Do the pure functions hold? | nothing |
 | Integration (`backend/tests/integration/`) | 20 | Do the API, migrations and database agree? | Postgres + pgvector |
-| End-to-end (`frontend/e2e/`) | 40 | Does the app work in a browser, accessibly? | built SPA |
+| End-to-end (`frontend/e2e/`) | 43 | Does the app work in a browser, accessibly? | built SPA |
 
 ## Coverage
 
