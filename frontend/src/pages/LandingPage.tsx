@@ -1,5 +1,6 @@
 import { Helmet } from "react-helmet-async";
 import { Link } from "react-router-dom";
+import { SiteFooter } from "../components/SiteFooter";
 import { ContrastToggle } from "../components/ContrastToggle";
 
 const DEMO_TITLE = "The Shawshank Redemption";
@@ -155,6 +156,7 @@ export function LandingPage() {
           <Link to="/login">Sign in</Link>
         </p>
       </footer>
+      <SiteFooter />
     </div>
   );
 }
