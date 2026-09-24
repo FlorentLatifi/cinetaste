@@ -12,6 +12,16 @@ markers = [
     "integration: hits real Postgres + Redis (skipped when unavailable)",
 ]
 
+[tool.coverage.run]
+source = ["app"]
+# SQLAlchemy's async layer runs database work inside greenlets, and coverage
+# does not follow a greenlet switch without being told to. Without this the
+# report silently understates every path that touches the database: the whole
+# body of the interactions endpoint and of recompute_profile read as dead code
+# while the tests that drive them pass. Measured on this suite, it moves the
+# total from 80% to 84% and recommendation_service from 59% to 87%.
+concurrency = ["greenlet", "thread"]
+
 [tool.ruff]
 line-length = 100
 target-version = "py312"

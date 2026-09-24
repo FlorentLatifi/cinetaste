@@ -33,11 +33,12 @@ jobs:
         env:
           POSTGRES_USER: cinetaste
           POSTGRES_PASSWORD: cinetaste
-          POSTGRES_DB: cinetaste
+          # Must end in _test: the suite refuses to TRUNCATE anything else.
+          POSTGRES_DB: cinetaste_test
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U cinetaste -d cinetaste"
+          --health-cmd "pg_isready -U cinetaste -d cinetaste_test"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
@@ -55,7 +56,7 @@ jobs:
       APP_ENV: test
       APP_DEBUG: "false"
       JWT_SECRET: ci-test-secret-key-at-least-32-characters-long
-      DATABASE_URL: postgresql+asyncpg://cinetaste:cinetaste@localhost:5432/cinetaste
+      DATABASE_URL: postgresql+asyncpg://cinetaste:cinetaste@localhost:5432/cinetaste_test
       CORS_ORIGINS: http://localhost:5173
       TMDB_API_KEY: ""
       # Fail instead of skipping when Postgres is unreachable.
@@ -92,11 +93,15 @@ jobs:
           REDIS_URL: redis://localhost:6379/0
         run: pytest -q -m integration
 
-      # Reported, not gated: pick a floor from a measured run before enforcing.
-      - name: Coverage report
+      # Gated now that the measurement is trustworthy: before the greenlet
+      # concurrency setting the report understated every database path, so a
+      # floor would have failed for the wrong reasons.
+      - name: Coverage report and gate
         env:
           REDIS_URL: ""
-        run: pytest -q --cov=app --cov-report=term-missing
+        run: |
+          pytest -q --cov=app --cov-report=term-missing             --cov-report=json:coverage.json --cov-fail-under=80
+          python tools/coverage_gate.py coverage.json
 
       - name: App imports with production-like settings
         env:
@@ -136,7 +141,7 @@ jobs:
           docker rm -f api
 
   frontend:
-    name: Frontend (typecheck, build, a11y)
+    name: Frontend (typecheck, unit, build, a11y)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -153,6 +158,11 @@ jobs:
 
       - name: Install
         run: npm ci
+
+      # Before the build: a broken pure function should fail in two seconds,
+      # not after Playwright has downloaded a browser.
+      - name: Unit tests + coverage gate
+        run: npm run test:coverage
 
       - name: Build (typecheck + bundle)
         run: npm run build
