@@ -107,3 +107,41 @@ def test_jwt_algorithm_is_restricted_to_hmac_sha2() -> None:
         Settings(**_base(jwt_algorithm="none"))
     with pytest.raises(ValidationError):
         Settings(**_base(jwt_algorithm="RS256"))
+
+
+def test_trusted_hosts_include_the_name_the_platform_assigned() -> None:
+    """A blueprint that finds "cinetaste-api" taken creates "cinetaste-api-mtqp".
+
+    Hardcoding the expected name turned that into a 400 on every request, with
+    nothing in the error to suggest the hostname was the problem. Render injects
+    the real one; trusting it removes the guess.
+    """
+    settings = Settings(
+        **_base(
+            trusted_hosts="cinetaste.vercel.app,*.vercel.app",
+            render_external_hostname="cinetaste-api-mtqp.onrender.com",
+        )
+    )
+    assert "cinetaste-api-mtqp.onrender.com" in settings.trusted_host_list
+    assert "cinetaste.vercel.app" in settings.trusted_host_list
+
+
+def test_loopback_is_always_trusted_when_a_list_exists() -> None:
+    """The container's own HEALTHCHECK curls 127.0.0.1."""
+    hosts = Settings(**_base(trusted_hosts="cinetaste.vercel.app")).trusted_host_list
+    assert "127.0.0.1" in hosts and "localhost" in hosts
+
+
+def test_an_empty_list_still_means_any_host() -> None:
+    """Local development and tests do not configure this at all."""
+    assert Settings(**_base(trusted_hosts="")).trusted_host_list == ["*"]
+
+
+def test_no_duplicates_when_the_platform_host_is_also_listed() -> None:
+    hosts = Settings(
+        **_base(
+            trusted_hosts="cinetaste-api-mtqp.onrender.com,localhost",
+            render_external_hostname="cinetaste-api-mtqp.onrender.com",
+        )
+    ).trusted_host_list
+    assert len(hosts) == len(set(hosts))
