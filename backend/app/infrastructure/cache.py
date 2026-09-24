@@ -37,6 +37,14 @@ class KeyValueStore(Protocol):
 
     async def delete_prefix(self, prefix: str) -> None: ...
 
+    async def track(self, index_key: str, member: str, *, ttl_seconds: int) -> None:
+        """Remember that ``member`` is a key this index is responsible for."""
+        ...
+
+    async def drop_tracked(self, index_key: str) -> None:
+        """Delete every key the index knows about, and the index itself."""
+        ...
+
     async def hit(self, key: str, *, window_seconds: int) -> tuple[int, int]:
         """Count one hit in a fixed window. Returns (hits so far, seconds left)."""
         ...
@@ -53,6 +61,7 @@ class MemoryStore:
 
     def __init__(self, max_entries: int = _MEMORY_MAX_ENTRIES) -> None:
         self._data: OrderedDict[str, tuple[str, float]] = OrderedDict()
+        self._sets: dict[str, set[str]] = {}
         self._max_entries = max_entries
 
     def _live(self, key: str) -> tuple[str, float] | None:
@@ -82,6 +91,13 @@ class MemoryStore:
         for key in [k for k in self._data if k.startswith(prefix)]:
             del self._data[key]
 
+    async def track(self, index_key: str, member: str, *, ttl_seconds: int) -> None:
+        self._sets.setdefault(index_key, set()).add(member)
+
+    async def drop_tracked(self, index_key: str) -> None:
+        for key in self._sets.pop(index_key, ()):
+            self._data.pop(key, None)
+
     async def hit(self, key: str, *, window_seconds: int) -> tuple[int, int]:
         now = time.monotonic()
         item = self._live(key)
@@ -97,6 +113,7 @@ class MemoryStore:
 
     async def close(self) -> None:
         self._data.clear()
+        self._sets.clear()
 
 
 class RedisStore:
@@ -125,6 +142,24 @@ class RedisStore:
                 batch.clear()
         if batch:
             await self._client.delete(*batch)
+
+    async def track(self, index_key: str, member: str, *, ttl_seconds: int) -> None:
+        # The index outlives the entries it points at, so a slate that expires
+        # on its own leaves a dead member behind. UNLINK on a missing key is a
+        # no-op, so that costs nothing but a little memory until the index
+        # itself expires.
+        async with self._client.pipeline(transaction=True) as pipe:
+            pipe.sadd(index_key, member)
+            pipe.expire(index_key, max(ttl_seconds, 1) * 2)
+            await pipe.execute()
+
+    async def drop_tracked(self, index_key: str) -> None:
+        members = await self._client.smembers(index_key)
+        if members:
+            # UNLINK, not DEL: frees memory on a background thread.
+            await self._client.unlink(*members, index_key)
+        else:
+            await self._client.unlink(index_key)
 
     async def hit(self, key: str, *, window_seconds: int) -> tuple[int, int]:
         # SET NX EX + INCR in one transaction: the window's expiry is set exactly
@@ -188,6 +223,15 @@ class FallbackStore:
         # Invalidate both copies so a Redis recovery can't resurrect stale data.
         await self._fallback.delete_prefix(prefix)
         await self._call("delete_prefix", prefix)
+
+    async def track(self, index_key: str, member: str, *, ttl_seconds: int) -> None:
+        await self._call("track", index_key, member, ttl_seconds=ttl_seconds)
+
+    async def drop_tracked(self, index_key: str) -> None:
+        # Both copies: a Redis recovery must not resurrect an entry we dropped
+        # while degraded.
+        await self._fallback.drop_tracked(index_key)
+        await self._call("drop_tracked", index_key)
 
     async def hit(self, key: str, *, window_seconds: int) -> tuple[int, int]:
         return await self._call("hit", key, window_seconds=window_seconds)

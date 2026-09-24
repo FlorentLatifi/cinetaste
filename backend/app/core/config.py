@@ -53,6 +53,20 @@ class Settings(BaseSettings):
     refresh_reuse_grace_seconds: int = Field(default=20, ge=0, le=120)
 
     database_url: str
+    # Connection pool. The ceiling per worker process is
+    # db_pool_size + db_max_overflow, so the deploy must satisfy
+    #   WEB_CONCURRENCY * (pool_size + max_overflow) < the host's max_connections
+    # Render's free Postgres allows ~97; two workers at 5+10 uses 30.
+    db_pool_size: int = Field(default=5, ge=1, le=50)
+    db_max_overflow: int = Field(default=10, ge=0, le=50)
+    # Fail fast instead of queueing: a request that waits 30s for a
+    # connection has already lost the user, and holding it there makes the
+    # pile-up worse.
+    db_pool_timeout_seconds: float = Field(default=5.0, gt=0, le=60)
+    # Managed Postgres and poolers drop idle connections without telling the
+    # client. pool_pre_ping catches that at the cost of a round trip;
+    # recycling first means it rarely has to.
+    db_pool_recycle_seconds: int = Field(default=1800, ge=60)
     # Optional. Empty → in-process cache/rate limits (fine for one process).
     redis_url: str = ""
 

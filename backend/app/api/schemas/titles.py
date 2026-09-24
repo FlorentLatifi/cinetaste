@@ -18,8 +18,11 @@ class GenreOut(BaseModel):
 class ReasonOut(BaseModel):
     """Human-readable explanation for a recommendation.
 
-    ``message`` is the user-facing line. ``evidence`` holds structured
-    detail for UI polish / debugging (liked title names, directors, tones…).
+    Only ``code`` and ``message`` cross the wire. The ranker also builds a
+    structured ``evidence`` dict (liked titles, directors, tones) and it is
+    still there internally for explanations and tests — but nothing rendered
+    it, while it accounted for 95% of a cached slate. If a debug view wants it
+    back, it should be behind a query flag rather than on every response.
     """
 
     code: str = Field(
@@ -31,10 +34,6 @@ class ReasonOut(BaseModel):
         )
     )
     message: str = Field(description="Thoughtful, specific sentence shown to the user")
-    evidence: dict = Field(
-        default_factory=dict,
-        description="Structured support: liked_titles, directors, tones, keywords, genres, …",
-    )
 
 
 class TitleSummary(BaseModel):
