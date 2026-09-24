@@ -57,7 +57,7 @@ services:
       # localhost for the container health check. Add a custom domain here
       # before pointing DNS at it, or the API will answer 400.
       - key: TRUSTED_HOSTS
-        value: cinetaste-api-staging.onrender.com,cinetaste-staging.vercel.app,*.vercel.app,localhost,127.0.0.1
+        value: cinetaste-staging.vercel.app,*.vercel.app
       - key: TRUSTED_PROXY_HOPS
         value: "2"
       # The SPA proxies /api through its own domain, so the refresh

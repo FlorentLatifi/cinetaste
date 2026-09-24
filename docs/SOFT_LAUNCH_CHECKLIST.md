@@ -9,8 +9,9 @@ Use this before inviting friends-and-family users. Frontend polish through Wave 
       rewrite pointed at the staging API — an absolute cross-origin URL
       breaks the refresh cookie on Safari *and* the SPA's `connect-src`
 - [ ] Production secrets set: `JWT_SECRET`, `CORS_ORIGINS`, `TMDB_API_KEY`
-- [ ] `TRUSTED_HOSTS` lists every host the API is reached by — a missing one
-      answers 400, so set it before pointing DNS at a new domain
+- [ ] `TRUSTED_HOSTS` lists the domains the API is reached *through* (its own
+      platform hostname and loopback are detected). A missing one answers 400,
+      so add a custom domain before pointing DNS at it
 - [ ] `curl -sI <api>/api/v1/health | grep -i strict-transport` returns a header
 - [ ] Postgres `vector` extension + migrations applied
 - [ ] Redis reachable **or** `REDIS_URL` empty on purpose — one worker counts
