@@ -4,6 +4,7 @@ import { ApiError } from "../api/client";
 import * as titlesApi from "../api/titles";
 import type { Title } from "../api/titles";
 import { CatalogSkeleton } from "../components/CatalogSkeleton";
+import { LoadFailed } from "../components/LoadFailed";
 import { PosterCard } from "../components/PosterCard";
 import { useAuth } from "../features/auth/AuthContext";
 
@@ -12,10 +13,15 @@ export function WatchlistPage() {
   const [items, setItems] = useState<Title[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     if (!accessToken) return;
     let cancelled = false;
+    // Clear the previous failure before retrying, or the error block outlives
+    // the request that succeeded.
+    setError(null);
+    setLoading(true);
     (async () => {
       try {
         const data = await titlesApi.getWatchlist(accessToken);
@@ -31,7 +37,7 @@ export function WatchlistPage() {
     return () => {
       cancelled = true;
     };
-  }, [accessToken]);
+  }, [accessToken, reloadKey]);
 
   return (
     <section className="feed" aria-labelledby="watchlist-heading">
@@ -45,10 +51,16 @@ export function WatchlistPage() {
           Back to For You
         </Link>
       </div>
-      {error && (
-        <p className="form-error" role="alert">
-          {error}
-        </p>
+      {error && !loading && (
+        <LoadFailed
+          what="your watchlist"
+          message={error}
+          onRetry={() => setReloadKey((n) => n + 1)}
+        >
+          <Link className="btn ghost" to="/search">
+            Browse search
+          </Link>
+        </LoadFailed>
       )}
       {loading && (
         <CatalogSkeleton count={8} label="Loading watchlist" />

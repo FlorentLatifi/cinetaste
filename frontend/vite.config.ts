@@ -31,6 +31,7 @@ export default defineConfig({
         "src/lib/**/*.ts",
         "src/features/taste/**/*.ts",
         "src/api/tokenStore.ts",
+        "src/features/auth/sessionChannel.ts",
       ],
       // Set from a measured run, a little under where each sits, so a real
       // regression trips them and ordinary churn does not.

@@ -73,6 +73,10 @@ export async function installApiMock(
     emailUnverified?: boolean;
     /** Force POST /auth/verify-email to fail (expired or reused link). */
     verifyEmailFails?: boolean;
+    /** Paths whose first request returns 500; the retry after it succeeds. */
+    failOnce?: string[];
+    /** Delay /auth/refresh, to exercise the slow-bootstrap message. */
+    refreshDelayMs?: number;
     /** Server enforces REQUIRE_EMAIL_VERIFICATION: gated routes answer 403. */
     verificationEnforced?: boolean;
   } = {},
@@ -81,6 +85,7 @@ export async function installApiMock(
   const base = onboardingComplete ? mockUserComplete : mockUserNeedsOnboarding;
   const user = opts.emailUnverified ? { ...base, email_verified_at: null } : base;
   let interactionPosts = 0;
+  const failedOnce = new Set<string>();
   let refreshCalls = 0;
 
   await page.route("**/api/v1/**", async (route: Route) => {
@@ -94,8 +99,21 @@ export async function installApiMock(
 
     const method = req.method();
 
+    // One failure per path, then success — the shape of a transient outage,
+    // which is what a retry button is for.
+    if (opts.failOnce?.includes(path) && !failedOnce.has(path)) {
+      failedOnce.add(path);
+      await route.fulfill(
+        json({ message: "The server is having a moment.", code: "internal_error" }, 500),
+      );
+      return;
+    }
+
     if (method === "POST" && path === "/auth/refresh") {
       refreshCalls += 1;
+      if (opts.refreshDelayMs) {
+        await new Promise((r) => setTimeout(r, opts.refreshDelayMs));
+      }
       if (opts.sessionDeadOnInteraction && refreshCalls > 1) {
         await route.fulfill(
           json({ message: "Session expired", code: "unauthorized" }, 401),
