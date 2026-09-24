@@ -207,8 +207,8 @@ Errors share one shape: `{code, message, request_id}` (validation adds `errors[]
 cd backend && pytest -m "not integration"   # 226 unit tests
 docker compose up -d db                      # integration needs Postgres
 INTEGRATION_REQUIRED=1 pytest -m integration # 15 API + DB tests, run the migrations
-cd frontend && npm test                     # 68 unit tests (vitest)
-cd frontend && npx playwright test           # 43 e2e + axe accessibility tests
+cd frontend && npm test                     # 77 unit tests (vitest)
+cd frontend && npx playwright test           # 47 e2e + axe accessibility tests
 ```
 
 Integration tests build the schema with `alembic upgrade head` (migrations are

@@ -15,6 +15,7 @@ import {
   tryRefreshSession,
 } from "../../api/client";
 import { clearLegacyTokenStorage, setAccessToken } from "../../api/tokenStore";
+import { broadcastSession, onSessionEvent } from "./sessionChannel";
 
 type AuthState = {
   user: User | null;
@@ -22,6 +23,11 @@ type AuthState = {
   loading: boolean;
   /** The API refused something because this address is not confirmed. */
   emailVerificationRequired: boolean;
+  /** The first request is slow enough to be worth explaining. */
+  bootstrapSlow: boolean;
+  /** We stopped waiting for it. */
+  bootstrapFailed: boolean;
+  retryBootstrap: () => void;
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, password: string, displayName?: string) => Promise<void>;
   logout: () => Promise<void>;
@@ -35,6 +41,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [accessToken, setAccessTokenState] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [emailVerificationRequired, setEmailVerificationRequired] = useState(false);
+  const [bootstrapSlow, setBootstrapSlow] = useState(false);
+  const [bootstrapFailed, setBootstrapFailed] = useState(false);
+  const [bootstrapAttempt, setBootstrapAttempt] = useState(0);
 
   const applySession = useCallback((tokens: authApi.TokenResponse) => {
     setAccessToken(tokens.access_token);
@@ -52,30 +61,60 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (me.email_verified_at) setEmailVerificationRequired(false);
   }, []);
 
+  // How long the first request may take before we say something, and before we
+  // stop waiting. The API sleeps on its free tier and a cold start costs about
+  // fifty seconds, so the explanation comes early and the deadline comes late —
+  // a bare spinner for a minute reads as broken, but giving up at five seconds
+  // would turn a slow start into a failure.
+  const SLOW_AFTER_MS = 5_000;
+
   useEffect(() => {
     let cancelled = false;
     clearLegacyTokenStorage();
+    setBootstrapSlow(false);
+    setBootstrapFailed(false);
+
+    const slowTimer = setTimeout(() => {
+      if (!cancelled) setBootstrapSlow(true);
+    }, SLOW_AFTER_MS);
 
     async function bootstrap() {
-      // Goes through the shared single-flight refresh: StrictMode's double
-      // effect and other tabs reuse one request instead of racing it.
-      const tokens = await tryRefreshSession();
-      if (cancelled) return;
-      if (tokens) {
-        applySession(tokens);
-      } else {
-        setAccessToken(null);
-        setAccessTokenState(null);
-        setUser(null);
+      try {
+        // Goes through the shared single-flight refresh: StrictMode's double
+        // effect and other tabs reuse one request instead of racing it.
+        const tokens = await tryRefreshSession();
+        if (cancelled) return;
+        if (tokens) {
+          applySession(tokens);
+        } else {
+          setAccessToken(null);
+          setAccessTokenState(null);
+          setUser(null);
+        }
+      } catch {
+        // tryRefreshSession swallows its own errors, so reaching here means
+        // something unexpected. Treat it as "could not tell" rather than
+        // "signed out", because the difference matters to what we show.
+        if (!cancelled) setBootstrapFailed(true);
+      } finally {
+        if (!cancelled) {
+          clearTimeout(slowTimer);
+          setLoading(false);
+        }
       }
-      setLoading(false);
     }
 
     void bootstrap();
     return () => {
       cancelled = true;
+      clearTimeout(slowTimer);
     };
-  }, [applySession]);
+  }, [applySession, bootstrapAttempt]);
+
+  const retryBootstrap = useCallback(() => {
+    setLoading(true);
+    setBootstrapAttempt((n) => n + 1);
+  }, []);
 
   // When apiFetch gets 401 and refresh fails, drop local session immediately.
   useEffect(() => {
@@ -95,10 +134,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => setEmailUnverifiedHandler(null);
   }, []);
 
+  // Follow what the other tabs did. Signing out in one tab used to leave every
+  // other one looking signed in until its next request happened to 401 — which
+  // on a page nobody is clicking might be never.
+  useEffect(
+    () =>
+      onSessionEvent((event) => {
+        if (event === "signed-out") {
+          setAccessToken(null);
+          setAccessTokenState(null);
+          setUser(null);
+          setEmailVerificationRequired(false);
+          return;
+        }
+        // Signed in elsewhere: fetch our own token through the shared cookie
+        // rather than being handed one. Nothing sensitive crossed the channel.
+        void refreshUser().catch(() => undefined);
+      }),
+    [refreshUser],
+  );
+
   const login = useCallback(
     async (email: string, password: string) => {
       const tokens = await authApi.login({ email, password });
       applySession(tokens);
+      broadcastSession("signed-in");
     },
     [applySession],
   );
@@ -111,6 +171,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         display_name: displayName,
       });
       applySession(tokens);
+      broadcastSession("signed-in");
     },
     [applySession],
   );
@@ -126,6 +187,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
     setEmailVerificationRequired(false);
     clearLegacyTokenStorage();
+    broadcastSession("signed-out");
   }, []);
 
   const value = useMemo(
@@ -134,6 +196,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       accessToken,
       loading,
       emailVerificationRequired,
+      bootstrapSlow,
+      bootstrapFailed,
+      retryBootstrap,
       login,
       register,
       logout,
@@ -144,6 +209,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       accessToken,
       loading,
       emailVerificationRequired,
+      bootstrapSlow,
+      bootstrapFailed,
+      retryBootstrap,
       login,
       register,
       logout,
