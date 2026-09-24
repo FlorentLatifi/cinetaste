@@ -10,6 +10,7 @@ import {
   type FeedbackAction,
 } from "../components/ActionToast";
 import { DetailSkeleton } from "../components/CatalogSkeleton";
+import { LoadFailed } from "../components/LoadFailed";
 import { useAuth } from "../features/auth/AuthContext";
 import { POST_WATCH_RATINGS } from "../features/taste/ratingScale";
 import { heroPosterUrl, posterSrcSet } from "../lib/poster";
@@ -94,6 +95,8 @@ export function TitleDetailPage() {
   const [watchLoading, setWatchLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [reloadKey, setReloadKey] = useState(0);
+  const [loadFailure, setLoadFailure] = useState<ApiError | null>(null);
   const [busy, setBusy] = useState(false);
   const [lastAction, setLastAction] = useState<FeedbackAction | null>(null);
   const [rateOpen, setRateOpen] = useState(false);
@@ -132,6 +135,7 @@ export function TitleDetailPage() {
         }
       } catch (err) {
         if (!cancelled) {
+          setLoadFailure(err instanceof ApiError ? err : null);
           setError(err instanceof ApiError ? err.message : "Could not load title");
           setTitle(null);
         }
@@ -142,7 +146,7 @@ export function TitleDetailPage() {
     return () => {
       cancelled = true;
     };
-  }, [accessToken, titleId]);
+  }, [accessToken, titleId, reloadKey]);
 
   useEffect(() => {
     if (!accessToken || !titleId) return;
@@ -245,6 +249,22 @@ export function TitleDetailPage() {
   }
 
   if (!title) {
+    // A 404 means the title is not in the catalogue and retrying cannot help.
+    // Anything else — a timeout, a 500, a dropped connection — is worth
+    // another attempt, and "Title not found" would be a lie about it.
+    if (loadFailure && loadFailure.status !== 404) {
+      return (
+        <LoadFailed
+          what="this title"
+          message={loadFailure.message}
+          onRetry={() => setReloadKey((n) => n + 1)}
+        >
+          <Link className="btn ghost" to="/">
+            Back to For You
+          </Link>
+        </LoadFailed>
+      );
+    }
     return (
       <section className="account-page">
         <h1>Title not found</h1>

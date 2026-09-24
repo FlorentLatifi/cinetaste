@@ -440,3 +440,56 @@ test("TMDb attribution appears on the landing page and behind sign-in", async ({
   await page.goto("/account");
   await expect(page.getByText(required)).toBeVisible();
 });
+
+test("A failed load offers Try again, and the retry works", async ({ page }) => {
+  // The watchlist used to render a red line and nothing else — no button, no
+  // link, nothing to do but navigate away.
+  await installApiMock(page, { onboardingComplete: true, failOnce: ["/watchlist"] });
+  await page.goto("/watchlist");
+
+  await expect(page.getByRole("heading", { name: /Couldn.t load your watchlist/i })).toBeVisible();
+  await expect(page.getByText("The server is having a moment.")).toBeVisible();
+
+  await page.getByRole("button", { name: "Try again" }).click();
+
+  await expect(page.getByRole("heading", { name: /Couldn.t load/i })).toHaveCount(0);
+});
+
+test("A failed search offers Try again", async ({ page }) => {
+  await installApiMock(page, {
+    onboardingComplete: true,
+    failOnce: ["/titles/search"],
+  });
+  await page.goto("/search?q=mock");
+
+  await expect(page.getByRole("heading", { name: /Couldn.t load those results/i })).toBeVisible();
+  await page.getByRole("button", { name: "Try again" }).click();
+  await expect(page.getByRole("heading", { name: /Couldn.t load/i })).toHaveCount(0);
+});
+
+test("A slow first request explains itself instead of spinning silently", async ({ page }) => {
+  // The API sleeps on its free tier; a cold start is about fifty seconds, and
+  // a bare spinner for that long reads as broken.
+  await installApiMock(page, { onboardingComplete: true, refreshDelayMs: 7000 });
+  await page.goto("/");
+
+  await expect(page.getByText(/Waking the server/i)).toBeVisible({ timeout: 10_000 });
+});
+
+test("Signing out in one tab signs the other out too", async ({ page, context }) => {
+  await installApiMock(page, { onboardingComplete: true });
+  await page.goto("/account");
+  await expect(page.getByRole("heading", { name: "Details" })).toBeVisible();
+
+  const second = await context.newPage();
+  await installApiMock(second, { onboardingComplete: true });
+  await second.goto("/account");
+  await expect(second.getByRole("heading", { name: "Details" })).toBeVisible();
+
+  // Sign out in the first tab. The second shares the origin's localStorage, so
+  // it hears about it without making a request of its own.
+  await page.getByRole("button", { name: /Sign out/i }).click();
+
+  await expect(second).toHaveURL(/\/login$/, { timeout: 10_000 });
+  await second.close();
+});

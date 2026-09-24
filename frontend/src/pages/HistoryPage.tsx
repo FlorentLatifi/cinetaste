@@ -4,6 +4,7 @@ import { ApiError } from "../api/client";
 import * as titlesApi from "../api/titles";
 import type { HistoryItem } from "../api/titles";
 import { CatalogSkeleton } from "../components/CatalogSkeleton";
+import { LoadFailed } from "../components/LoadFailed";
 import { PosterCard } from "../components/PosterCard";
 import { useAuth } from "../features/auth/AuthContext";
 import { prefersReducedMotion } from "../features/taste/snapshot";
@@ -182,10 +183,12 @@ export function HistoryPage() {
         })}
       </div>
 
-      {error && (
-        <p className="form-error" role="alert">
-          {error}
-        </p>
+      {error && !loading && (
+        <LoadFailed
+          what="your history"
+          message={error}
+          onRetry={() => void loadPage({ append: false })}
+        />
       )}
 
       {loading && (
