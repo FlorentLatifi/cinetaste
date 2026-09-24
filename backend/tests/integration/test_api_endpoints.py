@@ -386,3 +386,75 @@ async def test_ready_reports_whether_the_catalog_is_usable(
     unembedded = await client.get(f"{api_prefix}/ready")
     assert unembedded.status_code == 200, "an unembedded catalog is not a reason to drain traffic"
     assert unembedded.json()["catalog"] == "unembedded"
+
+
+async def test_rating_changes_the_next_slate_without_waiting_for_the_rebuild(
+    client: AsyncClient, db_session: AsyncSession, api_prefix: str
+) -> None:
+    """The point of deferring the recompute.
+
+    Passing recompute=False on its own would break this: For You is cached
+    against profile.version, so a rating that does not bump it returns the
+    identical slate and the screen never changes. The version bump stays in the
+    request; only the rebuild moves behind the response.
+    """
+    from sqlalchemy import select
+
+    from app.infrastructure.db.models.taste import TasteProfile
+
+    titles = await seed_catalog(db_session, count=24)
+    headers = _auth(await _register(client, api_prefix))
+
+    async def rate(title, event: str) -> None:
+        res = await client.post(
+            f"{api_prefix}/titles/{title.id}/interactions",
+            headers=headers,
+            json={"event_type": event},
+        )
+        assert res.status_code == 204, res.text
+
+    await rate(titles[0], "rate_4")
+    await rate(titles[1], "rate_4")
+
+    # The rebuild runs after the response; by now it has happened.
+    profile = await db_session.scalar(
+        select(TasteProfile).where(TasteProfile.user_id.is_not(None))
+    )
+    await db_session.refresh(profile)
+    assert profile.features, "the deferred rebuild should have populated the profile"
+    assert profile.vector is not None
+
+    first = (await client.get(f"{api_prefix}/recommendations/for-you?limit=10", headers=headers)).json()
+    assert first["items"], "a profile with two strong ratings should produce a slate"
+    picked = first["items"][0]["title"]["id"]
+
+    await rate(next(t for t in titles if str(t.id) == picked), "not_interested")
+
+    second = (await client.get(f"{api_prefix}/recommendations/for-you?limit=10", headers=headers)).json()
+    shown = {row["title"]["id"] for row in second["items"]}
+    assert picked not in shown, "the title just rejected must leave the feed"
+    assert second["slate_id"] != first["slate_id"], "the slate must be recomputed, not served from cache"
+
+
+async def test_a_rating_is_recorded_even_if_the_rebuild_would_fail(
+    client: AsyncClient, db_session: AsyncSession, api_prefix: str
+) -> None:
+    """The write is committed before the rebuild is attempted."""
+    from unittest.mock import AsyncMock, patch
+
+    titles = await seed_catalog(db_session, count=12)
+    headers = _auth(await _register(client, api_prefix))
+
+    with patch(
+        "app.application.taste_recompute.recompute_profile_after_response",
+        AsyncMock(side_effect=RuntimeError("rebuild exploded")),
+    ):
+        res = await client.post(
+            f"{api_prefix}/titles/{titles[0].id}/interactions",
+            headers=headers,
+            json={"event_type": "rate_4"},
+        )
+    assert res.status_code == 204
+
+    history = (await client.get(f"{api_prefix}/me/history", headers=headers)).json()
+    assert [i["title"]["id"] for i in history["items"]] == [str(titles[0].id)]
