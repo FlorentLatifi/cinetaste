@@ -133,7 +133,7 @@ once per computed slate, not per cache hit.
 | Candidate generation | ANN via HNSW with `ef_search` raised so filtering doesn't silently shrink the pool |
 | N+1 queries | Relationships never load implicitly (`lazy="raise"`); each query states what it needs |
 | Password hashing | bcrypt in a worker thread |
-| Profile recompute | Small indexed event scan + a column-only title fetch; O(interactions) per rating |
+| Profile recompute | Still O(interactions), but off the request path: the rating bumps `profile.version` so the next slate is rebuilt, and the profile itself is rebuilt after the response. A rating costs ~18 ms at any history, against 558 ms inline at 2,000 ratings |
 | Free-tier Redis | Optional by design: one process uses an in-process store |
 | Cache invalidation | Each user's slate keys are tracked in a Redis set and deleted by name. Deleting by prefix means SCAN, which walks the whole keyspace — measured 449 ms at 100k keys, on a path that runs for every rating |
 | Already-seen titles | Over-fetched from the ANN query rather than excluded in SQL: ranking filters them anyway, and a 2,000-id `NOT IN` cost 210 ms against 98 ms for a larger pool |

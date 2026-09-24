@@ -1,7 +1,7 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import DbSession, VerifiedUser, get_settings_dep
@@ -16,6 +16,7 @@ from app.api.schemas.titles import (
     WhereToWatchOut,
 )
 from app.application.recommendation_service import RecommendationService
+from app.application.taste_recompute import recompute_profile_after_response
 from app.application.taste_service import TasteService
 from app.application.watch_providers import WatchProvidersService
 from app.core.config import Settings
@@ -147,19 +148,36 @@ async def interact(
     body: InteractionRequest,
     user: VerifiedUser,
     session: DbSession,
+    background: BackgroundTasks,
     settings: Annotated[Settings, Depends(get_settings_dep)],
 ) -> None:
+    """Record one rating, save or undo.
+
+    The write and the cache invalidation happen here; rebuilding the taste
+    profile happens after the response unless configured otherwise, because it
+    re-reads the whole history and grew to 324 ms at two thousand ratings. What
+    the user sees straight away — the title leaving the feed, undo, history —
+    comes from the event log and user_title_state, not the profile.
+    """
     service = _rec_service(session, settings)
     if not await service.title_exists(title_id):
         raise NotFoundError("Title not found")
 
-    taste = TasteService(session)
+    deferred = settings.taste_recompute_deferred
+    taste = TasteService(session, half_life_days=settings.taste_half_life_days)
     await taste.record_interaction(
         user_id=user.id,
         title_id=title_id,
         event_type=body.event_type,
+        recompute=not deferred,
     )
+    if deferred:
+        # Bump now so the next For You is rebuilt; rebuild the profile behind it.
+        await taste.bump_profile_version(user.id)
     await service.invalidate_user(user.id)
+
+    if deferred:
+        background.add_task(recompute_profile_after_response, user.id, settings)
 
 
 @router.get("/watchlist", response_model=list[TitleSummaryOut])

@@ -142,6 +142,26 @@ class TasteService:
             await self.recompute_profile(user_id)
         return state
 
+    async def bump_profile_version(self, user_id: UUID) -> int:
+        """Mark the profile as changed without rebuilding it.
+
+        The For You cache is keyed by this version, so bumping it is what makes
+        a rating visible — the slate is rebuilt on the next request. Rebuilding
+        the profile itself is the expensive half and can follow behind; see
+        ``application.taste_recompute``.
+
+        Creates the row when it does not exist yet, so a user's very first
+        rating has something to version.
+        """
+        profile = await self._session.get(TasteProfile, user_id)
+        if profile is None:
+            profile = TasteProfile(user_id=user_id, version=1, features={}, vector=None)
+            self._session.add(profile)
+        else:
+            profile.version = int(profile.version or 1) + 1
+        await self._session.flush()
+        return int(profile.version)
+
     async def recompute_profile(self, user_id: UUID) -> TasteProfile:
         events = (
             await self._session.execute(

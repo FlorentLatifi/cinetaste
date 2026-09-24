@@ -93,6 +93,12 @@ class Settings(BaseSettings):
     # Taste drifts: an interaction loses half its influence after this many days
     # (0 disables decay).
     taste_half_life_days: float = Field(default=365.0, ge=0)
+    # Rebuild the taste profile after the response rather than inside the
+    # request that recorded the rating. The rebuild re-reads the whole
+    # history — 324 ms at two thousand ratings — and nothing the user sees
+    # immediately depends on it. Turn off to go back to rebuilding inline,
+    # which costs latency but cannot lose a rebuild to a restart.
+    taste_recompute_deferred: bool = True
 
     # Rate limiting
     rate_limit_enabled: bool = True
