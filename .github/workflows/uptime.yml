@@ -1,0 +1,89 @@
+name: Uptime
+
+# Two jobs in one: it tells you when the site is down, and the traffic keeps
+# Render's free tier from sleeping — which otherwise makes the first visitor of
+# every session wait about fifty seconds for a cold start.
+#
+# A failed run emails whoever owns the repository, which is the whole alerting
+# setup. No third-party account, no dashboard to forget about.
+#
+# Set these repository variables to switch it on (Settings → Secrets and
+# variables → Actions → Variables):
+#   API_BASE_URL  e.g. https://cinetaste-api.onrender.com
+#   APP_BASE_URL  e.g. https://cinetaste.vercel.app
+# Until they exist every run skips and reports why, so this is quiet before the
+# first deploy instead of crying wolf.
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: uptime
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    name: Probe API and app
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check the API is ready
+        env:
+          API_BASE_URL: ${{ vars.API_BASE_URL }}
+        run: |
+          if [ -z "$API_BASE_URL" ]; then
+            echo "API_BASE_URL is not set — nothing deployed yet, skipping."
+            exit 0
+          fi
+
+          url="${API_BASE_URL%/}/api/v1/ready"
+          # Generous timeouts on purpose: a free instance waking from sleep can
+          # take the better part of a minute, and that is not an outage.
+          body=$(curl -sS --max-time 90 --retry 2 --retry-delay 15 \
+                      --retry-all-errors -w '\n%{http_code}' "$url") || {
+            echo "::error::Could not reach $url"
+            exit 1
+          }
+
+          code=$(printf '%s' "$body" | tail -n1)
+          payload=$(printf '%s' "$body" | sed '$d')
+          echo "$url -> $code"
+          echo "$payload"
+
+          if [ "$code" != "200" ]; then
+            echo "::error::Readiness returned $code (503 means the database is unreachable)"
+            exit 1
+          fi
+
+          case "$payload" in
+            *'"database":"ok"'*) ;;
+            *) echo "::error::Database is not ok"; exit 1 ;;
+          esac
+
+          # Not a failure — the API is serving. But an unembedded catalog means
+          # For You is empty for everyone, which is worth an annotation.
+          case "$payload" in
+            *'"catalog":"unembedded"'*)
+              echo "::warning::Catalog has no embeddings — For You will be empty. Run reembed_catalog." ;;
+            *'"catalog":"empty"'*)
+              echo "::warning::Catalog is empty — run ingest_catalog." ;;
+          esac
+
+      - name: Check the app is served
+        env:
+          APP_BASE_URL: ${{ vars.APP_BASE_URL }}
+        run: |
+          if [ -z "$APP_BASE_URL" ]; then
+            echo "APP_BASE_URL is not set — skipping."
+            exit 0
+          fi
+
+          code=$(curl -sS --max-time 60 --retry 2 --retry-delay 10 \
+                      --retry-all-errors -o /dev/null -w '%{http_code}' "${APP_BASE_URL%/}/")
+          echo "${APP_BASE_URL%/}/ -> $code"
+          [ "$code" = "200" ] || { echo "::error::App returned $code"; exit 1; }

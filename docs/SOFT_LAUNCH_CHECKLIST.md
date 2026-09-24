@@ -17,6 +17,13 @@ Use this before inviting friends-and-family users. Frontend polish through Wave 
       in process just as well. (Auth fails closed only when a *configured*
       store is unreachable, not when there is none.)
 - [ ] Sentry DSN optional but recommended
+- [ ] `API_BASE_URL` and `APP_BASE_URL` repository variables set, so the Uptime
+      workflow starts probing (it skips silently until they exist)
+- [ ] One backup taken and one restore drilled — `backend/tools/backup_database.sh`,
+      then the steps in [RUNBOOK.md](RUNBOOK.md#5-database-backup-and-restore)
+- [ ] Contact address filled into the privacy page (it ships with a placeholder)
+- [ ] TMDb logo dropped at `frontend/public/tmdb.svg` (the required wording is
+      already in the footer; the mark hides itself if the file is absent)
 
 ## 2. Smoke (manual, 10 minutes)
 
