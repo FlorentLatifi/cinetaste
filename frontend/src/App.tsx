@@ -7,6 +7,7 @@ import { ForgotPasswordPage } from "./pages/ForgotPasswordPage";
 import { LandingPage } from "./pages/LandingPage";
 import { LoginPage } from "./pages/LoginPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
+import { PrivacyPage } from "./pages/PrivacyPage";
 import { RegisterPage } from "./pages/RegisterPage";
 import { ResetPasswordPage } from "./pages/ResetPasswordPage";
 import { VerifyEmailPage } from "./pages/VerifyEmailPage";
@@ -193,6 +194,9 @@ export default function App() {
           is often opened on a different device from the one used to sign
           up. The token is the proof. */}
       <Route path="/verify-email" element={<VerifyEmailPage />} />
+      {/* Reachable signed out: a privacy policy nobody can read before
+          registering is not a privacy policy. */}
+      <Route path="/privacy" element={<PrivacyPage />} />
       <Route path="/" element={<RootRoute />} />
       <Route path="*" element={<NotFoundPage />} />
     </Routes>

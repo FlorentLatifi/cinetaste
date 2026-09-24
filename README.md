@@ -179,7 +179,8 @@ without Redis at all.
 28 endpoints under `/api/v1`. Access tokens are short-lived JWTs held in memory;
 the rotating refresh token lives in an httpOnly cookie scoped to `/auth`.
 The threat model and the controls behind these routes are written up in
-[docs/SECURITY.md](docs/SECURITY.md).
+[docs/SECURITY.md](docs/SECURITY.md); what to do when something breaks is in
+[docs/RUNBOOK.md](docs/RUNBOOK.md).
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -207,7 +208,7 @@ cd backend && pytest -m "not integration"   # 226 unit tests
 docker compose up -d db                      # integration needs Postgres
 INTEGRATION_REQUIRED=1 pytest -m integration # 15 API + DB tests, run the migrations
 cd frontend && npm test                     # 68 unit tests (vitest)
-cd frontend && npx playwright test           # 40 e2e + axe accessibility tests
+cd frontend && npx playwright test           # 43 e2e + axe accessibility tests
 ```
 
 Integration tests build the schema with `alembic upgrade head` (migrations are

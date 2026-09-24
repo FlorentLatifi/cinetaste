@@ -15,6 +15,7 @@ const guestRoutes: { path: string; ready: string }[] = [
   { path: "/register", ready: "role=heading[name='Create account']" },
   { path: "/forgot-password", ready: "role=heading[name='Forgot password']" },
   { path: "/reset-password", ready: "role=heading[name='Reset password']" },
+  { path: "/privacy", ready: "role=heading[name='Privacy']" },
 ];
 
 for (const route of guestRoutes) {
