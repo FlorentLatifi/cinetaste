@@ -1,0 +1,105 @@
+name: Catalog
+
+# Fills and refreshes the production catalog from TMDb without a laptop.
+#
+# Render's free plan has no shell, so the only other way to run the ingest is
+# from a personal machine against the external database URL. A full run takes a
+# long time from Europe to Oregon and dies if the lid closes. A GitHub runner
+# sits close to the database and is not someone's laptop.
+#
+# Re-running is safe: titles are upserted by TMDb id, and every batch commits
+# on its own, so an interrupted run keeps what it wrote.
+#
+# Set these repository secrets to switch it on (Settings → Secrets and
+# variables → Actions → Secrets):
+#   DATABASE_URL  Render → cinetaste-db → Connect → External Database URL
+#   TMDB_API_KEY  https://www.themoviedb.org/settings/api
+# Then Actions → Catalog → Run workflow.
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "popular = onboarding deck + discover pages; seed-only = onboarding deck only (fast)"
+        type: choice
+        options: [popular, seed-only]
+        default: popular
+      pages:
+        description: "Discover pages per sort and media type (20 titles each)"
+        type: number
+        default: 10
+  # Monthly, so new releases and shifting popularity reach recommendations.
+  schedule:
+    - cron: "17 3 1 * *"
+
+permissions:
+  contents: read
+
+# Never two ingests at once: they would fetch the same titles twice. A queued
+# run waits instead of cancelling one that is halfway through.
+concurrency:
+  group: catalog
+  cancel-in-progress: false
+
+jobs:
+  ingest:
+    name: Ingest TMDb catalog
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
+      # The script only reads the database and TMDb settings; these exist so
+      # Settings validates. No Redis, no tokens issued.
+      APP_ENV: local
+      APP_DEBUG: "false"
+      REDIS_URL: ""
+      JWT_SECRET: catalog-ingest-only-never-signs-a-token-000000
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check secrets
+        run: |
+          missing=""
+          [ -n "$DATABASE_URL" ] || missing="$missing DATABASE_URL"
+          [ -n "$TMDB_API_KEY" ] || missing="$missing TMDB_API_KEY"
+          if [ -n "$missing" ]; then
+            if [ "${{ github.event_name }}" = "schedule" ]; then
+              echo "Secrets not set:$missing — skipping the scheduled refresh."
+              echo "SKIP=1" >> "$GITHUB_ENV"
+              exit 0
+            fi
+            echo "::error::Set repository secrets:$missing (see the comment at the top of catalog.yml)"
+            exit 1
+          fi
+          case "$DATABASE_URL" in
+            *localhost*|*127.0.0.1*)
+              echo "::error::DATABASE_URL points at localhost. Use Render's External Database URL."
+              exit 1 ;;
+          esac
+
+      - uses: actions/setup-python@v7
+        if: env.SKIP != '1'
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        if: env.SKIP != '1'
+        run: pip install -r requirements.txt
+
+      - name: Ingest
+        if: env.SKIP != '1'
+        env:
+          MODE: ${{ inputs.mode || 'popular' }}
+          PAGES: ${{ inputs.pages || 10 }}
+        run: |
+          if [ "$MODE" = "seed-only" ]; then
+            python -m app.scripts.ingest_catalog --seed-only
+          else
+            python -m app.scripts.ingest_catalog --pages "$PAGES"
+          fi
