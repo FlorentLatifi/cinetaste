@@ -7,6 +7,9 @@ Design:
 * Details are fetched concurrently (bounded) and written in batches, one
   commit per batch. Each title is upserted in a savepoint, so one bad payload
   or a TMDb error skips that title instead of rolling back the whole run.
+* A dropped connection is *not* a bad payload and must not be treated as one.
+  It is retried once on a fresh connection, and if that fails too the run stops
+  with a single clear error. See ``_connection_is_lost``.
 * Re-running is safe: titles are upserted by TMDb id.
 """
 
@@ -19,6 +22,12 @@ from typing import Any
 from uuid import uuid4
 
 from sqlalchemy import delete, select
+from sqlalchemy.exc import (
+    DBAPIError,
+    DisconnectionError,
+    InterfaceError,
+    PendingRollbackError,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.data.onboarding_seed import all_seed_tmdb_ids
@@ -42,6 +51,62 @@ DISCOVER_SORTS = ("popularity.desc", "vote_count.desc")
 MAX_KEYWORDS = 25
 MAX_CAST = 8
 CREW_JOBS = {"Director", "Writer", "Screenplay"}
+
+
+class IngestConnectionLost(RuntimeError):
+    """The database became unreachable, so the run stopped early.
+
+    Distinct from a title that fails to upsert: that costs one title, this
+    costs every title after it. Batches committed before the drop are safe --
+    the ingest is idempotent, so re-running continues from the catalog as it
+    stands.
+    """
+
+
+def _connection_is_lost(exc: BaseException) -> bool:
+    """Did the session die, or did just this one title fail?
+
+    Worth the care: the two arrive at the same ``except`` and want opposite
+    handling. A run against a remote database once hit a dropped socket
+    mid-batch and logged nine consecutive tracebacks -- the same dead
+    connection, reported once per remaining title -- because the bad-payload
+    path swallowed it.
+
+    ``PendingRollbackError`` is the unambiguous case: SQLAlchemy refuses every
+    further statement until the transaction is rolled back, so no title after
+    it can succeed. The other checks catch the *first* failure, which arrives
+    as whatever the driver raised. asyncpg errors are deliberately not matched
+    by type -- importing the driver into the application layer to catch one
+    would be the wrong trade -- so the cause chain is inspected by name, which
+    also covers the bare ``OSError`` a half-open socket surfaces.
+    """
+    if isinstance(exc, (PendingRollbackError, DisconnectionError, InterfaceError)):
+        return True
+    if isinstance(exc, DBAPIError) and exc.connection_invalidated:
+        return True
+
+    driver_connection_errors = {
+        "ConnectionDoesNotExistError",
+        "ConnectionFailureError",
+        "ConnectionRejectionError",
+        "ClientCannotConnectError",
+        "TooManyConnectionsError",
+    }
+    seen: set[int] = set()
+    pending: list[BaseException] = [exc]
+    while pending:
+        cause = pending.pop()
+        if id(cause) in seen:
+            continue
+        seen.add(id(cause))
+        if isinstance(cause, OSError) or type(cause).__name__ in driver_connection_errors:
+            return True
+        # ``orig`` as well as the raise-from chain: SQLAlchemy keeps the driver
+        # exception on the wrapper, and that is where the useful name lives.
+        for nxt in (cause.__cause__, cause.__context__, getattr(cause, "orig", None)):
+            if isinstance(nxt, BaseException):
+                pending.append(nxt)
+    return False
 
 
 def _parse_date(value: str | None) -> date | None:
@@ -140,25 +205,33 @@ class CatalogIngestService:
         for start in range(0, len(targets), self._batch_size):
             batch = targets[start : start + self._batch_size]
             fetched = await asyncio.gather(*(fetch(m, t) for m, t in batch))
-            for media_type, tmdb_id, payload in fetched:
-                if payload is None:
-                    failed += 1
-                    continue
+            try:
+                batch_created, batch_updated, batch_failed = await self._write_batch(fetched)
+            except IngestConnectionLost:
+                # One retry, because the usual cause is a laptop that slept or a
+                # link that blinked: by the time we notice, the network is
+                # generally back and the pool hands us a working connection.
+                logger.warning(
+                    "ingest_connection_lost done=%s/%s - reconnecting and redoing this batch",
+                    start,
+                    len(targets),
+                    exc_info=True,
+                )
+                await self._reset_session()
                 try:
-                    async with self._session.begin_nested():
-                        status = await self._upsert_from_detail(media_type, payload)
-                except Exception:
-                    failed += 1
-                    # Objects created in the rolled-back savepoint are gone; drop
-                    # cached references so later titles look them up again.
-                    self._genre_cache.clear()
-                    self._person_cache.clear()
-                    self._keyword_cache.clear()
-                    logger.exception("title_upsert_failed media_type=%s tmdb_id=%s", media_type, tmdb_id)
-                    continue
-                created += status == "created"
-                updated += status == "updated"
-            await self._session.commit()
+                    batch_created, batch_updated, batch_failed = await self._write_batch(fetched)
+                except IngestConnectionLost as lost:
+                    raise IngestConnectionLost(
+                        f"database connection lost after {created + updated} titles "
+                        f"({start} of {len(targets)} attempted). Everything committed "
+                        f"so far is safe; re-run to continue."
+                    ) from lost
+
+            # Folded in only once the batch is through, so a redone batch
+            # replaces its counts instead of doubling them.
+            created += batch_created
+            updated += batch_updated
+            failed += batch_failed
             logger.info(
                 "ingest_progress done=%s/%s created=%s updated=%s failed=%s",
                 min(start + self._batch_size, len(targets)),
@@ -168,6 +241,70 @@ class CatalogIngestService:
                 failed,
             )
         return {"requested": len(targets), "created": created, "updated": updated, "failed": failed}
+
+    async def _write_batch(
+        self, fetched: list[tuple[str, int, dict[str, Any] | None]]
+    ) -> tuple[int, int, int]:
+        """Upsert one batch and commit it, returning its own (created, updated, failed).
+
+        Counts are per batch rather than accumulated so the caller can redo a
+        batch after a reconnect without double counting. Raises
+        ``IngestConnectionLost`` the moment the session stops being usable;
+        every other failure costs one title and the batch carries on.
+        """
+        created = updated = failed = 0
+        for media_type, tmdb_id, payload in fetched:
+            if payload is None:
+                failed += 1
+                continue
+            try:
+                async with self._session.begin_nested():
+                    status = await self._upsert_from_detail(media_type, payload)
+            except Exception as exc:
+                if _connection_is_lost(exc):
+                    raise IngestConnectionLost(str(exc)) from exc
+                failed += 1
+                # Objects created in the rolled-back savepoint are gone; drop
+                # cached references so later titles look them up again.
+                self._forget_cached_rows()
+                logger.exception("title_upsert_failed media_type=%s tmdb_id=%s", media_type, tmdb_id)
+                continue
+            created += status == "created"
+            updated += status == "updated"
+
+        try:
+            await self._session.commit()
+        except Exception as exc:
+            if _connection_is_lost(exc):
+                raise IngestConnectionLost(str(exc)) from exc
+            raise
+        return created, updated, failed
+
+    async def _reset_session(self) -> None:
+        """Make the session usable again after the connection dropped.
+
+        The rollback is what clears the failed transaction; the next statement
+        then checks a fresh connection out of the pool. It can itself fail on a
+        dead socket, which is fine and not worth propagating - the state it was
+        meant to clear is gone either way.
+        """
+        try:
+            await self._session.rollback()
+        except Exception:  # noqa: BLE001 - best effort on an already-dead session
+            logger.warning("ingest_rollback_failed", exc_info=True)
+        self._forget_cached_rows()
+
+    def _forget_cached_rows(self) -> None:
+        """Drop ORM rows cached from a transaction that no longer exists.
+
+        ``_genres_ready`` deliberately stays set: ``_ensure_genres`` commits, so
+        the genre rows survive and the lookups below find them again by SELECT.
+        Anything that was *not* committed is gone from the database too, and is
+        simply recreated.
+        """
+        self._genre_cache.clear()
+        self._person_cache.clear()
+        self._keyword_cache.clear()
 
     # ------------------------------------------------------------ lookups
 
