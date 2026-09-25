@@ -35,7 +35,7 @@ python -c "import secrets; print(secrets.token_urlsafe(48))"
 2. Connect `FlorentLatifi/cinetaste`
 3. Apply `render.yaml` for production (or `render.staging.yaml` for staging)
 4. Set secrets in the dashboard:
-   - `CORS_ORIGINS` = your Vercel URL (e.g. `https://cinetaste.vercel.app`)
+   - `CORS_ORIGINS` = your Vercel URL (live: `https://cinetaste-rho.vercel.app`; keep `render.yaml` in sync, a blueprint sync overwrites dashboard edits)
    - `TMDB_API_KEY` (optional at first)
    - Confirm `JWT_SECRET` was generated
 5. After first deploy, open a shell / connect to Postgres and ensure:
@@ -225,12 +225,18 @@ Startup **fails closed** if production secrets look like local defaults.
 
 ## 5. Post-deploy product steps
 
-```bash
-# Inside API container / one-off job
-python -m app.scripts.seed_demo_catalog
-# or
-python -m app.scripts.ingest_catalog --pages 3
-```
+Fill the catalog with the **Catalog** workflow (`.github/workflows/catalog.yml`).
+Render's free plan has no shell, and running the ingest from a laptop against
+the external database URL is slow and dies when the machine sleeps.
+
+1. GitHub → Settings → Secrets and variables → Actions → **Secrets**:
+   - `DATABASE_URL` = Render → `cinetaste-db` → Connect → **External** Database URL
+   - `TMDB_API_KEY`
+2. Actions → **Catalog** → Run workflow. `seed-only` fills the onboarding deck in
+   a few minutes; `popular` with 10 pages adds about 800 titles.
+3. It then refreshes monthly on its own. Re-running is always safe (upserts).
+
+`/api/v1/ready` reports `"catalog":"empty"` or `"unembedded"` when this is missing.
 
 Then:
 

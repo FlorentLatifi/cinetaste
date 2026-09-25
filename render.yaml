@@ -18,12 +18,13 @@ services:
         value: "false"
       - key: API_PREFIX
         value: /api/v1
-      # Set this BEFORE first deploy to your real Vercel URL (required in production).
-      # Temporary placeholder is OK; update after Vercel is live, then redeploy.
+      # The live Vercel URL. Vercel appended "-rho" because "cinetaste" was
+      # taken, so this is not the project name. Change it here, not only in the
+      # dashboard: a blueprint sync writes these values back over manual edits.
       - key: CORS_ORIGINS
-        value: https://cinetaste.vercel.app
+        value: https://cinetaste-rho.vercel.app
       - key: PUBLIC_APP_URL
-        value: https://cinetaste.vercel.app
+        value: https://cinetaste-rho.vercel.app
       - key: JWT_SECRET
         generateValue: true
       - key: DATABASE_URL
@@ -47,7 +48,7 @@ services:
       # hardcoded guess would then 400 every request. Add a custom domain here
       # before pointing DNS at it.
       - key: TRUSTED_HOSTS
-        value: cinetaste.vercel.app,*.vercel.app
+        value: cinetaste-rho.vercel.app,*.vercel.app
       # Vercel rewrite -> Render = two proxies appending X-Forwarded-For.
       - key: TRUSTED_PROXY_HOPS
         value: "2"
@@ -83,6 +84,7 @@ databases:
     #   CREATE EXTENSION IF NOT EXISTS pg_trgm;
     # The 0006 migration also runs these; this comment is a reminder.
 #
-# After the first deploy (Render shell):
-#   python -m app.scripts.ingest_catalog --pages 10   # needs TMDB_API_KEY
-#   python -m app.scripts.reembed_catalog             # after embedding changes
+# Filling the catalog: the free plan has no shell, so use the "Catalog"
+# workflow in GitHub Actions (.github/workflows/catalog.yml). It runs
+#   python -m app.scripts.ingest_catalog --pages 10
+# against this database and refreshes it monthly. See docs/DEPLOY.md §5.
