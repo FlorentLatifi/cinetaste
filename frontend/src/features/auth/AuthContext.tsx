@@ -49,7 +49,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setAccessToken(tokens.access_token);
     setAccessTokenState(tokens.access_token);
     setUser(tokens.user);
-    if (tokens.user.email_verified_at) setEmailVerificationRequired(false);
+    // Known at sign-in now, so "check your inbox" shows straight away rather
+    // than after the first gated request comes back 403.
+    setEmailVerificationRequired(
+      Boolean(tokens.email_verification_required) && !tokens.user.email_verified_at,
+    );
   }, []);
 
   const refreshUser = useCallback(async () => {

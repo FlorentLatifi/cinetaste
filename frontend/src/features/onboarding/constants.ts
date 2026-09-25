@@ -23,3 +23,7 @@ export function isRating(action: OnboardingAction): boolean {
 export function isPositive(action: OnboardingAction): boolean {
   return action === "rate_2" || action === "rate_3" || action === "rate_4";
 }
+
+/** Must match backend GUEST_MIN_RATINGS / GUEST_MIN_POSITIVE (routes/guest.py). */
+export const GUEST_MIN_RATINGS = 3;
+export const GUEST_MIN_POSITIVE = 1;

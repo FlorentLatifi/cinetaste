@@ -254,6 +254,12 @@ class AuthService:
             raise AppError("Invalid or expired reset link", status_code=400, code="invalid_reset_token")
 
         user.password_hash = await hash_password_async(new_password)
+        # The link was opened from this inbox, which is exactly what email
+        # verification proves. It also settles squatting: if someone else
+        # registered this address, its owner resets the password, takes the
+        # account over, and every session the squatter held is revoked below.
+        if user.email_verified_at is None:
+            user.email_verified_at = now
         # Revoking refresh tokens below only closes the long-lived door.
         # Access tokens are stateless and stay valid for their full TTL, so
         # record the cut-off that api.deps checks them against.
