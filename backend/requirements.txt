@@ -29,4 +29,4 @@ httpx==0.28.1
 python-dotenv==1.2.3
 
 # Observability (optional at runtime — no-op without SENTRY_DSN)
-sentry-sdk[fastapi]==2.69.2
+sentry-sdk[fastapi]==2.70.0
