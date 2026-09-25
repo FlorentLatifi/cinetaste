@@ -57,6 +57,15 @@ export function PrivacyPage() {
             whether the recommendations are any good.
           </dd>
 
+          <dt>Guest mode</dt>
+          <dd>
+            Trying CineTaste without an account stores nothing on our servers:
+            your answers are sent with each request, used to rank that one
+            slate, and discarded. This browser keeps them (and any picks you
+            saved) in local storage for up to seven days, so they can move into
+            an account if you create one. Clearing site data removes them.
+          </dd>
+
           <dt>Session tokens</dt>
           <dd>
             Sign-in, password-reset and email-confirmation tokens are stored as

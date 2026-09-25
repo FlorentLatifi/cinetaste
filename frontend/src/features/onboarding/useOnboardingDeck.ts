@@ -1,27 +1,46 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ApiError } from "../../api/client";
+import * as guestApi from "../../api/guest";
 import * as titlesApi from "../../api/titles";
 import type { OnboardingAction, OnboardingReaction, Title } from "../../api/titles";
 import { useAuth } from "../auth/AuthContext";
+import { clearGuestDraft, loadGuestDraft, saveGuestDraft } from "../guest/guestDraft";
 import {
   BATCH_SIZE,
+  GUEST_MIN_POSITIVE,
+  GUEST_MIN_RATINGS,
   isPositive,
   isRating,
   MIN_POSITIVE,
   MIN_RATINGS,
 } from "./constants";
 
+export type DeckOptions =
+  | { mode: "account" }
+  | {
+      mode: "guest";
+      /** Called with every answer once the gate is met; shows the results. */
+      onGuestFinish: (reactions: OnboardingReaction[]) => Promise<void>;
+    };
+
 /**
  * Onboarding deck state machine: load batches, apply reactions, finish.
- * Presentation stays in OnboardingPage.
+ *
+ * The same deck serves guests (answers stay in the browser and go to the
+ * stateless guest endpoint) and accounts (answers are stored). Whatever a
+ * guest answered is carried into account onboarding, so signing up never
+ * means answering the same cards twice. Presentation stays in the page.
  */
-export function useOnboardingDeck() {
+export function useOnboardingDeck(options: DeckOptions = { mode: "account" }) {
+  const guest = options.mode === "guest";
   const { accessToken, user, refreshUser } = useAuth();
   const navigate = useNavigate();
+  // Read once: the draft is the starting point, later writes come from here.
+  const [initialDraft] = useState(() => loadGuestDraft());
   const [cards, setCards] = useState<Title[]>([]);
   const [index, setIndex] = useState(0);
-  const [reactions, setReactions] = useState<OnboardingReaction[]>([]);
+  const [reactions, setReactions] = useState<OnboardingReaction[]>(initialDraft.reactions);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -30,35 +49,48 @@ export function useOnboardingDeck() {
   const [exhausted, setExhausted] = useState(false);
   const [cardAnimKey, setCardAnimKey] = useState(0);
   const [exiting, setExiting] = useState(false);
+  const carriedIds = useRef(new Set(initialDraft.reactions.map((r) => r.title_id)));
+
+  const minRatings = guest ? GUEST_MIN_RATINGS : MIN_RATINGS;
+  const minPositive = guest ? GUEST_MIN_POSITIVE : MIN_POSITIVE;
+  const onGuestFinish = guest ? options.onGuestFinish : null;
+
+  const fetchCards = useCallback(
+    async (exclude: string[]) => {
+      if (guest) return (await guestApi.getGuestCards({ limit: BATCH_SIZE, exclude })).items;
+      if (!accessToken) return null;
+      return (await titlesApi.getOnboardingCards(accessToken, { limit: BATCH_SIZE, exclude }))
+        .items;
+    },
+    [guest, accessToken],
+  );
 
   const loadBatch = useCallback(
     async (exclude: string[], replace: boolean) => {
-      if (!accessToken) return;
-      const data = await titlesApi.getOnboardingCards(accessToken, {
-        limit: BATCH_SIZE,
-        exclude,
-      });
-      if (data.items.length === 0) {
+      const items = await fetchCards(exclude);
+      if (items === null) return;
+      if (items.length === 0) {
         setExhausted(true);
         return;
       }
-      setCards((prev) => (replace ? data.items : [...prev, ...data.items]));
+      setCards((prev) => (replace ? items : [...prev, ...items]));
       setExhausted(false);
     },
-    [accessToken],
+    [fetchCards],
   );
 
   useEffect(() => {
-    if (user?.onboarding_completed_at) {
+    if (!guest && user?.onboarding_completed_at) {
       navigate("/", { replace: true });
       return;
     }
-    if (!accessToken) return;
+    if (!guest && !accessToken) return;
 
     let cancelled = false;
     (async () => {
       try {
-        await loadBatch([], true);
+        // Cards already answered as a guest are not asked again.
+        await loadBatch([...carriedIds.current], true);
       } catch (err) {
         if (!cancelled) {
           setError(
@@ -74,7 +106,10 @@ export function useOnboardingDeck() {
     return () => {
       cancelled = true;
     };
-  }, [accessToken, user, navigate, loadBatch]);
+    // Only the completion stamp matters here: depending on the whole user
+    // would reload the deck, and throw away the cards being answered, every
+    // time refreshUser returns a new object.
+  }, [guest, accessToken, user?.onboarding_completed_at, navigate, loadBatch]);
 
   const current = cards[index];
   const ratedCount = useMemo(
@@ -89,18 +124,25 @@ export function useOnboardingDeck() {
     () => reactions.filter((r) => r.action === "haven't_seen").length,
     [reactions],
   );
+  const carriedCount = useMemo(
+    () => reactions.filter((r) => carriedIds.current.has(r.title_id)).length,
+    [reactions],
+  );
   const canFinish =
-    ratedCount >= MIN_RATINGS && positiveCount >= MIN_POSITIVE && !submitting;
+    ratedCount >= minRatings && positiveCount >= minPositive && !submitting;
 
-  const seenIds = useMemo(() => cards.map((c) => c.id), [cards]);
-  const progressPct = Math.min(100, (ratedCount / MIN_RATINGS) * 100);
+  const seenIds = useMemo(
+    () => [...new Set([...carriedIds.current, ...cards.map((c) => c.id)])],
+    [cards],
+  );
+  const progressPct = Math.min(100, (ratedCount / minRatings) * 100);
 
   const ensureMoreCardsIfNeeded = useCallback(
     async (nextIndex: number, nextReactions: OnboardingReaction[]) => {
       const remaining = cards.length - nextIndex;
       const ratingsSoFar = nextReactions.filter((r) => isRating(r.action)).length;
-      if (remaining > 3 || exhausted || !accessToken) return;
-      if (ratingsSoFar >= MIN_RATINGS && remaining > 0) return;
+      if (remaining > 3 || exhausted) return;
+      if (ratingsSoFar >= minRatings && remaining > 0) return;
 
       setLoadingMore(true);
       try {
@@ -113,7 +155,7 @@ export function useOnboardingDeck() {
         setLoadingMore(false);
       }
     },
-    [accessToken, cards.length, exhausted, loadBatch, seenIds],
+    [cards.length, exhausted, loadBatch, seenIds, minRatings],
   );
 
   const advanceCard = useCallback(() => {
@@ -121,24 +163,65 @@ export function useOnboardingDeck() {
     setCardAnimKey((k) => k + 1);
   }, []);
 
+  const finishAccount = useCallback(
+    async (finalReactions: OnboardingReaction[], ratings: number) => {
+      if (!accessToken) return;
+      try {
+        await titlesApi.completeOnboarding(accessToken, finalReactions);
+      } catch (err) {
+        if (err instanceof ApiError && err.code === "unknown_titles" && carriedIds.current.size) {
+          // A title answered as a guest has since left the catalog. Drop the
+          // carried answers rather than leave the person stuck on a 400.
+          const fresh = finalReactions.filter((r) => !carriedIds.current.has(r.title_id));
+          carriedIds.current = new Set();
+          clearGuestDraft();
+          setReactions(fresh);
+          throw new ApiError(
+            400,
+            "unknown_titles",
+            "A few earlier answers are no longer in the catalog. Rate a few more to finish.",
+          );
+        }
+        throw err;
+      }
+      // Picks saved as a guest become the start of their watchlist. Best
+      // effort: onboarding is already done, and a failure here only costs
+      // a saved title, not the account.
+      const saved = loadGuestDraft().saved;
+      await Promise.allSettled(
+        saved.map((id) => titlesApi.interact(accessToken, id, "watchlist")),
+      );
+      clearGuestDraft();
+      try {
+        await refreshUser();
+      } catch {
+        // Still navigate; home may re-fetch user on next load
+      }
+      navigate("/", {
+        replace: true,
+        state: { fromOnboarding: true, ratingsCount: ratings },
+      });
+    },
+    [accessToken, navigate, refreshUser],
+  );
+
   const finish = useCallback(
     async (finalReactions: OnboardingReaction[]) => {
-      if (!accessToken) return;
       const ratings = finalReactions.filter((r) => isRating(r.action)).length;
-      const positives = finalReactions.filter((r) =>
-        isPositive(r.action),
-      ).length;
-      if (ratings < MIN_RATINGS) {
+      const positives = finalReactions.filter((r) => isPositive(r.action)).length;
+      if (ratings < minRatings) {
         setError(
-          `Rate at least ${MIN_RATINGS} titles you've actually seen. ` +
+          `Rate at least ${minRatings} titles you've actually seen. ` +
             `Current: ${ratings}. “Haven't seen it” does not count.`,
         );
         setExiting(false);
         return;
       }
-      if (positives < MIN_POSITIVE) {
+      if (positives < minPositive) {
         setError(
-          `Mark at least ${MIN_POSITIVE} as OK, Good, or Favorite so we know what you like.`,
+          minPositive === 1
+            ? "Mark at least one title you liked so we know what to look for."
+            : `Mark at least ${minPositive} as OK, Good, or Favorite so we know what you like.`,
         );
         setExiting(false);
         return;
@@ -147,19 +230,12 @@ export function useOnboardingDeck() {
       setSubmitting(true);
       setError(null);
       try {
-        await titlesApi.completeOnboarding(accessToken, finalReactions);
-        try {
-          await refreshUser();
-        } catch {
-          // Still navigate; home may re-fetch user on next load
+        if (onGuestFinish) {
+          await onGuestFinish(finalReactions);
+          setSubmitting(false);
+        } else {
+          await finishAccount(finalReactions, ratings);
         }
-        navigate("/", {
-          replace: true,
-          state: {
-            fromOnboarding: true,
-            ratingsCount: ratings,
-          },
-        });
       } catch (err) {
         setError(
           err instanceof ApiError
@@ -170,7 +246,7 @@ export function useOnboardingDeck() {
         setExiting(false);
       }
     },
-    [accessToken, navigate, refreshUser],
+    [finishAccount, onGuestFinish, minRatings, minPositive],
   );
 
   const applyAction = useCallback(
@@ -185,6 +261,9 @@ export function useOnboardingDeck() {
         { title_id: current.id, action },
       ];
       setReactions(nextReactions);
+      if (guest) {
+        saveGuestDraft({ reactions: nextReactions, saved: loadGuestDraft().saved });
+      }
 
       await new Promise((r) => setTimeout(r, 160));
 
@@ -201,7 +280,7 @@ export function useOnboardingDeck() {
         return;
       }
 
-      if (nextRated >= MIN_RATINGS && nextPositive >= MIN_POSITIVE) {
+      if (nextRated >= minRatings && nextPositive >= minPositive) {
         await finish(nextReactions);
         return;
       }
@@ -211,21 +290,18 @@ export function useOnboardingDeck() {
         const exclude = [
           ...new Set([...seenIds, ...nextReactions.map((r) => r.title_id)]),
         ];
-        const data = await titlesApi.getOnboardingCards(accessToken!, {
-          limit: BATCH_SIZE,
-          exclude,
-        });
-        if (data.items.length === 0) {
+        const items = await fetchCards(exclude);
+        if (!items || items.length === 0) {
           setExhausted(true);
           setError(
-            `We need ${MIN_RATINGS} ratings of titles you've seen (you have ${nextRated}). ` +
+            `We need ${minRatings} ratings of titles you've seen (you have ${nextRated}). ` +
               "“Haven't seen it” doesn't count — keep going when more titles load, or seed the catalog.",
           );
           setExiting(false);
           setReactions(nextReactions);
           return;
         }
-        setCards((prev) => [...prev, ...data.items]);
+        setCards((prev) => [...prev, ...items]);
         setIndex(nextIndex);
         advanceCard();
       } catch (err) {
@@ -238,21 +314,33 @@ export function useOnboardingDeck() {
       }
     },
     [
-      accessToken,
       advanceCard,
       cards.length,
       current,
       ensureMoreCardsIfNeeded,
       exiting,
+      fetchCards,
       finish,
+      guest,
       index,
+      minPositive,
+      minRatings,
       reactions,
       seenIds,
       submitting,
     ],
   );
 
+  /** Forget answers carried over from guest mode (e.g. a shared computer). */
+  const discardCarried = useCallback(() => {
+    const carried = carriedIds.current;
+    carriedIds.current = new Set();
+    clearGuestDraft();
+    setReactions((prev) => prev.filter((r) => !carried.has(r.title_id)));
+  }, []);
+
   return {
+    discardCarried,
     current,
     reactions,
     error,
@@ -266,11 +354,12 @@ export function useOnboardingDeck() {
     ratedCount,
     positiveCount,
     unseenCount,
+    carriedCount,
     canFinish,
     progressPct,
     applyAction,
     finish,
-    minRatings: MIN_RATINGS,
-    minPositive: MIN_POSITIVE,
+    minRatings,
+    minPositive,
   };
 }

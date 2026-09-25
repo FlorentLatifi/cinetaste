@@ -8,7 +8,6 @@ from app.api.deps import DbSession, VerifiedUser, get_settings_dep
 from app.api.schemas.titles import (
     InteractionRequest,
     ProviderOfferOut,
-    ReasonOut,
     RecommendationItemOut,
     RecommendationSlateOut,
     TitleDetailOut,
@@ -41,16 +40,7 @@ async def for_you(
     # Log what was shown once per computed slate, not on every cache hit.
     if slate.fresh:
         await service.log_impressions(user.id, slate.items, slate_id=slate.slate_id)
-    items = [
-        RecommendationItemOut(
-            title=TitleSummaryOut.from_title(title),
-            score=round(item.score, 4),
-            reasons=[
-                ReasonOut(code=r.code, message=r.message) for r in item.reasons
-            ],
-        )
-        for title, item in slate.items
-    ]
+    items = [RecommendationItemOut.from_ranked(title, item) for title, item in slate.items]
     return RecommendationSlateOut(items=items, slate_id=slate.slate_id)
 
 

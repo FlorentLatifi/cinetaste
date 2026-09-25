@@ -111,6 +111,31 @@ logs and never returned in the response; only `APP_ENV=local`/`test` get a
 refuses to start if SMTP is on while `PUBLIC_APP_URL` is not a public https URL,
 because that is where reset links point.
 
+### Requiring a confirmed email
+
+Off by default. With it on, a new account can do nothing but confirm its
+address, so nobody can use an email they don't own. Production refuses to start
+with it on and no SMTP, because then nobody could ever confirm.
+
+1. Set up SMTP (Resend's free tier is enough): `SMTP_HOST`, `SMTP_PORT`,
+   `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`, and `PUBLIC_APP_URL`.
+2. Check that "Forgot password" delivers a mail.
+3. Only then set `REQUIRE_EMAIL_VERIFICATION=true` on the API and redeploy.
+
+The SPA shows "Check your inbox" straight after sign-up (the session says
+verification is owed), moves on by itself when the link is opened in another
+tab, and keeps `/account` reachable so a mistyped address can be deleted.
+A password reset also confirms the address: it proves the same thing, and it
+lets the real owner of an address someone else registered take it over.
+
+### Guest mode
+
+`/try` lets anyone rate a few cards and get a slate without an account, via the
+public `GET /guest/cards` and `POST /guest/recommendations`. Nothing is written
+server-side. Both share a lower rate-limit bucket (`RATE_LIMIT_GUEST_REQUESTS`,
+default 30/min per IP), the unfiltered deck is cached for 10 minutes, and a
+slate is capped at 30 titles.
+
 ### Auth cookies (SPA)
 
 | Item | Value |

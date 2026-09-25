@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from functools import partial
 from typing import Any
 from uuid import UUID, uuid4
@@ -17,6 +18,7 @@ from app.application.history_cursor import (
     decode_history_cursor,
     encode_history_cursor,
 )
+from app.application.taste_service import load_profile_titles
 from app.core.config import Settings
 from app.data.onboarding_seed import (
     load_onboarding_seed_deck,
@@ -24,13 +26,19 @@ from app.data.onboarding_seed import (
     pick_diverse_fallback,
 )
 from app.domain.exceptions import AppError
-from app.domain.taste_signals import FEED_EXCLUDE_STATES, HISTORY_VISIBLE_STATES
+from app.domain.taste_signals import (
+    FEED_EXCLUDE_STATES,
+    HISTORY_VISIBLE_STATES,
+    effective_title_signals,
+    weight_for,
+)
 from app.infrastructure.cache import get_store
 from app.infrastructure.db.models.catalog import Credit, Title
 from app.infrastructure.db.models.interaction import RecommendationImpression, UserTitleState
 from app.infrastructure.db.models.taste import TasteProfile
 from app.recommendation.explanations import Reason, strip_explain_memory
 from app.recommendation.pipeline import RankedItem, rank_titles
+from app.recommendation.profile import build_profile
 
 logger = logging.getLogger(__name__)
 
@@ -168,33 +176,12 @@ class RecommendationService:
 
         user_vector = list(profile.vector) if profile is not None and profile.vector is not None else None
         raw_features = dict(profile.features) if profile and profile.features else {}
-        user_features, explain_memory = strip_explain_memory(raw_features)
-
-        titles = await self._load_candidates(user_vector=user_vector, exclude_ids=exclude_ids)
-        if titles and not any(t.embedding is not None for t in titles):
-            # Ranking drops every title whose embedding is NULL, so this returns
-            # an empty slate with a 200 and no other sign that anything is
-            # wrong. It means ingest ran and re-embed did not.
-            logger.warning(
-                "slate_candidates_unembedded user_id=%s candidates=%d — "
-                "For You will be empty; run: python -m app.scripts.reembed_catalog",
-                user_id,
-                len(titles),
-            )
-
-        # Ranking is CPU work (numpy + Python); keep it off the event loop.
-        ranked = await to_thread.run_sync(
-            partial(
-                rank_titles,
-                user_vector=user_vector,
-                user_features=user_features,
-                titles=titles,
-                exclude_ids=exclude_ids,
-                slate_size=slate_size,
-                mmr_lambda=self._settings.rec_mmr_lambda,
-                exploration_slots=self._settings.rec_exploration_slots,
-                explain_memory=explain_memory,
-            )
+        titles, ranked = await self._rank_for_profile(
+            user_vector=user_vector,
+            raw_features=raw_features,
+            exclude_ids=exclude_ids,
+            slate_size=slate_size,
+            who=str(user_id),
         )
 
         slate_id = uuid4()
@@ -226,6 +213,82 @@ class RecommendationService:
             slate_id=slate_id,
             fresh=True,
         )
+
+    async def _rank_for_profile(
+        self,
+        *,
+        user_vector: list[float] | None,
+        raw_features: dict[str, Any],
+        exclude_ids: set[UUID],
+        slate_size: int,
+        who: str,
+    ) -> tuple[list[Title], list[RankedItem]]:
+        """Candidates + ranking for one taste profile, stored or not."""
+        user_features, explain_memory = strip_explain_memory(raw_features)
+
+        titles = await self._load_candidates(user_vector=user_vector, exclude_ids=exclude_ids)
+        if titles and not any(t.embedding is not None for t in titles):
+            # Ranking drops every title whose embedding is NULL, so this returns
+            # an empty slate with a 200 and no other sign that anything is
+            # wrong. It means ingest ran and re-embed did not.
+            logger.warning(
+                "slate_candidates_unembedded user_id=%s candidates=%d — "
+                "For You will be empty; run: python -m app.scripts.reembed_catalog",
+                who,
+                len(titles),
+            )
+
+        # Ranking is CPU work (numpy + Python); keep it off the event loop.
+        ranked = await to_thread.run_sync(
+            partial(
+                rank_titles,
+                user_vector=user_vector,
+                user_features=user_features,
+                titles=titles,
+                exclude_ids=exclude_ids,
+                slate_size=slate_size,
+                mmr_lambda=self._settings.rec_mmr_lambda,
+                exploration_slots=self._settings.rec_exploration_slots,
+                explain_memory=explain_memory,
+            )
+        )
+        return titles, ranked
+
+    async def guest_slate(
+        self, reactions: list[tuple[UUID, str]], *, limit: int
+    ) -> list[tuple[Title, RankedItem]]:
+        """Rank a slate from card answers that are never stored.
+
+        Same profile builder and ranker as For You, so a guest sees what an
+        account with the same answers would see — including "because you liked
+        X" reasons. Nothing is written: no events, no profile, no impressions,
+        no cache entry keyed to a person.
+        """
+        start = datetime.now(UTC)
+        # Answer order is the event order, so a changed answer supersedes the
+        # first one exactly as it would in a stored log. No time decay: every
+        # answer is seconds old.
+        signals = effective_title_signals(
+            (
+                (title_id, event_type, weight_for(event_type), start + timedelta(microseconds=i))
+                for i, (title_id, event_type) in enumerate(reactions)
+            ),
+            now=start,
+        )
+        built = build_profile(
+            signals.values(), await load_profile_titles(self._session, list(signals))
+        )
+        titles, ranked = await self._rank_for_profile(
+            user_vector=built.vector,
+            raw_features=built.features_with_memory(),
+            # Every card the guest answered, "haven't seen" included: they have
+            # just been shown it and passed.
+            exclude_ids={title_id for title_id, _event in reactions},
+            slate_size=limit,
+            who="guest",
+        )
+        by_id = {t.id: t for t in titles}
+        return [(by_id[item.title_id], item) for item in ranked]
 
     @staticmethod
     def _slate_index_key(user_id: UUID) -> str:
@@ -396,6 +459,12 @@ class RecommendationService:
                 )
             ).all()
         )
+
+    async def existing_title_ids(self, title_ids: list[UUID]) -> set[UUID]:
+        if not title_ids:
+            return set()
+        rows = await self._session.scalars(select(Title.id).where(Title.id.in_(title_ids)))
+        return set(rows.all())
 
     async def title_exists(self, title_id: UUID) -> bool:
         return (

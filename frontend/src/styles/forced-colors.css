@@ -10,6 +10,7 @@
   }
 
   body, #root, .shell, .main, .feed, .fy-stage, .fy-why, .fy-act,
+  .pick-card, .pick-why, .pick-btn, .pick-rate-btn, .pick-nav-btn,
   .fy-poster-frame, .landing, .landing-topbar, .landing-stage, .landing-poster,
   .landing-why, .landing-step-list li, .bottom-nav, .account-page, .auth-layout,
   .auth-aside, .auth-card, .topbar, .rec-card, .account-card, .history-row,
@@ -25,7 +26,7 @@
   .topbar { border-bottom: 1px solid ButtonBorder; }
   a, a:hover, .rec-title-link, .brand { color: LinkText; text-decoration: underline; text-underline-offset: 0.15em; }
   .btn, .history-filter, .ob-btn, .ob-rate-btn, .ob-finish, .detail-rate-btn, .nav-link, .contrast-toggle { forced-color-adjust: none; background: ButtonFace !important; color: ButtonText !important; border: 1px solid ButtonBorder !important; }
-  .btn.primary, .btn.danger, .ob-finish, .detail-rate-btn.rate-rate_4, .rec-badge.gem, .history-filter.active, .nav-link.active { background: Highlight !important; color: HighlightText !important; border: 1px solid ButtonBorder !important; }
+  .btn.primary, .btn.danger, .ob-finish, .pick-btn-primary, .detail-rate-btn.rate-rate_4, .rec-badge.gem, .history-filter.active, .nav-link.active { background: Highlight !important; color: HighlightText !important; border: 1px solid ButtonBorder !important; }
   .btn:disabled, .btn[disabled] { opacity: 1; color: GrayText !important; border-color: GrayText !important; }
   input, select, textarea, .search-bar input[type="search"], .account-card input, .account-card select, .auth-card input { forced-color-adjust: none; background: Field !important; color: FieldText !important; border: 1px solid ButtonBorder !important; }
   :focus-visible, .btn:focus-visible, .nav-link:focus-visible, input:focus-visible, button:focus-visible, a:focus-visible, .skip-link:focus { outline: 3px solid Highlight !important; outline-offset: 2px; }

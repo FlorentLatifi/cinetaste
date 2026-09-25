@@ -10,9 +10,9 @@ export function LandingPage() {
     <div className="landing">
       <Helmet>
         <title>CineTaste — Movie & TV Recommendations That Match Your Taste</title>
-        <meta name="description" content="Not another catalog browser. Rate what you know, skip the rest — CineTaste builds a living taste profile and recommends movies worth your time." />
+        <meta name="description" content="Rate a few films you know and get tonight's picks, each with the reason it was chosen. Try it without an account." />
         <meta property="og:title" content="CineTaste — Taste-First Movie Discovery" />
-        <meta property="og:description" content="One poster. Your taste. Every pick explained." />
+        <meta property="og:description" content="Rate three films. Get picks for tonight. Every pick explained." />
         <meta property="og:type" content="website" />
         <meta name="twitter:card" content="summary_large_image" />
       </Helmet>
@@ -33,7 +33,7 @@ export function LandingPage() {
           <div className="landing-topbar-actions">
             <ContrastToggle compact />
             <Link className="btn ghost btn-sm" to="/login">Sign in</Link>
-            <Link className="btn primary btn-sm" to="/register">Get started</Link>
+            <Link className="btn primary btn-sm" to="/register">Create account</Link>
           </div>
         </div>
       </header>
@@ -44,12 +44,21 @@ export function LandingPage() {
 
           <p className="eyebrow landing-eyebrow">Not another catalog</p>
           <h1 id="landing-hero-title" className="landing-headline">
-            One poster. Your taste. Every pick explained.
+            Rate three films. Get tonight&rsquo;s picks. Every pick explained.
           </h1>
           <p className="landing-lede">
-            Rate what you know. Skip the rest. CineTaste builds a living profile
-            and surfaces movies worth your time — not what is trending this week.
+            Tell us a few films you know and we&rsquo;ll line up what to watch
+            next — with the reason for each. No account needed to try it.
           </p>
+
+          <div className="landing-cta landing-cta-top">
+            <Link className="btn primary landing-cta-primary" to="/try">
+              Try it now — no sign-up
+            </Link>
+            <Link className="btn ghost" to="/login">
+              I already have an account
+            </Link>
+          </div>
 
           <div className="landing-stage" aria-label="Product preview">
             <div className="landing-poster-wrap">
@@ -78,48 +87,39 @@ export function LandingPage() {
               </ul>
             </div>
 
-            <div className="landing-demo-actions" role="group" aria-label="Demo actions — create an account to use For You">
-              <span className="fy-act fy-act-fav landing-demo-btn" aria-hidden="true">
-                <span className="fy-act-label">My favorite movie</span>
-              </span>
-              <span className="fy-act fy-act-like landing-demo-btn" aria-hidden="true">
-                <span className="fy-act-label">I like it</span>
-              </span>
-              <span className="fy-act fy-act-nope landing-demo-btn" aria-hidden="true">
-                <span className="fy-act-label">I don't like it</span>
-              </span>
+            <div className="landing-demo-actions" aria-hidden="true">
+              <span className="pick-btn pick-btn-primary landing-demo-btn">＋ Want to watch</span>
+              <span className="pick-btn landing-demo-btn">Seen it</span>
+              <span className="pick-btn pick-btn-quiet landing-demo-btn">Not for me</span>
             </div>
             <p className="landing-demo-note">
-              Preview of For You — 6 rating levels after onboarding.
+              Preview — the real slate is a row of picks you swipe through.
             </p>
           </div>
 
           <div className="landing-cta">
-            <Link className="btn primary landing-cta-primary" to="/register">
+            <Link className="btn primary landing-cta-primary" to="/try">
               Start free
             </Link>
-            <Link className="btn ghost" to="/login">
-              I already have an account
+            <Link className="btn ghost" to="/register">
+              Create an account
             </Link>
           </div>
         </section>
 
         <section className="landing-social" aria-labelledby="landing-social-title">
           <h2 id="landing-social-title" className="landing-social-title">
-            Why people are switching
+            What you can count on
           </h2>
           <div className="landing-social-grid">
             <div className="landing-social-card">
-              <span className="landing-step-num" aria-hidden="true">"</span>
-              <p><strong>Finally</strong> a rec system that explains <em>why</em>. No more endless scrolling.</p>
+              <p><strong>A reason for every pick.</strong> Same director, a film you rated, a mood you like — spelled out, never a bare score.</p>
             </div>
             <div className="landing-social-card">
-              <span className="landing-step-num" aria-hidden="true">"</span>
-              <p>Onboarding took 2 minutes and the picks were <strong>scarily accurate</strong>.</p>
+              <p><strong>Not just what&rsquo;s trending.</strong> Each slate mixes close matches with hidden gems and a few deliberate surprises.</p>
             </div>
             <div className="landing-social-card">
-              <span className="landing-step-num" aria-hidden="true">"</span>
-              <p>Letterboxd for taste. I actually <strong>discovered</strong> movies I&rsquo;d never have found.</p>
+              <p><strong>Try first, sign up later.</strong> Guest ratings stay in your browser and move into your account if you create one.</p>
             </div>
           </div>
         </section>
@@ -136,8 +136,8 @@ export function LandingPage() {
             </li>
             <li>
               <span className="landing-step-num" aria-hidden="true">02</span>
-              <h3>One pick at a time</h3>
-              <p>A single poster focus — from "Favorite" to "Don't like it". No endless grid noise.</p>
+              <h3>Swipe through your slate</h3>
+              <p>A row of picks, not an endless grid. Save what you want to watch, pass on the rest.</p>
             </li>
             <li>
               <span className="landing-step-num" aria-hidden="true">03</span>
@@ -151,6 +151,8 @@ export function LandingPage() {
       <footer className="landing-footer">
         <p>
           CineTaste — taste-first discovery.{" "}
+          <Link to="/try">Try it without an account</Link>
+          {" · "}
           <Link to="/register">Create an account</Link>
           {" · "}
           <Link to="/login">Sign in</Link>

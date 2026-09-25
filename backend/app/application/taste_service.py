@@ -85,6 +85,35 @@ def _read_import_overlay(profile: TasteProfile | None) -> dict[str, float]:
     return overlay
 
 
+async def load_profile_titles(
+    session: AsyncSession, title_ids: list[UUID]
+) -> dict[UUID, ProfileTitle]:
+    """The slice of each title that profile building needs, as plain columns.
+
+    Shared by the stored profile and the guest profile, which is built the same
+    way but never written anywhere.
+    """
+    if not title_ids:
+        return {}
+    rows = (
+        await session.execute(
+            select(Title.id, Title.name, Title.release_date, Title.extra, Title.embedding).where(
+                Title.id.in_(title_ids)
+            )
+        )
+    ).all()
+    return {
+        row.id: ProfileTitle(
+            id=row.id,
+            name=row.name,
+            year=row.release_date.year if row.release_date else None,
+            feature_snapshot=(row.extra or {}).get("feature_snapshot") or {},
+            embedding=row.embedding,
+        )
+        for row in rows
+    }
+
+
 class TasteService:
     def __init__(self, session: AsyncSession, *, half_life_days: float | None = None) -> None:
         self._session = session
@@ -179,25 +208,7 @@ class TasteService:
             half_life_days=self._half_life_days,
         )
 
-        titles: dict[UUID, ProfileTitle] = {}
-        if signals:
-            rows = (
-                await self._session.execute(
-                    select(
-                        Title.id, Title.name, Title.release_date, Title.extra, Title.embedding
-                    ).where(Title.id.in_(list(signals)))
-                )
-            ).all()
-            titles = {
-                row.id: ProfileTitle(
-                    id=row.id,
-                    name=row.name,
-                    year=row.release_date.year if row.release_date else None,
-                    feature_snapshot=(row.extra or {}).get("feature_snapshot") or {},
-                    embedding=row.embedding,
-                )
-                for row in rows
-            }
+        titles = await load_profile_titles(self._session, list(signals))
 
         # The import overlay is durable: it survives recomputes until cleared.
         profile = await self._session.get(TasteProfile, user_id)

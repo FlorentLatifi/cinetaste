@@ -45,6 +45,33 @@ _LEGACY_ACTION_MAP = {
 }
 
 
+def normalize_reactions(reactions: list[dict[str, str]]) -> list[tuple[UUID, str]]:
+    """Card decisions as (title_id, event_type), one per title, in answer order.
+
+    The last answer for a title wins, so repeating a title cannot inflate the
+    rating count. Unknown actions are dropped; legacy like/dislike are mapped.
+    """
+    by_title: dict[UUID, str] = {}
+    for reaction in reactions:
+        action = reaction["action"]
+        if action not in ONBOARDING_ACTIONS:
+            continue
+        event_type = _LEGACY_ACTION_MAP.get(action, action)
+        if not is_supported_event(event_type):
+            continue
+        title_id = UUID(reaction["title_id"])
+        by_title.pop(title_id, None)
+        by_title[title_id] = event_type
+    return list(by_title.items())
+
+
+def count_ratings(normalized: list[tuple[UUID, str]]) -> tuple[int, int]:
+    """(ratings of seen titles, of which positive) — what the gates count."""
+    rated = sum(1 for _t, e in normalized if e in RATING_EVENT_TYPES)
+    positive = sum(1 for _t, e in normalized if e in POSITIVE_RATING_EVENT_TYPES)
+    return rated, positive
+
+
 class OnboardingService:
     def __init__(
         self,
@@ -89,22 +116,8 @@ class OnboardingService:
         - ``rate_1``…``rate_4`` → Bad … Favorite scale
         """
         # Validate first so we never leave partial interactions when gates fail.
-        # One reaction per title (the last one wins), so repeating a title
-        # cannot inflate the rating count.
-        by_title: dict[UUID, str] = {}
-        for reaction in reactions:
-            action = reaction["action"]
-            if action not in ONBOARDING_ACTIONS:
-                continue
-            event_type = _LEGACY_ACTION_MAP.get(action, action)
-            if not is_supported_event(event_type):
-                continue
-            title_id = UUID(reaction["title_id"])
-            by_title.pop(title_id, None)
-            by_title[title_id] = event_type
-        normalized = list(by_title.items())
-        rated = sum(1 for _t, e in normalized if e in RATING_EVENT_TYPES)
-        positive = sum(1 for _t, e in normalized if e in POSITIVE_RATING_EVENT_TYPES)
+        normalized = normalize_reactions(reactions)
+        rated, positive = count_ratings(normalized)
 
         if not normalized:
             raise AppError(
