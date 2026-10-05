@@ -134,6 +134,10 @@ class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     user: UserResponse
+    # True when this server gates the product on a confirmed address and this
+    # one isn't confirmed yet. Lets the SPA show "check your inbox" straight
+    # after sign-up instead of discovering it from a 403 two screens later.
+    email_verification_required: bool = False
 
 
 class ForgotPasswordRequest(StrictModel):

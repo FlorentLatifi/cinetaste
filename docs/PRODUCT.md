@@ -64,6 +64,7 @@ If this loop is weak, no amount of pages will save the product.
 |------|------------|---------------------|
 | Auth | Email/password + secure JWT (access + refresh) | Private profiles & history |
 | Catalog | Movies + TV basics (title, poster, year, genres, overview, key cast/crew) | Something to recommend from |
+| Guest mode | Rate 3 cards at `/try`, get an explained slate; nothing stored server-side, answers carried into sign-up | Value before commitment: no account wall in front of the first pick |
 | Onboarding | Swipe-style like/dislike on ~12–20 curated cards + optional starter moods | Preference data without search |
 | Taste profile | Weighted signals: genres, keywords, people (cast/crew), year/runtime buckets, popularity preference | System “understands me” |
 | Home feed | “For you” slate (e.g. 20 items) with diversity + light exploration | Instant value |
@@ -97,6 +98,7 @@ These are valuable later; they do not prove product-market fit faster than the c
 
 | Metric | MVP target (directional) |
 |--------|---------------------------|
+| **Guest → account** | Share of `/try` sessions that reach results and then register (the saved-picks count is the hook) |
 | **Onboarding completion** | ≥ 70% of signups finish swipe set |
 | **Time-to-first-save/like post-onboarding** | < 60s median |
 | **Feedback rate** | ≥ 30% of shown cards get an action in session |

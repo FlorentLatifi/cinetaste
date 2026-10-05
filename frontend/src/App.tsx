@@ -12,6 +12,7 @@ import { PrivacyPage } from "./pages/PrivacyPage";
 import { RegisterPage } from "./pages/RegisterPage";
 import { ResetPasswordPage } from "./pages/ResetPasswordPage";
 import { VerifyEmailPage } from "./pages/VerifyEmailPage";
+import { VerifyPendingPage } from "./pages/VerifyPendingPage";
 
 /** Lazy-load heavier authenticated surfaces to shrink the initial guest bundle. */
 const AccountPage = lazy(() =>
@@ -31,6 +32,9 @@ const TitleDetailPage = lazy(() =>
 );
 const WatchlistPage = lazy(() =>
   import("./pages/WatchlistPage").then((m) => ({ default: m.WatchlistPage })),
+);
+const GuestPage = lazy(() =>
+  import("./pages/GuestPage").then((m) => ({ default: m.GuestPage })),
 );
 const ForYouPage = lazy(() =>
   import("./pages/HomePage").then((m) => ({ default: m.HomePage })),
@@ -54,10 +58,11 @@ function Protected({ children }: { children: ReactNode }) {
     );
   }
   if (!user) return <Navigate to="/login" replace />;
-  // The server is enforcing email verification. /account is the only page
-  // that can resolve it, and none of its calls are gated, so no loop.
+  // The server is enforcing email verification: nothing but "check your
+  // inbox" until it's done. /account stays reachable (none of its calls are
+  // gated) so a mistyped address can be deleted and registered again.
   if (emailVerificationRequired && pathname !== "/account") {
-    return <Navigate to="/account" replace />;
+    return <VerifyPendingPage />;
   }
   return children;
 }
@@ -83,7 +88,7 @@ function RootRoute() {
     );
   }
   if (!user) return <LandingPage />;
-  if (emailVerificationRequired) return <Navigate to="/account" replace />;
+  if (emailVerificationRequired) return <VerifyPendingPage />;
   return (
     <AppShell>
       <Suspense fallback={<RouteFallback />}>
@@ -136,6 +141,18 @@ export default function App() {
         element={
           <GuestOnly>
             <ResetPasswordPage />
+          </GuestOnly>
+        }
+      />
+      {/* Try it without an account. Signed-in people already have the real
+          thing, so they are sent home. */}
+      <Route
+        path="/try"
+        element={
+          <GuestOnly>
+            <Suspense fallback={<RouteFallback />}>
+              <GuestPage />
+            </Suspense>
           </GuestOnly>
         }
       />

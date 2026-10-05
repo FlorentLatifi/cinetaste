@@ -106,6 +106,9 @@ class Settings(BaseSettings):
     rate_limit_window_seconds: int = 60
     rate_limit_auth_requests: int = 20
     rate_limit_auth_window_seconds: int = 60
+    # Guest routes are public and one of them ranks a whole slate, so they get
+    # their own, lower ceiling. A real guest session is a handful of calls.
+    rate_limit_guest_requests: int = 30
     # Per-account throttle for login and password reset. Keyed by the email
     # in the request, not the source IP, so it still holds when the caller
     # controls X-Forwarded-For or spreads attempts across many addresses.

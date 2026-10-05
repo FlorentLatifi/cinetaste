@@ -95,3 +95,4 @@
   .ob-rate-grid { grid-template-columns: 1fr 1fr; }
   .ob-body { padding: 1.15rem 1.1rem 1.25rem; }
 }
+.ob-carried { margin: 0.6rem 0 0; font-size: 0.88rem; color: var(--accent-strong); }

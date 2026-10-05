@@ -37,6 +37,21 @@ export const mockTitle = {
   poster_url: null,
 };
 
+/** A small deck for guest mode: enough cards to pass the 3-rating gate. */
+export const mockDeck = [
+  mockTitle,
+  { ...mockTitle, id: "44444444-4444-4444-8444-444444444444", name: "Mock Sequel" },
+  { ...mockTitle, id: "66666666-6666-4666-8666-666666666666", name: "Mock Thriller" },
+  { ...mockTitle, id: "77777777-7777-4777-8777-777777777777", name: "Mock Comedy" },
+];
+
+/** A second pick so the For You row has somewhere to swipe to. */
+export const mockSecondPick = {
+  ...mockTitle,
+  id: "88888888-8888-4888-8888-888888888888",
+  name: "Mock Discovery",
+};
+
 function json(data: unknown, status = 200) {
   return {
     status,
@@ -79,6 +94,8 @@ export async function installApiMock(
     refreshDelayMs?: number;
     /** Server enforces REQUIRE_EMAIL_VERIFICATION: gated routes answer 403. */
     verificationEnforced?: boolean;
+    /** No session cookie: /auth/refresh answers 401, as for a first visit. */
+    signedOut?: boolean;
   } = {},
 ): Promise<ApiMockHandle> {
   const onboardingComplete = opts.onboardingComplete !== false;
@@ -114,7 +131,7 @@ export async function installApiMock(
       if (opts.refreshDelayMs) {
         await new Promise((r) => setTimeout(r, opts.refreshDelayMs));
       }
-      if (opts.sessionDeadOnInteraction && refreshCalls > 1) {
+      if (opts.signedOut || (opts.sessionDeadOnInteraction && refreshCalls > 1)) {
         await route.fulfill(
           json({ message: "Session expired", code: "unauthorized" }, 401),
         );
@@ -125,6 +142,8 @@ export async function installApiMock(
           access_token: "mock-access-token",
           token_type: "bearer",
           user,
+          email_verification_required:
+            Boolean(opts.verificationEnforced) && !user.email_verified_at,
         }),
       );
       return;
@@ -132,6 +151,28 @@ export async function installApiMock(
 
     if (method === "POST" && path === "/auth/logout") {
       await route.fulfill({ status: 204, body: "" });
+      return;
+    }
+
+    if (method === "GET" && path.startsWith("/guest/cards")) {
+      const exclude = new Set(url.searchParams.getAll("exclude"));
+      await route.fulfill(json({ items: mockDeck.filter((t) => !exclude.has(t.id)) }));
+      return;
+    }
+
+    if (method === "POST" && path === "/guest/recommendations") {
+      await route.fulfill(
+        json({
+          items: [mockSecondPick, { ...mockSecondPick, id: "99999999-9999-4999-8999-999999999999", name: "Mock Gem" }].map(
+            (title) => ({
+              title,
+              score: 0.8,
+              reasons: [{ code: "because_you_liked", message: `Because you liked ${mockTitle.name}` }],
+            }),
+          ),
+          slate_id: null,
+        }),
+      );
       return;
     }
 
@@ -353,6 +394,11 @@ export async function installApiMock(
                 },
               ],
             },
+            {
+              title: mockSecondPick,
+              score: 0.74,
+              reasons: [{ code: "discovery", message: "A step outside your usual genres" }],
+            },
           ],
         }),
       );
@@ -408,7 +454,8 @@ export async function installApiMock(
     }
 
     if (method === "GET" && path.startsWith("/onboarding/cards")) {
-      await route.fulfill(json({ items: [mockTitle, { ...mockTitle, id: "44444444-4444-4444-8444-444444444444", name: "Mock Sequel" }] }));
+      const exclude = new Set(url.searchParams.getAll("exclude"));
+      await route.fulfill(json({ items: mockDeck.filter((t) => !exclude.has(t.id)) }));
       return;
     }
 
