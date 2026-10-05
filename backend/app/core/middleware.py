@@ -169,6 +169,12 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             return self._settings.rate_limit_auth_requests, auth_window, "auth_reset"
         if self._is_auth_path(path):
             return self._settings.rate_limit_auth_requests * 2, auth_window, "auth_other"
+        if "/guest/" in path:
+            return (
+                self._settings.rate_limit_guest_requests,
+                self._settings.rate_limit_window_seconds,
+                "guest",
+            )
         return (
             self._settings.rate_limit_requests,
             self._settings.rate_limit_window_seconds,

@@ -1,49 +1,37 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { ActionToast } from "../components/ActionToast";
+import { PickActions } from "../components/PickActions";
+import { PickCarousel } from "../components/PickCarousel";
 import { useForYouQueue } from "../features/for-you/useForYouQueue";
-import { RATING_SCALE } from "../features/taste/ratingScale";
-import { heroPosterUrl, posterSrcSet, yearOf } from "../lib/poster";
-
-const ACTIONS = RATING_SCALE;
 
 export function HomePage() {
   const {
     needsOnboarding,
     items,
-    current,
-    remaining,
     error,
     loading,
-    busy,
     welcome,
     toast,
     undoBusy,
-    exiting,
-    cardKey,
+    leaving,
     act,
     undoLast,
     dismissToast,
     reload,
   } = useForYouQueue();
 
-  const titleRef = useRef<HTMLHeadingElement>(null);
-  const [posterError, setPosterError] = useState(false);
-  const poster = current ? heroPosterUrl(current.title) : null;
-  const posterSet = current ? posterSrcSet(current.title) : null;
-  const onPosterError = useCallback(() => setPosterError(true), []);
+  // A ref, not state: the shortcut listener must see the card in view at the
+  // moment of the keypress, not as of the last render.
+  const active = useRef(0);
+  // Which card has its rating row open, so the S shortcut and the button agree.
+  const [ratingFor, setRatingFor] = useState<string | null>(null);
+  const onActiveChange = useCallback((i: number) => {
+    active.current = i;
+  }, []);
 
   useEffect(() => {
-    setPosterError(false);
-    if (current && !loading) {
-      requestAnimationFrame(() =>
-        titleRef.current?.focus({ preventScroll: true }),
-      );
-    }
-  }, [current?.title.id, loading]);
-
-  useEffect(() => {
-    if (!current || loading || needsOnboarding) return;
+    if (loading || needsOnboarding || items.length === 0) return;
 
     function onKeyDown(e: KeyboardEvent) {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
@@ -57,16 +45,21 @@ export function HomePage() {
       ) {
         return;
       }
-
+      const item = items[Math.min(active.current, items.length - 1)];
+      if (!item) return;
       const key = e.key.toLowerCase();
-      for (const a of ACTIONS) {
-        if (key === a.key || key === a.shortcut) {
-          e.preventDefault();
-          void act(a.event);
-          return;
-        }
-      }
-      if (key === "u" && toast && !undoBusy) {
+      if (key === "w") {
+        e.preventDefault();
+        void act(item, "watchlist");
+      } else if (key === "n") {
+        e.preventDefault();
+        void act(item, "not_interested");
+      } else if (key === "s") {
+        e.preventDefault();
+        setRatingFor(item.title.id);
+      } else if (key === "escape" && ratingFor) {
+        setRatingFor(null);
+      } else if (key === "u" && toast && !undoBusy) {
         e.preventDefault();
         void undoLast();
       }
@@ -74,7 +67,7 @@ export function HomePage() {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [current, loading, needsOnboarding, act, toast, undoBusy, undoLast]);
+  }, [items, loading, needsOnboarding, act, toast, undoBusy, undoLast, ratingFor]);
 
   if (needsOnboarding) {
     return (
@@ -95,18 +88,14 @@ export function HomePage() {
   if (loading) {
     return (
       <div className="fy-stage" role="status" aria-live="polite" aria-busy="true">
-        <div className="fy-skeleton" aria-hidden="true">
-          <div className="fy-skeleton-poster shimmer" />
-          <div className="fy-skeleton-line shimmer" />
-          <div className="fy-skeleton-line short shimmer" />
-          <div className="fy-skeleton-actions">
-            <span className="shimmer" />
-            <span className="shimmer" />
-            <span className="shimmer" />
-            <span className="shimmer" />
-            <span className="shimmer" />
-            <span className="shimmer" />
-          </div>
+        <div className="pick-skeleton" aria-hidden="true">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="pick-skeleton-card">
+              <div className="pick-skeleton-poster shimmer" />
+              <div className="fy-skeleton-line shimmer" />
+              <div className="fy-skeleton-line short shimmer" />
+            </div>
+          ))}
         </div>
         <p className="sr-only">
           {welcome?.fromOnboarding
@@ -119,14 +108,6 @@ export function HomePage() {
 
   return (
     <section className="fy-stage" aria-labelledby="for-you-heading">
-      {poster && (
-        <div
-          className="fy-ambient"
-          style={{ backgroundImage: `url(${poster})` }}
-          aria-hidden
-        />
-      )}
-
       <header className="fy-header">
         <div className="fy-header-text">
           <p className="eyebrow">For you</p>
@@ -142,28 +123,23 @@ export function HomePage() {
                 {welcome.ratingsCount ?? "your"} rating
                 {(welcome.ratingsCount ?? 2) === 1 ? "" : "s"}
               </strong>
-              . One poster at a time — every pick explains why.
+              . Swipe through them — every pick says why.
             </p>
           ) : (
             <p className="fy-sub">
-              One poster. Your taste. Rate each title — then the next.
+              Swipe through tonight&rsquo;s picks. Save what you want to watch,
+              pass on the rest — each choice sharpens the next slate.
             </p>
           )}
         </div>
         <div className="fy-header-meta">
-          {items.length > 0 && (
-            <p className="fy-queue" aria-live="polite">
-              <strong>{items.length}</strong>
-              <span> left in this slate</span>
-            </p>
-          )}
-          <Link className="btn ghost btn-sm" to="/watchlist">
+          <Link className="btn ghost btn-sm fy-watchlist-link" to="/watchlist">
             Watchlist
           </Link>
         </div>
       </header>
 
-      {error && !current && (
+      {error && items.length === 0 && (
         <div className="fy-empty" role="alert">
           <p className="eyebrow">Couldn&rsquo;t load picks</p>
           <h2>Something went wrong</h2>
@@ -181,194 +157,63 @@ export function HomePage() {
         </div>
       )}
 
-      {error && current && (
+      {error && items.length > 0 && (
         <p className="form-error fy-error" role="alert">
           {error}
         </p>
       )}
 
-      {!error && !current && (
+      {!error && items.length === 0 && (
         <div className="fy-empty" role="status">
           <p className="eyebrow">Slate clear</p>
-          <h2>No more picks right now</h2>
+          <h2>You&rsquo;ve been through every pick</h2>
           <p className="lede">
-            Rate more titles in Search or History, or refresh later as your taste
-            evolves.
+            Everything you did here has already reshaped your taste. Get a fresh
+            slate built from it.
           </p>
           <div className="fy-empty-actions">
-            <Link className="btn primary" to="/search">
-              Browse search
-            </Link>
-            <Link className="btn ghost" to="/history">
-              Review history
+            <button type="button" className="btn primary" onClick={reload}>
+              New picks
+            </button>
+            <Link className="btn ghost" to="/watchlist">
+              Open watchlist
             </Link>
           </div>
         </div>
       )}
 
-      {current && (
-        <article
-          key={`${current.title.id}-${cardKey}`}
-          className={`fy-focus ${exiting ? "fy-focus-exit" : "fy-focus-enter"}`}
-          aria-labelledby="fy-current-title"
-        >
-          <Link
-            to={`/titles/${current.title.id}`}
-            className="fy-poster-link"
-            viewTransition
-            style={{ viewTransitionName: "title-poster" } as CSSProperties}
-            aria-label={`Open details for ${current.title.name}${
-              yearOf(current.title) ? `, ${yearOf(current.title)}` : ""
-            }`}
-          >
-            <div className="fy-poster-frame">
-              {poster && !posterError ? (
-                <img
-                  className="fy-poster"
-                  src={poster}
-                  srcSet={posterSet ?? undefined}
-                  sizes={
-                    posterSet
-                      ? "(max-width: 560px) 85vw, 420px"
-                      : undefined
-                  }
-                  alt=""
-                  draggable={false}
-                  decoding="async"
-                  fetchPriority="high"
-                  onError={onPosterError}
-                />
-              ) : (
-                <div className="fy-poster fy-poster-fallback" aria-hidden="true">
-                  <span className="fy-fallback-letter">
-                    {current.title.name.slice(0, 1)}
-                  </span>
-                  <span className="fy-fallback-name">{current.title.name}</span>
-                </div>
-              )}
-              {(current.reasons.some((r) => r.code === "hidden_gem") ||
-                current.reasons.some((r) => r.code === "discovery")) && (
-                <div className="fy-badges">
-                  {current.reasons.some((r) => r.code === "hidden_gem") && (
-                    <span className="rec-badge gem">Hidden gem</span>
-                  )}
-                  {current.reasons.some((r) => r.code === "discovery") && (
-                    <span className="rec-badge discovery">Discovery</span>
-                  )}
-                </div>
-              )}
-            </div>
-          </Link>
+      {items.length > 0 && (
+        <PickCarousel
+          items={items}
+          label="Your picks"
+          linkToDetail
+          leavingIds={leaving}
+          onActiveChange={onActiveChange}
+          renderActions={(item) => (
+            <PickActions
+              item={item}
+              onAct={(it, event) => {
+                setRatingFor(null);
+                void act(it, event);
+              }}
+              ratingOpen={ratingFor === item.title.id}
+              onRatingOpenChange={(open) => setRatingFor(open ? item.title.id : null)}
+            />
+          )}
+        />
+      )}
 
-          <div className="fy-meta-block">
-            <h2
-              ref={titleRef}
-              id="fy-current-title"
-              className="fy-title"
-              tabIndex={-1}
-            >
-              {current.title.name}
-            </h2>
-            <p className="fy-meta">
-              {yearOf(current.title) && <span>{yearOf(current.title)}</span>}
-              {current.title.media_type && (
-                <span className="ob-pill">{current.title.media_type}</span>
-              )}
-              {current.title.vote_average > 0 && (
-                <span className="ob-score">
-                  <span className="sr-only">Rating </span>
-                  {current.title.vote_average.toFixed(1)}
-                </span>
-              )}
-              {current.title.genres.length > 0 && (
-                <span className="fy-genres">
-                  {current.title.genres
-                    .slice(0, 3)
-                    .map((g) => g.name)
-                    .join(" · ")}
-                </span>
-              )}
-            </p>
-
-            {current.reasons.length > 0 && (
-              <div className="fy-why">
-                <p className="why-label" id="fy-why-label">
-                  Why this pick
-                </p>
-                <ul className="reasons fy-reasons" aria-labelledby="fy-why-label">
-                  {current.reasons.slice(0, 2).map((r, idx) => (
-                    <li
-                      key={`${r.code}-${idx}`}
-                      className={idx === 0 ? "reason-primary" : undefined}
-                    >
-                      {r.message}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            <div
-              className="fy-actions"
-              role="group"
-              aria-label={`Rate ${current.title.name}. Keyboard: ${ACTIONS.map(
-                (a) => `${a.key} ${a.label.toLowerCase()}`,
-              ).join(", ")}.`}
-            >
-              {ACTIONS.map((a) => {
-                const cls =
-                  a.event === "rate_4"
-                    ? "fy-act fy-act-fav"
-                    : a.event === "rate_3"
-                      ? "fy-act fy-act-like-so"
-                      : a.event === "rate_2"
-                        ? "fy-act fy-act-like"
-                        : a.event === "mid"
-                          ? "fy-act fy-act-ok"
-                          : a.event === "haven't_seen"
-                            ? "fy-act fy-act-unseen"
-                            : "fy-act fy-act-nope";
-                return (
-                  <button
-                    key={a.event}
-                    type="button"
-                    className={cls}
-                    disabled={busy}
-                    aria-keyshortcuts={`${a.key} ${a.shortcut}`}
-                    aria-label={`${a.label} — ${current.title.name}`}
-                    onClick={() => void act(a.event)}
-                  >
-                    <span className="fy-act-label">{a.label}</span>
-                    <span className="fy-act-kbd">
-                      <kbd>{a.key}</kbd>
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-
-            <p className="fy-keys-hint">
-              <span className="sr-only">Keyboard shortcuts: </span>
-              <kbd>1</kbd> Loved · <kbd>2</kbd> Really liked · <kbd>3</kbd> Liked ·{" "}
-              <kbd>4</kbd> Ok · <kbd>5</kbd> Not seen · <kbd>6</kbd> Didn't like
-              {toast ? (
-                <> · <kbd>U</kbd> Undo</>
-              ) : null}
-            </p>
-
-            <p className="fy-detail-hint">
-              <Link to={`/titles/${current.title.id}`} viewTransition>
-                Full details
-              </Link>
-              {remaining > 0 && (
-                <span className="fy-remaining">
-                  {" "}
-                  · {remaining} more in queue
-                </span>
-              )}
-            </p>
-          </div>
-        </article>
+      {items.length > 0 && (
+        <p className="fy-keys-hint">
+          <span className="sr-only">Keyboard shortcuts: </span>
+          <kbd>←</kbd> <kbd>→</kbd> Browse · <kbd>W</kbd> Want to watch ·{" "}
+          <kbd>S</kbd> Seen it · <kbd>N</kbd> Not for me
+          {toast ? (
+            <>
+              {" "}· <kbd>U</kbd> Undo
+            </>
+          ) : null}
+        </p>
       )}
 
       {toast && (

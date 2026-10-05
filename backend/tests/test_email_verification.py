@@ -15,12 +15,13 @@ import pytest
 from pydantic import ValidationError
 
 from app.api.deps import get_verified_user
+from app.api.routes.auth import _token_response
 from app.application.auth_service import AuthService
 from app.core.config import Settings
 from app.core.security import hash_password, hash_token
 from app.domain.exceptions import AppError, ConflictError, ForbiddenError
 from app.infrastructure.cache import MemoryStore
-from app.infrastructure.db.models.user import EmailVerificationToken, User
+from app.infrastructure.db.models.user import EmailVerificationToken, PasswordResetToken, User
 
 
 @pytest.fixture(autouse=True)
@@ -250,3 +251,68 @@ def test_requiring_verification_without_smtp_is_refused_in_production() -> None:
         smtp_host="smtp.example.com",
         smtp_from="noreply@cinetaste.app",
     )
+
+
+# ------------------------------------------------ proving ownership by reset
+
+
+@pytest.mark.asyncio
+async def test_a_password_reset_proves_the_mailbox() -> None:
+    """The reset link was opened from the inbox; that is what verification proves.
+
+    It also resolves squatting: the owner of an address someone else
+    registered resets the password and ends up verified, and the reset revokes
+    the squatter's sessions.
+    """
+    user = _user()
+    raw = "a-reset-token-value-1234"
+    row = PasswordResetToken(
+        id=uuid4(),
+        user_id=user.id,
+        token_hash=hash_token(raw),
+        expires_at=datetime.now(UTC) + timedelta(minutes=30),
+    )
+    session = _session()
+    session.scalar = AsyncMock(return_value=row)
+    session.get = AsyncMock(return_value=user)
+
+    await AuthService(session, _settings()).reset_password(token=raw, new_password="new-password-99")
+
+    assert user.email_verified_at is not None
+
+
+@pytest.mark.asyncio
+async def test_a_reset_keeps_the_original_verification_time() -> None:
+    user = _user(verified=True)
+    first = user.email_verified_at
+    raw = "another-reset-token-5678"
+    row = PasswordResetToken(
+        id=uuid4(),
+        user_id=user.id,
+        token_hash=hash_token(raw),
+        expires_at=datetime.now(UTC) + timedelta(minutes=30),
+    )
+    session = _session()
+    session.scalar = AsyncMock(return_value=row)
+    session.get = AsyncMock(return_value=user)
+
+    await AuthService(session, _settings()).reset_password(token=raw, new_password="new-password-99")
+
+    assert user.email_verified_at == first
+
+
+def test_the_session_says_up_front_whether_verification_is_owed() -> None:
+    """The SPA shows "check your inbox" right after sign-up, not after a 403."""
+    strict = _settings(
+        require_email_verification=True,
+        smtp_host="smtp.example.com",
+        smtp_from="noreply@example.com",
+    )
+    user = _user()
+    user.created_at = datetime.now(UTC)
+
+    assert _token_response(user, "access", strict).email_verification_required is True
+    assert _token_response(user, "access", _settings()).email_verification_required is False
+
+    user.email_verified_at = datetime.now(UTC)
+    assert _token_response(user, "access", strict).email_verification_required is False

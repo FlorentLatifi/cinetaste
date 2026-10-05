@@ -14,6 +14,8 @@ export type TokenResponse = {
   access_token: string;
   token_type: string;
   user: User;
+  /** The server gates the product on a confirmed address and this one isn't. */
+  email_verification_required?: boolean;
 };
 
 export function register(input: {

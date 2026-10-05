@@ -134,6 +134,14 @@ class RecommendationItemOut(BaseModel):
     score: float
     reasons: list[ReasonOut]
 
+    @classmethod
+    def from_ranked(cls, title, item) -> RecommendationItemOut:
+        return cls(
+            title=TitleSummaryOut.from_title(title),
+            score=round(item.score, 4),
+            reasons=[ReasonOut(code=r.code, message=r.message) for r in item.reasons],
+        )
+
 
 class RecommendationSlateOut(BaseModel):
     items: list[RecommendationItemOut]
@@ -188,6 +196,13 @@ class OnboardingReaction(StrictModel):
 
 class OnboardingCompleteRequest(StrictModel):
     reactions: list[OnboardingReaction] = Field(min_length=1, max_length=80)
+
+
+class GuestRecommendationsRequest(StrictModel):
+    """Card answers from someone without an account. Used once, never stored."""
+
+    reactions: list[OnboardingReaction] = Field(min_length=1, max_length=80)
+    limit: int = Field(default=12, ge=1, le=30)
 
 
 class OnboardingCardsOut(BaseModel):

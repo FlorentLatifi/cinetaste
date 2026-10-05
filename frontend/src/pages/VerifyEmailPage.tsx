@@ -4,6 +4,7 @@ import * as authApi from "../api/auth";
 import { ApiError } from "../api/client";
 import { ContrastToggle } from "../components/ContrastToggle";
 import { useAuth } from "../features/auth/AuthContext";
+import { broadcastSession } from "../features/auth/sessionChannel";
 
 type State =
   | { status: "working" }
@@ -48,6 +49,9 @@ export function VerifyEmailPage() {
         // reading `user` here would capture whatever the bootstrap had not
         // finished loading yet.
         await refreshUser().catch(() => undefined);
+        // The tab that registered is usually still open on "check your
+        // inbox"; tell it, so it moves on without the person reloading.
+        broadcastSession("signed-in");
       } catch (err) {
         if (cancelled) return;
         setState({

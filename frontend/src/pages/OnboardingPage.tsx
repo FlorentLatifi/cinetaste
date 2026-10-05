@@ -1,9 +1,18 @@
 import { useEffect, useRef } from "react";
 import { RATE_OPTIONS } from "../features/onboarding/constants";
-import { useOnboardingDeck } from "../features/onboarding/useOnboardingDeck";
+import {
+  useOnboardingDeck,
+  type DeckOptions,
+} from "../features/onboarding/useOnboardingDeck";
 import { heroPosterUrl, posterSrcSet, yearOf } from "../lib/poster";
 
 export function OnboardingPage() {
+  return <OnboardingDeckView options={{ mode: "account" }} />;
+}
+
+/** The rating deck, for onboarding and for guests trying the product. */
+export function OnboardingDeckView({ options }: { options: DeckOptions }) {
+  const guest = options.mode === "guest";
   const {
     current,
     reactions,
@@ -23,7 +32,9 @@ export function OnboardingPage() {
     applyAction,
     finish,
     minRatings,
-  } = useOnboardingDeck();
+    carriedCount,
+    discardCarried,
+  } = useOnboardingDeck(options);
 
   const rateFirstRef = useRef<HTMLButtonElement>(null);
   const titleRef = useRef<HTMLHeadingElement>(null);
@@ -56,9 +67,13 @@ export function OnboardingPage() {
       <div className="ob-stage ob-stage-loading">
         <div className="spinner" />
         <p className="eyebrow">Almost there</p>
-        <h1 className="ob-loading-title">Building your taste profile</h1>
+        <h1 className="ob-loading-title">
+          {guest ? "Finding picks for you" : "Building your taste profile"}
+        </h1>
         <p className="ob-loading-copy">
-          Weaving your ratings into a personal For You slate…
+          {guest
+            ? "Matching your ratings against the whole catalog…"
+            : "Weaving your ratings into a personal For You slate…"}
         </p>
       </div>
     );
@@ -97,12 +112,30 @@ export function OnboardingPage() {
 
       <header className="ob-header">
         <div className="ob-header-text">
-          <p className="eyebrow">Taste calibration</p>
+          <p className="eyebrow">{guest ? "Quick taste check" : "Taste calibration"}</p>
           <h1>Rate what you know</h1>
           <p className="ob-sub">
-            Skip the unfamiliar — zero signal. Rate the ones you&apos;ve seen so
-            recommendations feel like you.
+            {guest ? (
+              <>
+                Rate {minRatings} you&apos;ve seen and we&apos;ll pick films for
+                you — no account needed. Skip anything unfamiliar.
+              </>
+            ) : (
+              <>
+                Skip the unfamiliar — zero signal. Rate the ones you&apos;ve seen so
+                recommendations feel like you.
+              </>
+            )}
           </p>
+          {carriedCount > 0 && !guest && (
+            <p className="ob-carried" role="status">
+              {carriedCount} answer{carriedCount === 1 ? "" : "s"} carried over from
+              before you signed up.{" "}
+              <button type="button" className="link-button" onClick={discardCarried}>
+                Not yours? Start fresh
+              </button>
+            </p>
+          )}
         </div>
 
         <div className="ob-progress" aria-live="polite" aria-atomic="true">
@@ -135,9 +168,11 @@ export function OnboardingPage() {
             {ratedCount < minRatings
               ? `${minRatings - ratedCount} more rating${
                   minRatings - ratedCount === 1 ? "" : "s"
-                } to unlock For You`
-              : positiveCount < 2
-                ? "Add a couple of OK / Good / Favorite picks"
+                } to ${guest ? "see your picks" : "unlock For You"}`
+              : positiveCount < (guest ? 1 : 2)
+                ? guest
+                  ? "Add one you liked"
+                  : "Add a couple of OK / Good / Favorite picks"
                 : "You can finish anytime — or keep refining"}
           </p>
         </div>
@@ -290,7 +325,7 @@ export function OnboardingPage() {
                 disabled={submitting || exiting}
                 onClick={() => void finish(reactions)}
               >
-                See my recommendations →
+                {guest ? "Show my picks →" : "See my recommendations →"}
               </button>
             )}
 

@@ -28,10 +28,13 @@ from app.domain.exceptions import UnauthorizedError
 router = APIRouter()
 
 
-def _token_response(user, access: str) -> TokenResponse:
+def _token_response(user, access: str, settings: Settings) -> TokenResponse:
     return TokenResponse(
         access_token=access,
         user=UserResponse.model_validate(user),
+        email_verification_required=(
+            settings.require_email_verification and user.email_verified_at is None
+        ),
     )
 
 
@@ -57,7 +60,7 @@ async def register(
         display_name=body.display_name,
     )
     set_refresh_cookie(response, refresh, settings)
-    return _token_response(user, access)
+    return _token_response(user, access, settings)
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -69,7 +72,7 @@ async def login(
 ) -> TokenResponse:
     user, access, refresh = await auth.login(email=body.email, password=body.password)
     set_refresh_cookie(response, refresh, settings)
-    return _token_response(user, access)
+    return _token_response(user, access, settings)
 
 
 @router.post("/refresh", response_model=TokenResponse)
@@ -83,7 +86,7 @@ async def refresh(
     raw = _refresh_from_request(request, body)
     user, access, new_refresh = await auth.refresh(refresh_token=raw)
     set_refresh_cookie(response, new_refresh, settings)
-    return _token_response(user, access)
+    return _token_response(user, access, settings)
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)

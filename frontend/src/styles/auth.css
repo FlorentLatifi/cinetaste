@@ -126,3 +126,5 @@
   .auth-layout { grid-template-columns: 1fr; }
   .auth-aside { border-right: none; border-bottom: 1px solid var(--border); padding-bottom: 1.5rem; }
 }
+.link-button { appearance: none; border: none; background: none; padding: 0; font: inherit; color: var(--accent-strong); text-decoration: underline; text-underline-offset: 0.15em; cursor: pointer; }
+.auth-carry { color: var(--accent-strong); }

@@ -157,6 +157,15 @@ def test_limit_families_do_not_share_a_counter() -> None:
     assert api_max == 120
 
 
+def test_guest_routes_have_their_own_lower_budget() -> None:
+    """Public and one of them ranks a slate: cheaper to abuse than /titles."""
+    limiter = _limiter(rate_limit_guest_requests=30)
+    for path in ("/api/v1/guest/cards", "/api/v1/guest/recommendations"):
+        guest_max, _, family = limiter._limits_for(path)
+        assert (guest_max, family) == (30, "guest")
+    assert limiter._limits_for("/api/v1/titles/search")[2] == "api"
+
+
 def test_register_shares_the_login_budget() -> None:
     """Both mint sessions from an email + password, so one budget covers them."""
     limiter = _limiter()

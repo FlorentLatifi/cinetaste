@@ -1,5 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
+import { installApiMock, mockTitle } from "./helpers/mockApi";
 
 /**
  * Static axe gate on guest routes (no API required).
@@ -9,7 +10,7 @@ const guestRoutes: { path: string; ready: string }[] = [
   {
     path: "/",
     ready:
-      "role=heading[name='One poster. Your taste. Every pick explained.']",
+      "role=heading[name='Rate three films. Get tonight’s picks. Every pick explained.']",
   },
   { path: "/login", ready: "role=heading[name='Welcome back']" },
   { path: "/register", ready: "role=heading[name='Create account']" },
@@ -30,6 +31,28 @@ for (const route of guestRoutes) {
     expect(results.violations, formatViolations(results.violations)).toEqual([]);
   });
 }
+
+test("axe: /try (guest deck and guest results)", async ({ page }) => {
+  await installApiMock(page, { signedOut: true });
+  await page.goto("/try");
+  await page.getByRole("heading", { name: "Rate what you know" }).waitFor();
+  const deck = await new AxeBuilder({ page })
+    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
+    .analyze();
+  expect(deck.violations, formatViolations(deck.violations)).toEqual([]);
+
+  for (const name of [mockTitle.name, "Mock Sequel", "Mock Thriller"]) {
+    await page.getByRole("heading", { name }).waitFor();
+    await page.getByRole("button", { name: `Rate ${name}` }).click();
+    await page.getByRole("button", { name: /Loved it:/i }).click();
+  }
+  await page.getByRole("button", { name: /Show my picks/i }).click();
+  await page.getByRole("heading", { name: /what we.d watch/i }).waitFor();
+  const results = await new AxeBuilder({ page })
+    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
+    .analyze();
+  expect(results.violations, formatViolations(results.violations)).toEqual([]);
+});
 
 test("high contrast toggle updates document", async ({ page }) => {
   await page.goto("/login");
