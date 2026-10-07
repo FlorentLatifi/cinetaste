@@ -316,3 +316,76 @@ def test_the_session_says_up_front_whether_verification_is_owed() -> None:
 
     user.email_verified_at = datetime.now(UTC)
     assert _token_response(user, "access", strict).email_verification_required is False
+
+
+# ------------------------------------------------- verify-first sign-up mail
+
+
+class _Outbox:
+    def __init__(self, fail: bool = False) -> None:
+        self.sent: list[tuple[str, str, str]] = []
+        self.fail = fail
+
+    async def send(self, *, to: str, subject: str, text_body: str) -> None:
+        if self.fail:
+            raise OSError("smtp down")
+        self.sent.append((to, subject, text_body))
+
+
+def _smtp_settings(**kwargs) -> Settings:
+    return _settings(smtp_host="smtp.example.com", smtp_from="noreply@example.com", **kwargs)
+
+
+def _signup_session(existing_user: User | None) -> AsyncMock:
+    session = _session()
+    # First lookup: an existing account; second: an earlier pending sign-up.
+    session.scalar = AsyncMock(side_effect=[existing_user, None])
+    return session
+
+
+@pytest.mark.asyncio
+async def test_sign_up_mails_a_link_and_returns_no_token_when_smtp_is_set() -> None:
+    outbox = _Outbox()
+    auth = AuthService(_signup_session(None), _smtp_settings(), email=outbox)
+
+    assert await auth.start_registration(email="New@Example.com", password="pw-123456789") is None
+
+    [(to, subject, body)] = outbox.sent
+    assert to == "new@example.com"
+    assert "/confirm-registration?token=" in body
+    assert "no account will be created" in body
+
+
+@pytest.mark.asyncio
+async def test_sign_up_for_a_registered_address_tells_its_owner_instead() -> None:
+    outbox = _Outbox()
+    auth = AuthService(_signup_session(_user()), _smtp_settings(), email=outbox)
+
+    assert await auth.start_registration(email="a@example.com", password="pw-123456789") is None
+
+    [(to, subject, body)] = outbox.sent
+    assert to == "a@example.com"
+    assert "already have" in subject
+    assert "confirm-registration" not in body
+
+
+@pytest.mark.asyncio
+async def test_a_failed_notice_mail_does_not_change_the_answer() -> None:
+    auth = AuthService(_signup_session(_user()), _smtp_settings(), email=_Outbox(fail=True))
+    assert await auth.start_registration(email="a@example.com", password="pw-123456789") is None
+
+
+@pytest.mark.asyncio
+async def test_a_failed_link_mail_is_reported_not_swallowed() -> None:
+    auth = AuthService(_signup_session(None), _smtp_settings(), email=_Outbox(fail=True))
+    with pytest.raises(AppError) as exc:
+        await auth.start_registration(email="new@example.com", password="pw-123456789")
+    assert exc.value.code == "email_unavailable"
+
+
+@pytest.mark.asyncio
+async def test_sign_up_without_any_mail_outside_dev_is_refused() -> None:
+    auth = AuthService(_session(), _settings(app_env="staging"), email=_Outbox())
+    with pytest.raises(AppError) as exc:
+        await auth.start_registration(email="new@example.com", password="pw-123456789")
+    assert exc.value.status_code == 503

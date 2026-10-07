@@ -18,12 +18,18 @@ from app.infrastructure.db.models.interaction import (
     UserTitleState,
 )
 from app.infrastructure.db.models.taste import TasteProfile
-from app.infrastructure.db.models.user import PasswordResetToken, RefreshToken, User
+from app.infrastructure.db.models.user import (
+    PasswordResetToken,
+    PendingRegistration,
+    RefreshToken,
+    User,
+)
 
 __all__ = [
     "User",
     "RefreshToken",
     "PasswordResetToken",
+    "PendingRegistration",
     "Title",
     "Genre",
     "TitleGenre",

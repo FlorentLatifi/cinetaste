@@ -52,6 +52,9 @@ export const mockSecondPick = {
   name: "Mock Discovery",
 };
 
+/** The password the confirm-registration mock accepts. */
+export const MOCK_SIGNUP_PASSWORD = "Str0ng!signup-pass";
+
 function json(data: unknown, status = 200) {
   return {
     status,
@@ -96,6 +99,8 @@ export async function installApiMock(
     verificationEnforced?: boolean;
     /** No session cookie: /auth/refresh answers 401, as for a first visit. */
     signedOut?: boolean;
+    /** Server requires a proven email before any account exists (202 on register). */
+    verifyFirst?: boolean;
   } = {},
 ): Promise<ApiMockHandle> {
   const onboardingComplete = opts.onboardingComplete !== false;
@@ -145,6 +150,62 @@ export async function installApiMock(
           email_verification_required:
             Boolean(opts.verificationEnforced) && !user.email_verified_at,
         }),
+      );
+      return;
+    }
+
+    if (method === "POST" && path === "/auth/register") {
+      const body = JSON.parse(req.postData() || "{}");
+      if (opts.verifyFirst) {
+        await route.fulfill(
+          json(
+            {
+              status: "confirmation_sent",
+              email: String(body.email).toLowerCase(),
+              dev_confirmation_token: null,
+            },
+            202,
+          ),
+        );
+        return;
+      }
+      await route.fulfill(
+        json(
+          {
+            access_token: "mock-access-token",
+            token_type: "bearer",
+            user: { ...mockUserNeedsOnboarding, email: body.email },
+          },
+          201,
+        ),
+      );
+      return;
+    }
+
+    if (method === "POST" && path === "/auth/confirm-registration") {
+      const body = JSON.parse(req.postData() || "{}");
+      if (body.password !== MOCK_SIGNUP_PASSWORD) {
+        await route.fulfill(
+          json(
+            {
+              message: "That isn't the password you chose when signing up.",
+              code: "invalid_credentials",
+            },
+            401,
+          ),
+        );
+        return;
+      }
+      await route.fulfill(
+        json(
+          {
+            access_token: "mock-access-token",
+            token_type: "bearer",
+            user: mockUserNeedsOnboarding,
+            email_verification_required: false,
+          },
+          201,
+        ),
       );
       return;
     }

@@ -140,6 +140,23 @@ class TokenResponse(BaseModel):
     email_verification_required: bool = False
 
 
+class RegistrationPendingResponse(BaseModel):
+    """Sign-up accepted; the account is created once the mailed link is used.
+
+    Identical for new and already-registered addresses, so it reveals nothing.
+    ``dev_confirmation_token`` is only set in local/test without SMTP.
+    """
+
+    status: str = "confirmation_sent"
+    email: EmailStr
+    dev_confirmation_token: str | None = None
+
+
+class ConfirmRegistrationRequest(StrictModel):
+    token: str = Field(min_length=10, max_length=200)
+    password: str = Field(min_length=1, max_length=128)
+
+
 class ForgotPasswordRequest(StrictModel):
     email: EmailStr
 

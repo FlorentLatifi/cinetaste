@@ -4,12 +4,14 @@ from fastapi import APIRouter, Depends, Request, Response, status
 
 from app.api.deps import CurrentUser, get_auth_service, get_settings_dep
 from app.api.schemas.auth import (
+    ConfirmRegistrationRequest,
     ForgotPasswordRequest,
     ForgotPasswordResponse,
     LoginRequest,
     LogoutRequest,
     RefreshRequest,
     RegisterRequest,
+    RegistrationPendingResponse,
     ResendVerificationResponse,
     ResetPasswordRequest,
     TokenResponse,
@@ -47,17 +49,48 @@ def _refresh_from_request(request: Request, body: RefreshRequest | LogoutRequest
     raise UnauthorizedError("Missing refresh token", code="invalid_refresh")
 
 
-@router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/register",
+    response_model=TokenResponse | RegistrationPendingResponse,
+    status_code=status.HTTP_201_CREATED,
+)
 async def register(
     body: RegisterRequest,
     response: Response,
     auth: Annotated[AuthService, Depends(get_auth_service)],
     settings: Annotated[Settings, Depends(get_settings_dep)],
-) -> TokenResponse:
+) -> TokenResponse | RegistrationPendingResponse:
+    """201 + session normally; 202 + "check your inbox" when email must be proven first."""
+    if settings.require_email_verification:
+        dev_token = await auth.start_registration(
+            email=body.email, password=body.password, display_name=body.display_name
+        )
+        response.status_code = status.HTTP_202_ACCEPTED
+        return RegistrationPendingResponse(
+            email=body.email.strip().lower(), dev_confirmation_token=dev_token
+        )
+
     user, access, refresh = await auth.register(
         email=body.email,
         password=body.password,
         display_name=body.display_name,
+    )
+    set_refresh_cookie(response, refresh, settings)
+    return _token_response(user, access, settings)
+
+
+@router.post(
+    "/confirm-registration", response_model=TokenResponse, status_code=status.HTTP_201_CREATED
+)
+async def confirm_registration(
+    body: ConfirmRegistrationRequest,
+    response: Response,
+    auth: Annotated[AuthService, Depends(get_auth_service)],
+    settings: Annotated[Settings, Depends(get_settings_dep)],
+) -> TokenResponse:
+    """Create the account from the mailed link plus the password chosen at sign-up."""
+    user, access, refresh = await auth.confirm_registration(
+        token=body.token, password=body.password
     )
     set_refresh_cookie(response, refresh, settings)
     return _token_response(user, access, settings)

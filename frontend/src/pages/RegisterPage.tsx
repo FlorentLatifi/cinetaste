@@ -15,22 +15,101 @@ export function RegisterPage() {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [draft] = useState(() => loadGuestDraft());
+  // Set when the server wants the address proven before any account exists.
+  const [sent, setSent] = useState<{ email: string; devToken: string | null } | null>(null);
+  const [resent, setResent] = useState(false);
 
-  async function onSubmit(e: FormEvent) {
-    e.preventDefault();
+  async function submit() {
     setError(null);
     setSubmitting(true);
     try {
-      await register(email, password, displayName || undefined);
+      const result = await register(email, password, displayName || undefined);
+      if (result.status === "confirmation_sent") {
+        setSent({ email: result.email, devToken: result.devToken });
+        return;
+      }
       // Straight to the deck: there is nothing on For You until it's done.
-      // If the server wants the address confirmed first, the route shows
-      // "check your inbox" and continues here afterwards.
       navigate("/onboarding", { replace: true });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not create account");
     } finally {
       setSubmitting(false);
     }
+  }
+
+  async function onSubmit(e: FormEvent) {
+    e.preventDefault();
+    await submit();
+  }
+
+  if (sent) {
+    return (
+      <div className="auth-layout">
+        <div className="auth-aside">
+          <p className="eyebrow">One last step</p>
+          <h1>Check your inbox</h1>
+          <p className="lede">
+            We sent a link to <strong>{sent.email}</strong>. Open it and enter the
+            password you just chose — your account is created at that moment, not
+            before.
+          </p>
+          {hasGuestDraft(draft) && (
+            <p className="lede auth-carry">
+              Your guest answers stay in this browser and will be waiting.
+            </p>
+          )}
+        </div>
+        <div className="auth-card">
+          <h2>Confirm your email</h2>
+          <p className="lede">
+            The link works for 48 hours. Can&rsquo;t find it? Check spam, or send a
+            new one — the old link stops working.
+          </p>
+          {sent.devToken && (
+            <p className="meta-line">
+              Dev link:{" "}
+              <Link to={`/confirm-registration?token=${encodeURIComponent(sent.devToken)}`}>
+                confirm sign-up
+              </Link>
+            </p>
+          )}
+          <button
+            className="btn ghost"
+            type="button"
+            disabled={submitting}
+            onClick={async () => {
+              await submit();
+              setResent(true);
+            }}
+          >
+            {submitting ? "Sending…" : "Send a new link"}
+          </button>
+          {resent && !error && (
+            <p className="meta-line" role="status">
+              Sent again.
+            </p>
+          )}
+          {error && (
+            <p className="form-error" role="alert">
+              {error}
+            </p>
+          )}
+          <p className="auth-switch">
+            Wrong address?{" "}
+            <button
+              type="button"
+              className="link-button"
+              onClick={() => {
+                setSent(null);
+                setResent(false);
+              }}
+            >
+              Use a different email
+            </button>
+          </p>
+        </div>
+      </div>
+    );
   }
 
   return (
