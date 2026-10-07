@@ -124,3 +124,33 @@ class EmailVerificationToken(Base):
     )
 
     user: Mapped[User] = relationship(back_populates="email_verification_tokens")
+
+
+class PendingRegistration(Base):
+    """A sign-up that has not proven its email address yet.
+
+    With REQUIRE_EMAIL_VERIFICATION on, registering writes this row instead of
+    a user. The account is created only when the link mailed to the address is
+    opened *and* the password chosen at sign-up is entered again. Until then the
+    address belongs to nobody, so it cannot be squatted.
+
+    Needing the password at confirmation is what stops the obvious attack: sign
+    up as someone else and hope they click the link. If they do, they cannot
+    finish the sign-up (they don't know the password), and the person who chose
+    the password cannot either (they never see the link).
+
+    One row per address: signing up again replaces the earlier attempt and its
+    link. Token stored as a hash, like every other one-time token here.
+    """
+
+    __tablename__ = "pending_registrations"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    email: Mapped[str] = mapped_column(String(320), unique=True, index=True, nullable=False)
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    display_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )

@@ -17,6 +17,10 @@ import {
 import { clearLegacyTokenStorage, setAccessToken } from "../../api/tokenStore";
 import { broadcastSession, onSessionEvent } from "./sessionChannel";
 
+export type RegisterResult =
+  | { status: "signed_in" }
+  | { status: "confirmation_sent"; email: string; devToken: string | null };
+
 type AuthState = {
   user: User | null;
   accessToken: string | null;
@@ -29,7 +33,9 @@ type AuthState = {
   bootstrapFailed: boolean;
   retryBootstrap: () => void;
   login: (email: string, password: string) => Promise<void>;
-  register: (email: string, password: string, displayName?: string) => Promise<void>;
+  /** Signs in straight away, or reports that a confirmation link was mailed. */
+  register: (email: string, password: string, displayName?: string) => Promise<RegisterResult>;
+  confirmRegistration: (token: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
 };
@@ -168,12 +174,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const register = useCallback(
-    async (email: string, password: string, displayName?: string) => {
-      const tokens = await authApi.register({
+    async (email: string, password: string, displayName?: string): Promise<RegisterResult> => {
+      const res = await authApi.register({
         email,
         password,
         display_name: displayName,
       });
+      if (!("access_token" in res)) {
+        // Verify-first: no account exists until the mailed link is used.
+        return { status: "confirmation_sent", email: res.email, devToken: res.dev_confirmation_token };
+      }
+      applySession(res);
+      broadcastSession("signed-in");
+      return { status: "signed_in" };
+    },
+    [applySession],
+  );
+
+  const confirmRegistration = useCallback(
+    async (token: string, password: string) => {
+      const tokens = await authApi.confirmRegistration(token, password);
       applySession(tokens);
       broadcastSession("signed-in");
     },
@@ -205,6 +225,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       retryBootstrap,
       login,
       register,
+      confirmRegistration,
       logout,
       refreshUser,
     }),
@@ -218,6 +239,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       retryBootstrap,
       login,
       register,
+      confirmRegistration,
       logout,
       refreshUser,
     ],

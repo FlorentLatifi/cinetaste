@@ -57,6 +57,14 @@ export function PrivacyPage() {
             whether the recommendations are any good.
           </dd>
 
+          <dt>Unfinished sign-ups</dt>
+          <dd>
+            When this server requires a confirmed email, signing up stores the
+            address, a hash of the password and the display name until the
+            confirmation link is used or expires (48 hours). No account exists
+            until then.
+          </dd>
+
           <dt>Guest mode</dt>
           <dd>
             Trying CineTaste without an account stores nothing on our servers:
