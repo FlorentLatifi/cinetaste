@@ -22,6 +22,7 @@ from app.domain.exceptions import AppError, ConflictError, UnauthorizedError
 from app.infrastructure.db.models.user import (
     EmailVerificationToken,
     PasswordResetToken,
+    PendingRegistration,
     RefreshToken,
     User,
 )
@@ -67,6 +68,161 @@ class AuthService:
 
         access, refresh, _row_id = await self._issue_tokens(user)
         return user, access, refresh
+
+    # ------------------------------------------------- verify-first sign-up
+
+    async def start_registration(
+        self, *, email: str, password: str, display_name: str | None = None
+    ) -> str | None:
+        """Sign up without creating an account yet; mail a confirmation link.
+
+        Used when REQUIRE_EMAIL_VERIFICATION is on. The account only comes into
+        existence in ``confirm_registration``, so an address nobody has proven
+        is never taken.
+
+        The answer is the same whether or not the address already has an
+        account; its owner gets a "you already have an account" mail instead.
+        Returning ``email_taken`` here would let anyone test which addresses
+        are registered.
+
+        Returns the raw token only in local/test without SMTP, like the reset
+        and verification flows; otherwise None.
+        """
+        dev_mode = self._settings.is_dev_like and not self._settings.email_configured
+        if not self._settings.email_configured and not dev_mode:
+            raise AppError(
+                "Sign-up needs email, which is not available on this server.",
+                status_code=503,
+                code="email_unavailable",
+            )
+
+        normalized = email.strip().lower()
+        # Every request counts: the abuse is mailing an address over and over,
+        # which looks like success from here.
+        await guard_identity(normalized, scope="signup", settings=self._settings)
+        await record_attempt(normalized, scope="signup", settings=self._settings)
+
+        now = datetime.now(UTC)
+        # Housekeeping on the write path keeps the table small without a job.
+        await self._session.execute(
+            delete(PendingRegistration).where(PendingRegistration.expires_at < now)
+        )
+
+        existing = await self._session.scalar(select(User).where(User.email == normalized))
+        if existing is not None:
+            if not dev_mode:
+                await self._send_best_effort(
+                    to=normalized,
+                    subject="You already have a CineTaste account",
+                    body=(
+                        "Hi,\n\n"
+                        "Someone tried to create a CineTaste account with this address, "
+                        "but you already have one. Sign in, or reset your password here:\n\n"
+                        f"{self._settings.public_app_url.rstrip('/')}/forgot-password\n\n"
+                        "If this wasn't you, you can ignore this email.\n"
+                    ),
+                )
+            # Same cost as the real path, so timing doesn't reveal the account.
+            await hash_password_async(password)
+            return None
+
+        raw = secrets.token_urlsafe(32)
+        password_hash = await hash_password_async(password)
+        expires_at = now + timedelta(hours=self._settings.email_verification_ttl_hours)
+        pending = await self._session.scalar(
+            select(PendingRegistration).where(PendingRegistration.email == normalized)
+        )
+        if pending is None:
+            pending = PendingRegistration(email=normalized)
+            self._session.add(pending)
+        # Signing up again replaces the earlier attempt, and its link stops working.
+        pending.password_hash = password_hash
+        pending.display_name = display_name.strip() if display_name else None
+        pending.token_hash = hash_token(raw)
+        pending.expires_at = expires_at
+        await self._session.flush()
+        logger.info("registration_pending")
+
+        if dev_mode:
+            return raw
+
+        link = f"{self._settings.public_app_url.rstrip('/')}/confirm-registration?token={raw}"
+        body = (
+            "Hi,\n\n"
+            "Confirm this address to finish creating your CineTaste account.\n"
+            f"Open this link within {self._settings.email_verification_ttl_hours} hours "
+            "and enter the password you chose:\n\n"
+            f"{link}\n\n"
+            "If you did not sign up, ignore this email — no account will be created.\n"
+        )
+        try:
+            await self._email.send(
+                to=normalized, subject="Confirm your email to finish signing up", text_body=body
+            )
+        except Exception as exc:
+            logger.exception("registration_email_failed")
+            raise AppError(
+                "Could not send the confirmation email. Try again later.",
+                status_code=503,
+                code="email_unavailable",
+            ) from exc
+        return None
+
+    async def confirm_registration(self, *, token: str, password: str) -> tuple[User, str, str]:
+        """Create the account from a pending sign-up: link opened + password known."""
+        stored = await self._session.scalar(
+            select(PendingRegistration)
+            .where(PendingRegistration.token_hash == hash_token(token.strip()))
+            .with_for_update()
+        )
+        invalid = AppError(
+            "This link is invalid or has expired. Sign up again to get a new one.",
+            status_code=400,
+            code="invalid_confirmation_token",
+        )
+        if stored is None:
+            raise invalid
+        now = datetime.now(UTC)
+        expires = stored.expires_at
+        if expires.tzinfo is None:
+            expires = expires.replace(tzinfo=UTC)
+        if expires < now:
+            raise invalid
+
+        # The token alone is not enough: someone signing up as another person
+        # gets the link sent to that person, who must not be able to finish an
+        # account whose password the impostor chose.
+        await guard_identity(stored.email, scope="confirm", settings=self._settings)
+        if not await verify_password_async(password, stored.password_hash):
+            await record_attempt(stored.email, scope="confirm", settings=self._settings)
+            raise UnauthorizedError(
+                "That isn't the password you chose when signing up.",
+                code="invalid_credentials",
+            )
+
+        if await self._session.scalar(select(User.id).where(User.email == stored.email)):
+            await self._session.delete(stored)
+            raise ConflictError("An account with this email already exists", code="email_taken")
+
+        user = User(
+            email=stored.email,
+            password_hash=stored.password_hash,
+            display_name=stored.display_name,
+            email_verified_at=now,
+        )
+        self._session.add(user)
+        await self._session.delete(stored)
+        await self._session.flush()
+        logger.info("registration_confirmed user_id=%s", user.id)
+
+        access, refresh, _row_id = await self._issue_tokens(user)
+        return user, access, refresh
+
+    async def _send_best_effort(self, *, to: str, subject: str, body: str) -> None:
+        try:
+            await self._email.send(to=to, subject=subject, text_body=body)
+        except Exception:  # noqa: BLE001 — the response must not depend on it
+            logger.warning("notice_email_failed", exc_info=True)
 
     async def login(self, *, email: str, password: str) -> tuple[User, str, str]:
         normalized = email.strip().lower()

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from uuid import uuid4
 
+import pytest
 from httpx import AsyncClient
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,6 +21,8 @@ from app.infrastructure.db.models.interaction import (
 from app.infrastructure.db.models.taste import TasteProfile
 from app.infrastructure.db.models.user import User
 from tests.integration.conftest import seed_catalog
+
+pytestmark = pytest.mark.integration
 
 
 async def _count(session: AsyncSession, model) -> int:

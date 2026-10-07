@@ -1,5 +1,10 @@
 import { expect, test } from "@playwright/test";
-import { installApiMock, mockSecondPick, mockTitle } from "./helpers/mockApi";
+import {
+  installApiMock,
+  MOCK_SIGNUP_PASSWORD,
+  mockSecondPick,
+  mockTitle,
+} from "./helpers/mockApi";
 
 /**
  * Behavioral smoke tests against Playwright API mocks (no real backend).
@@ -486,6 +491,41 @@ test("Onboarding: guest answers carry over, and can be discarded", async ({ page
   await page.getByRole("button", { name: /Start fresh/ }).click();
   await expect(page.locator(".ob-progress-count strong")).toHaveText("0");
   await expect(page.getByText(/carried over/)).toHaveCount(0);
+});
+
+test("Verify-first sign-up: no account until the link is opened with the password", async ({
+  page,
+}) => {
+  await installApiMock(page, { signedOut: true, verifyFirst: true });
+  await page.goto("/register");
+  await page.getByRole("heading", { name: "Create account" }).waitFor();
+  await page.getByLabel("Email").fill("someone@example.com");
+  await page.locator('input[autocomplete="new-password"]').fill(MOCK_SIGNUP_PASSWORD);
+  await page.getByRole("button", { name: "Create account" }).click();
+
+  await expect(page.getByRole("heading", { name: "Check your inbox" })).toBeVisible();
+  await expect(page.getByText("someone@example.com")).toBeVisible();
+  // Not signed in: the app chrome never appears.
+  await expect(page.getByRole("navigation", { name: "Main" })).toHaveCount(0);
+
+  await page.goto("/confirm-registration?token=mock-token-abcdef");
+  await page.getByRole("heading", { name: "Finish creating your account" }).waitFor();
+  const pw = page.locator('input[autocomplete="current-password"]');
+
+  await pw.fill("someone-elses-guess");
+  await page.getByRole("button", { name: "Create my account" }).click();
+  await expect(page.getByRole("alert")).toContainText(/isn't the password you chose/i);
+
+  await pw.fill(MOCK_SIGNUP_PASSWORD);
+  await page.getByRole("button", { name: "Create my account" }).click();
+  await expect(page).toHaveURL(/\/onboarding$/);
+  await expect(page.getByRole("heading", { name: "Rate what you know" })).toBeVisible();
+});
+
+test("Confirm sign-up: a link without a token says so", async ({ page }) => {
+  await installApiMock(page, { signedOut: true });
+  await page.goto("/confirm-registration");
+  await expect(page.getByRole("alert")).toContainText(/missing its token/i);
 });
 
 test("Privacy: reachable signed out and says what is stored", async ({ page }) => {

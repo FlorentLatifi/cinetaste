@@ -11,6 +11,7 @@ import { NotFoundPage } from "./pages/NotFoundPage";
 import { PrivacyPage } from "./pages/PrivacyPage";
 import { RegisterPage } from "./pages/RegisterPage";
 import { ResetPasswordPage } from "./pages/ResetPasswordPage";
+import { ConfirmRegistrationPage } from "./pages/ConfirmRegistrationPage";
 import { VerifyEmailPage } from "./pages/VerifyEmailPage";
 import { VerifyPendingPage } from "./pages/VerifyPendingPage";
 
@@ -208,6 +209,9 @@ export default function App() {
           is often opened on a different device from the one used to sign
           up. The token is the proof. */}
       <Route path="/verify-email" element={<VerifyEmailPage />} />
+      {/* Opened from the sign-up email, often on another device: no session
+          exists yet, the token plus the chosen password create one. */}
+      <Route path="/confirm-registration" element={<ConfirmRegistrationPage />} />
       {/* Reachable signed out: a privacy policy nobody can read before
           registering is not a privacy policy. */}
       <Route path="/privacy" element={<PrivacyPage />} />

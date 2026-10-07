@@ -122,11 +122,24 @@ with it on and no SMTP, because then nobody could ever confirm.
 2. Check that "Forgot password" delivers a mail.
 3. Only then set `REQUIRE_EMAIL_VERIFICATION=true` on the API and redeploy.
 
-The SPA shows "Check your inbox" straight after sign-up (the session says
-verification is owed), moves on by itself when the link is opened in another
-tab, and keeps `/account` reachable so a mistyped address can be deleted.
-A password reset also confirms the address: it proves the same thing, and it
-lets the real owner of an address someone else registered take it over.
+With it on, sign-up is **verify-first**: `POST /auth/register` answers `202`
+and writes a `pending_registrations` row, not a user. The account is created by
+`POST /auth/confirm-registration` (the SPA's `/confirm-registration` page), which
+needs the mailed token **and** the password chosen at sign-up. So:
+
+- typing someone else's address creates nothing and takes nothing;
+- if that person clicks the link, they cannot finish an account whose password
+  an impostor chose, and the impostor never sees the link;
+- an address that already has an account gets the same `202`, and its owner a
+  "you already have an account" mail — the response never reveals who is
+  registered;
+- signing up again replaces the earlier link; links expire after
+  `EMAIL_VERIFICATION_TTL_HOURS` (48) and stale rows are swept on the next
+  sign-up.
+
+Accounts created before the switch keep the older gate: "Check your inbox"
+until confirmed, with `/account` reachable to delete a mistyped address. A
+password reset also confirms an address, since it proves the same thing.
 
 ### Guest mode
 

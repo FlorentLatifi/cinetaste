@@ -18,14 +18,30 @@ export type TokenResponse = {
   email_verification_required?: boolean;
 };
 
+/** Returned instead of a session when the address must be proven first. */
+export type RegistrationPending = {
+  status: "confirmation_sent";
+  email: string;
+  /** Local/test only, where no mail server delivers the link. */
+  dev_confirmation_token: string | null;
+};
+
 export function register(input: {
   email: string;
   password: string;
   display_name?: string;
 }) {
-  return apiFetch<TokenResponse>("/auth/register", {
+  return apiFetch<TokenResponse | RegistrationPending>("/auth/register", {
     method: "POST",
     body: JSON.stringify(input),
+  });
+}
+
+/** Finish a verify-first sign-up: the mailed token plus the chosen password. */
+export function confirmRegistration(token: string, password: string) {
+  return apiFetch<TokenResponse>("/auth/confirm-registration", {
+    method: "POST",
+    body: JSON.stringify({ token, password }),
   });
 }
 
