@@ -17,6 +17,10 @@ const guestRoutes: { path: string; ready: string }[] = [
   { path: "/forgot-password", ready: "role=heading[name='Forgot password']" },
   { path: "/reset-password", ready: "role=heading[name='Reset password']" },
   { path: "/privacy", ready: "role=heading[name='Privacy']" },
+  {
+    path: "/confirm-registration?token=mock-token-abcdef",
+    ready: "role=heading[name='Finish creating your account']",
+  },
 ];
 
 for (const route of guestRoutes) {
