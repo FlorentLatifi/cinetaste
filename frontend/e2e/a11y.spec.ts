@@ -47,8 +47,7 @@ test("axe: /try (guest deck and guest results)", async ({ page }) => {
 
   for (const name of [mockTitle.name, "Mock Sequel", "Mock Thriller"]) {
     await page.getByRole("heading", { name }).waitFor();
-    await page.getByRole("button", { name: `Rate ${name}` }).click();
-    await page.getByRole("button", { name: /Loved it:/i }).click();
+    await page.getByRole("button", { name: `Loved it — ${name}` }).click();
   }
   await page.getByRole("button", { name: /Show my picks/i }).click();
   await page.getByRole("heading", { name: /what we.d watch/i }).waitFor();
