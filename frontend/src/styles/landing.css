@@ -9,19 +9,8 @@
 .landing-eyebrow { margin-bottom: 0.75rem; }
 .landing-headline { margin: 0 0 0.85rem; font-size: clamp(1.85rem, 5vw, 2.75rem); line-height: 1.12; font-family: "Instrument Serif", Georgia, serif; font-weight: 400; }
 .landing-lede { margin: 0 auto 2rem; max-width: 34rem; color: var(--muted); font-size: 1.05rem; line-height: 1.5; }
-.landing-stage { display: flex; flex-direction: column; align-items: center; gap: 0.85rem; margin: 0 auto 2rem; padding: 1.5rem 1rem 1.25rem; max-width: 28rem; border-radius: calc(var(--radius) + 8px); border: 1px solid var(--border); background: var(--surface-glass); backdrop-filter: blur(12px); box-shadow: var(--shadow); }
-.landing-poster-wrap { width: min(100%, 240px); }
-.landing-poster { aspect-ratio: 2 / 3; border-radius: 16px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.45rem; padding: 1.25rem; text-align: center; color: var(--accent); background: radial-gradient(circle at 30% 20%, rgba(232, 194, 122, 0.22), transparent 55%), linear-gradient(160deg, #1a1d2a, #0e1018); box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2), 0 24px 48px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.06); }
-.landing-poster-letter { font-size: 3.25rem; font-family: "Instrument Serif", Georgia, serif; line-height: 1; }
-.landing-poster-label { font-size: 0.95rem; font-weight: 600; color: var(--text); }
-.landing-poster-year { font-size: 0.8rem; color: var(--muted); }
-.landing-film-title { margin: 0.25rem 0 0; font-size: clamp(1.5rem, 3vw, 1.9rem); font-family: "Instrument Serif", Georgia, serif; font-weight: 400; }
-.landing-film-meta { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 0.4rem 0.65rem; margin: 0; color: var(--muted); font-size: 0.9rem; }
 .landing-why { width: 100%; text-align: left; padding: 0.85rem 1rem; border-radius: 12px; background: rgba(11, 12, 16, 0.55); border: 1px solid var(--border); }
 .landing-why .why-label { margin: 0 0 0.35rem; }
-.landing-demo-actions { display: grid; grid-template-columns: 1fr 1fr 1.2fr; gap: 0.45rem; width: 100%; opacity: 0.92; pointer-events: none; user-select: none; }
-.landing-demo-btn { cursor: default; }
-.landing-demo-note { margin: 0; font-size: 0.8rem; color: var(--muted); }
 .landing-cta { display: flex; flex-wrap: wrap; gap: 0.75rem; justify-content: center; align-items: center; }
 .landing-cta-primary { min-width: 10rem; padding-left: 1.5rem; padding-right: 1.5rem; }
 .landing-steps { max-width: 960px; margin: 0 auto; padding: 0 1.25rem 4rem; }
@@ -43,8 +32,23 @@
 
 @media (max-width: 720px) {
   .landing-step-list { grid-template-columns: 1fr; }
-  .landing-demo-actions { grid-template-columns: 1fr; }
   .landing-topbar-inner { padding: 0.65rem 1rem; }
   .brand-tag { display: none; }
 }
 .landing-cta-top { margin: -0.75rem 0 2.25rem; }
+
+/* Poster wall: real catalog posters, tilted away from the viewer and faded
+   out, so the hero reads as "films" at a glance. Decorative only. */
+.landing-wall { position: relative; left: 50%; transform: translateX(-50%); width: min(1100px, calc(100vw - 2rem)); height: clamp(220px, 38vw, 380px); margin: 0.5rem 0 -4.5rem; overflow: hidden; perspective: 1400px; -webkit-mask-image: linear-gradient(to bottom, #000 35%, transparent 95%); mask-image: linear-gradient(to bottom, #000 35%, transparent 95%); pointer-events: none; }
+.landing-wall-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 0.75rem; transform: rotateX(22deg) scale(1.05); transform-origin: top center; }
+.landing-wall-grid img { width: 100%; aspect-ratio: 2 / 3; object-fit: cover; border-radius: 12px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35); background: var(--bg-soft); }
+.landing-why-example { position: relative; z-index: 1; max-width: 28rem; margin: 1.5rem auto 2rem; background: var(--surface-glass-strong); backdrop-filter: blur(12px); box-shadow: var(--shadow); }
+
+@media (max-width: 640px) {
+  .landing-wall-grid { grid-template-columns: repeat(3, 1fr); gap: 0.5rem; }
+  .landing-wall-grid img:nth-child(n + 10) { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .landing-wall-grid { transform: none; }
+}

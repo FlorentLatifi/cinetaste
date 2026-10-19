@@ -50,31 +50,39 @@ test("Register: password show toggle and strength meter", async ({ page }) => {
   );
 });
 
-test("Onboarding: skip advances to next card", async ({ page }) => {
+test("Onboarding: every poster is rateable at once, and a second tap takes it back", async ({
+  page,
+}) => {
   await installApiMock(page, { onboardingComplete: false });
   await page.goto("/onboarding");
   await page.getByRole("heading", { name: "Rate what you know" }).waitFor();
-  await expect(page.getByRole("heading", { name: mockTitle.name })).toBeVisible();
 
-  await page
-    .getByRole("button", { name: new RegExp(`Haven't seen ${mockTitle.name}`, "i") })
-    .click();
-  await expect(page.getByRole("heading", { name: "Mock Sequel" })).toBeVisible({
-    timeout: 5_000,
-  });
+  // A grid, not one card at a time: all four posters are on the page.
+  for (const name of [mockTitle.name, "Mock Sequel", "Mock Thriller", "Mock Comedy"]) {
+    await expect(page.getByRole("heading", { name })).toBeVisible();
+  }
+
+  const loved = page.getByRole("button", { name: `Loved it — ${mockTitle.name}` });
+  await loved.click();
+  await expect(loved).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator(".ob-progress-count strong")).toHaveText("1");
+
+  await loved.click();
+  await expect(loved).toHaveAttribute("aria-pressed", "false");
+  await expect(page.locator(".ob-progress-count strong")).toHaveText("0");
 });
 
-test("Onboarding: Rate opens scale and records a rating", async ({ page }) => {
+test("Onboarding: the finish button waits for enough ratings", async ({ page }) => {
   await installApiMock(page, { onboardingComplete: false });
   await page.goto("/onboarding");
-  await page.getByRole("heading", { name: mockTitle.name }).waitFor();
+  await page.getByRole("heading", { name: "Rate what you know" }).waitFor();
 
-  await page.getByRole("button", { name: `Rate ${mockTitle.name}` }).click();
-  await expect(page.getByText("How was it for you?")).toBeVisible();
-  await page.getByRole("button", { name: /Really liked it:/i }).click();
-  // Progress should reflect at least one rating
+  const finish = page.getByRole("button", { name: /See my recommendations/ });
+  await expect(finish).toBeDisabled();
+  await page.getByRole("button", { name: `Really liked it — ${mockTitle.name}` }).click();
   await expect(page.getByText(/of 6 rated/i)).toBeVisible();
-  await expect(page.locator(".ob-progress-count strong")).toHaveText("1");
+  await expect(page.getByText("Rate 5 more to unlock For You")).toBeVisible();
+  await expect(finish).toBeDisabled();
 });
 
 test("For You: several picks in a row, and a pass can be undone", async ({ page }) => {
@@ -450,8 +458,7 @@ test("Guest: rate three, get a row of picks, and the saves follow you to sign-up
 
   for (const name of [mockTitle.name, "Mock Sequel", "Mock Thriller"]) {
     await expect(page.getByRole("heading", { name })).toBeVisible();
-    await page.getByRole("button", { name: `Rate ${name}` }).click();
-    await page.getByRole("button", { name: /Really liked it:/i }).click();
+    await page.getByRole("button", { name: `Really liked it — ${name}` }).click();
   }
 
   await page.getByRole("button", { name: /Show my picks/i }).click();

@@ -72,11 +72,21 @@ describe("the derived lists stay in step with the scale", () => {
     expect(ONBOARDING_RATINGS.map((o) => o.event)).not.toContain("haven't_seen");
   });
 
-  it("orders onboarding worst to best, the reverse of For You", () => {
-    const feedOrder = RATING_SCALE.map((o) => o.event).filter(
-      (e) => e !== "haven't_seen",
-    );
-    expect(ONBOARDING_RATINGS.map((o) => o.event)).toEqual([...feedOrder].reverse());
+  it("is a four-step quick scale, worst to best", () => {
+    expect(ONBOARDING_RATINGS.map((o) => o.event)).toEqual([
+      "rate_1",
+      "mid",
+      "rate_3",
+      "rate_4",
+    ]);
+  });
+
+  it("starts at the worst answer and ends at the best", () => {
+    // Guest mode needs one positive and onboarding two, so both ends must be
+    // reachable in a single tap.
+    const events = ONBOARDING_RATINGS.map((o) => o.event);
+    expect(events[0]).toBe("rate_1");
+    expect(events.at(-1)).toBe("rate_4");
   });
 
   it("reuses the onboarding list after watching", () => {

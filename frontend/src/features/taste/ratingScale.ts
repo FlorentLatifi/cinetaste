@@ -98,11 +98,18 @@ export const RATING_SCALE: readonly RatingOption[] = [
   },
 ] as const;
 
-/** Onboarding asks only about titles the user has seen, worst → best. */
+/**
+ * The quick scale, worst → best: four steps, one tap each.
+ *
+ * Used wherever someone rates a film they have seen (onboarding, guest mode,
+ * "Seen it", the detail page). Five steps made "Liked it" and "Really liked
+ * it" a coin toss that told the profile little; four distinct answers are
+ * faster to choose and carry the same signal. "Liked it" (rate_2) is still a
+ * valid event, so older ratings keep their meaning.
+ */
 export const ONBOARDING_RATINGS: readonly RatingOption[] = [
   "rate_1",
   "mid",
-  "rate_2",
   "rate_3",
   "rate_4",
 ].map((event) => RATING_SCALE.find((o) => o.event === event)!);
