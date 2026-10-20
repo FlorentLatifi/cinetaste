@@ -1,8 +1,22 @@
 .title-detail { display: flex; flex-direction: column; gap: 1.25rem; }
-.title-detail-grid { display: grid; grid-template-columns: minmax(200px, 0.85fr) 1.2fr; gap: 1.5rem; align-items: start; }
-.title-detail-poster { border-radius: calc(var(--radius) + 4px); overflow: hidden; border: 1px solid var(--border); background: var(--bg-soft); box-shadow: var(--shadow); aspect-ratio: 2 / 3; }
+/* The head (type, title, meta, genres) sits beside the poster on every width;
+   the body goes under the head on wide screens and full width on a phone, so
+   the actions stay on the first screen there instead of under a tall poster. */
+.title-detail-grid {
+  display: grid;
+  /* Capped so the poster is never stretched past the image the browser picked. */
+  grid-template-columns: minmax(200px, 360px) minmax(0, 1fr);
+  grid-template-rows: auto 1fr;
+  grid-template-areas: "poster head" "poster body";
+  column-gap: 1.5rem;
+  row-gap: 0.65rem;
+  align-items: start;
+}
+.title-detail-head { grid-area: head; display: flex; flex-direction: column; gap: 0.65rem; }
+.title-detail-head h1 { overflow-wrap: anywhere; }
+.title-detail-poster { grid-area: poster; border-radius: calc(var(--radius) + 4px); overflow: hidden; border: 1px solid var(--border); background: var(--bg-soft); box-shadow: var(--shadow); aspect-ratio: 2 / 3; }
 .title-detail-poster img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.title-detail-body { display: flex; flex-direction: column; gap: 0.65rem; }
+.title-detail-body { grid-area: body; display: flex; flex-direction: column; gap: 0.65rem; min-width: 0; }
 .title-overview { color: var(--text); line-height: 1.55; margin: 0.25rem 0 0.5rem; max-width: 40rem; }
 .title-detail-nav { display: flex; flex-wrap: wrap; gap: 0.45rem; }
 
@@ -40,7 +54,7 @@
 .watch-attribution { margin: 0; color: var(--muted); font-size: 0.78rem; }
 
 .detail-skeleton { padding: 0.5rem 0 2rem; }
-.detail-skeleton-grid { display: grid; grid-template-columns: minmax(180px, 280px) 1fr; gap: 1.5rem 2rem; align-items: start; }
+.detail-skeleton-grid { display: grid; grid-template-columns: minmax(200px, 360px) 1fr; gap: 1.5rem 2rem; align-items: start; }
 .detail-skeleton-poster { aspect-ratio: 2 / 3; border-radius: 16px; background: var(--bg-soft); width: 100%; }
 .detail-skeleton-body { display: flex; flex-direction: column; gap: 0.65rem; padding-top: 0.25rem; }
 .detail-skeleton-line { height: 0.95rem; border-radius: 8px; background: var(--bg-soft); width: 100%; max-width: 36rem; }
@@ -50,8 +64,7 @@
 .detail-skeleton-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.75rem; }
 .detail-skeleton-actions span { display: block; height: 2.5rem; width: 6.5rem; border-radius: 999px; background: var(--bg-soft); }
 @media (max-width: 720px) {
-  .detail-skeleton-grid { grid-template-columns: 1fr; }
-  .detail-skeleton-poster { max-width: 240px; margin: 0 auto; }
+  .detail-skeleton-grid { grid-template-columns: minmax(6.5rem, 34%) 1fr; gap: 1rem; }
 }
 
 .detail-action-status .text-btn { appearance: none; border: 0; background: none; color: var(--accent-strong); font: inherit; font-weight: 700; cursor: pointer; padding: 0; text-decoration: underline; text-underline-offset: 0.15em; }
@@ -70,6 +83,16 @@
 .rec-title-link:hover { color: var(--accent-strong); text-decoration: underline; }
 
 @media (max-width: 720px) {
-  .title-detail-grid { grid-template-columns: 1fr; }
-  .title-detail-poster { max-width: 280px; margin: 0 auto; }
+  .title-detail-grid {
+    grid-template-columns: minmax(6.5rem, 34%) minmax(0, 1fr);
+    grid-template-rows: auto auto;
+    grid-template-areas: "poster head" "body body";
+    column-gap: 1rem;
+    row-gap: 1rem;
+    align-items: center;
+  }
+  .title-detail-head { gap: 0.4rem; }
+  .title-detail-head > * { margin: 0; }
+  .title-detail-head h1 { font-size: clamp(1.55rem, 7vw, 2.1rem); }
+  .title-detail-poster .poster-fallback { font-size: 0.85rem; padding: 0.5rem; }
 }

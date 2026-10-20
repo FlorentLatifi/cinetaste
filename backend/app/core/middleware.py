@@ -224,3 +224,79 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 },
             )
         return await call_next(request)
+
+
+class BodySizeLimitMiddleware:
+    """Refuse request bodies larger than ``max_bytes`` before anything parses them.
+
+    Without it a public route read and parsed whatever it was sent: a 4 MB JSON
+    body to /guest/recommendations was decoded in full before validation said
+    no, so a handful of 100 MB requests could exhaust a small instance's
+    memory. The largest legitimate body (a taste-snapshot import) is a few
+    tens of kilobytes.
+
+    A declared Content-Length over the limit is refused without reading. A
+    body without one (chunked) is read up to the limit and then refused, so
+    either way at most ``max_bytes`` is ever held. Pure ASGI rather than
+    BaseHTTPMiddleware, because the point is to act before the body is read.
+    """
+
+    _METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+
+    def __init__(self, app, max_bytes: int) -> None:
+        self.app = app
+        self.max_bytes = max_bytes
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] != "http" or scope.get("method") not in self._METHODS:
+            await self.app(scope, receive, send)
+            return
+
+        declared = dict(scope.get("headers") or []).get(b"content-length")
+        if declared is not None:
+            try:
+                too_big = int(declared) > self.max_bytes
+            except ValueError:
+                too_big = False  # let the server reject a malformed header
+            if too_big:
+                await self._reject(scope, receive, send)
+                return
+            await self.app(scope, receive, send)
+            return
+
+        # No declared length: buffer up to the limit, then replay.
+        chunks: list[bytes] = []
+        size = 0
+        while True:
+            message = await receive()
+            if message["type"] != "http.request":
+                break
+            body = message.get("body", b"")
+            size += len(body)
+            if size > self.max_bytes:
+                await self._reject(scope, receive, send)
+                return
+            chunks.append(body)
+            if not message.get("more_body", False):
+                break
+
+        replayed = False
+
+        async def replay():
+            nonlocal replayed
+            if not replayed:
+                replayed = True
+                return {"type": "http.request", "body": b"".join(chunks), "more_body": False}
+            return await receive()
+
+        await self.app(scope, replay, send)
+
+    async def _reject(self, scope, receive, send) -> None:
+        response = JSONResponse(
+            status_code=413,
+            content={
+                "code": "payload_too_large",
+                "message": f"Request body is larger than {self.max_bytes // 1024} KB.",
+            },
+        )
+        await response(scope, receive, send)

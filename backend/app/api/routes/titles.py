@@ -83,7 +83,9 @@ async def get_title(
     title = await service.get_title(title_id)
     if title is None:
         raise NotFoundError("Title not found")
-    return TitleDetailOut.from_title_detail(title)
+    out = TitleDetailOut.from_title_detail(title)
+    out.my_state, out.my_rating = await service.user_title_status(user.id, title_id)
+    return out
 
 
 @router.get("/titles/{title_id}/where-to-watch", response_model=WhereToWatchOut)

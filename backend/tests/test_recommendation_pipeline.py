@@ -376,6 +376,33 @@ def test_rank_includes_hidden_gem_reason_for_quality_underdog() -> None:
     assert "hidden_gem" in codes
 
 
+def test_hidden_gem_label_is_rationed_per_slate() -> None:
+    """Every title here qualifies; only a few may say so, or the badge is noise."""
+    from app.recommendation.pipeline import MAX_GEM_LABELS
+
+    gems = [
+        FakeTitle(
+            name=f"Underdog {i}",
+            genres=[["Drama", "Comedy", "Thriller", "Horror", "Romance"][i % 5]],
+            popularity=10.0 + i,
+            vote_average=7.4 + (i % 4) * 0.2,
+        )
+        for i in range(12)
+    ]
+    ranked = rank_titles(
+        user_vector=None,
+        user_features={},
+        titles=gems,
+        exclude_ids=set(),
+        slate_size=10,
+        mmr_lambda=0.7,
+        exploration_slots=0,
+    )
+    labelled = [item for item in ranked if any(r.code == "hidden_gem" for r in item.reasons)]
+    assert len(ranked) == 10
+    assert 0 < len(labelled) <= MAX_GEM_LABELS
+
+
 # ---------------------------------------------------------------------------
 # Sparse channel sanity (used inside score)
 # ---------------------------------------------------------------------------

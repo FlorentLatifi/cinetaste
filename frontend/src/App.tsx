@@ -9,6 +9,7 @@ import { LandingPage } from "./pages/LandingPage";
 import { LoginPage } from "./pages/LoginPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
 import { PrivacyPage } from "./pages/PrivacyPage";
+import { TermsPage } from "./pages/TermsPage";
 import { RegisterPage } from "./pages/RegisterPage";
 import { ResetPasswordPage } from "./pages/ResetPasswordPage";
 import { ConfirmRegistrationPage } from "./pages/ConfirmRegistrationPage";
@@ -50,15 +51,29 @@ function RouteFallback() {
 }
 
 function Protected({ children }: { children: ReactNode }) {
-  const { user, loading, emailVerificationRequired, bootstrapSlow, bootstrapFailed, retryBootstrap } =
-    useAuth();
+  const {
+    user,
+    loading,
+    signOutReason,
+    emailVerificationRequired,
+    bootstrapSlow,
+    bootstrapFailed,
+    retryBootstrap,
+  } = useAuth();
   const { pathname } = useLocation();
   if (loading) {
     return (
       <AppLoading slow={bootstrapSlow} failed={bootstrapFailed} onRetry={retryBootstrap} />
     );
   }
-  if (!user) return <Navigate to="/login" replace />;
+  if (!user) {
+    // Where to go depends on why there is no session.
+    if (signOutReason === "deleted") {
+      return <Navigate to="/" replace state={{ accountDeleted: true }} />;
+    }
+    if (signOutReason === "signed_out") return <Navigate to="/" replace />;
+    return <Navigate to="/login" replace />;
+  }
   // The server is enforcing email verification: nothing but "check your
   // inbox" until it's done. /account stays reachable (none of its calls are
   // gated) so a mistyped address can be deleted and registered again.
@@ -69,8 +84,11 @@ function Protected({ children }: { children: ReactNode }) {
 }
 
 function GuestOnly({ children }: { children: ReactNode }) {
-  const { user, loading, bootstrapSlow, bootstrapFailed, retryBootstrap } = useAuth();
-  if (loading) {
+  const { user, loading, sessionLikely, bootstrapSlow, bootstrapFailed, retryBootstrap } =
+    useAuth();
+  // Someone who was never signed in here doesn't wait for the session check;
+  // if it does find a session, the redirect below happens when it lands.
+  if (loading && sessionLikely) {
     return (
       <AppLoading slow={bootstrapSlow} failed={bootstrapFailed} onRetry={retryBootstrap} />
     );
@@ -81,9 +99,18 @@ function GuestOnly({ children }: { children: ReactNode }) {
 
 /** Guests see marketing landing; signed-in users see immersive For You. */
 function RootRoute() {
-  const { user, loading, emailVerificationRequired, bootstrapSlow, bootstrapFailed, retryBootstrap } =
-    useAuth();
-  if (loading) {
+  const {
+    user,
+    loading,
+    sessionLikely,
+    emailVerificationRequired,
+    bootstrapSlow,
+    bootstrapFailed,
+    retryBootstrap,
+  } = useAuth();
+  // A first-time visitor gets the landing page at once instead of waiting
+  // for a sleeping API to say they aren't signed in.
+  if (loading && sessionLikely) {
     return (
       <AppLoading slow={bootstrapSlow} failed={bootstrapFailed} onRetry={retryBootstrap} />
     );
@@ -215,6 +242,7 @@ export default function App() {
       {/* Reachable signed out: a privacy policy nobody can read before
           registering is not a privacy policy. */}
       <Route path="/privacy" element={<PrivacyPage />} />
+      <Route path="/terms" element={<TermsPage />} />
       <Route path="/" element={<RootRoute />} />
       <Route path="*" element={<NotFoundPage />} />
     </Routes>

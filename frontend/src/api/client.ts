@@ -65,13 +65,16 @@ export async function tryRefreshSession(): Promise<authApi.TokenResponse | null>
   if (refreshInFlight) return refreshInFlight;
 
   refreshInFlight = (async () => {
+    const before = getAccessToken();
     try {
       // Cookie sent automatically with credentials: "include"
       const tokens = await authApi.refresh();
       setAccessToken(tokens.access_token);
       return tokens;
     } catch {
-      setAccessToken(null);
+      // A sign-in that finished while this was in flight holds a newer token;
+      // only a token this refresh was meant to replace is cleared.
+      if (getAccessToken() === before) setAccessToken(null);
       return null;
     } finally {
       refreshInFlight = null;
