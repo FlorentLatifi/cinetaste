@@ -29,12 +29,17 @@ from app.domain.exceptions import AppError
 from app.domain.taste_signals import (
     FEED_EXCLUDE_STATES,
     HISTORY_VISIBLE_STATES,
+    RATING_EVENT_TYPES,
     effective_title_signals,
     weight_for,
 )
 from app.infrastructure.cache import get_store
 from app.infrastructure.db.models.catalog import Credit, Title
-from app.infrastructure.db.models.interaction import RecommendationImpression, UserTitleState
+from app.infrastructure.db.models.interaction import (
+    InteractionEvent,
+    RecommendationImpression,
+    UserTitleState,
+)
 from app.infrastructure.db.models.taste import TasteProfile
 from app.recommendation.explanations import Reason, strip_explain_memory
 from app.recommendation.pipeline import RankedItem, rank_titles
@@ -459,6 +464,39 @@ class RecommendationService:
                 )
             ).all()
         )
+
+    async def user_title_status(self, user_id: UUID, title_id: UUID) -> tuple[str | None, str | None]:
+        """(state, rating) for one title, for the detail page.
+
+        ``state`` is the stored relationship (watchlist, like, dislike, rated,
+        not_interested, watched) or None. The stored state collapses ratings
+        ("like" covers both Really liked and Loved), so the exact rating comes
+        from the newest rating event since the last undo.
+        """
+        state = await self._session.scalar(
+            select(UserTitleState.state).where(
+                UserTitleState.user_id == user_id, UserTitleState.title_id == title_id
+            )
+        )
+        if state in (None, "none", "haven't_seen"):
+            return None, None
+        if state not in {"like", "dislike", "rated"}:
+            return state, None
+
+        events = (
+            await self._session.execute(
+                select(InteractionEvent.event_type)
+                .where(
+                    InteractionEvent.user_id == user_id,
+                    InteractionEvent.title_id == title_id,
+                    InteractionEvent.event_type.in_([*RATING_EVENT_TYPES, "clear"]),
+                )
+                .order_by(InteractionEvent.created_at.desc())
+                .limit(1)
+            )
+        ).scalars().all()
+        rating = events[0] if events and events[0] != "clear" else None
+        return state, rating
 
     async def existing_title_ids(self, title_ids: list[UUID]) -> set[UUID]:
         if not title_ids:

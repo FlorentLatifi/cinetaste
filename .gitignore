@@ -13,6 +13,7 @@ backend/.venv/
 !.env.example
 !.env.production.example
 !.env.staging.example
+!frontend/.env.production
 *.egg-info/
 .pytest_cache/
 .mypy_cache/
@@ -54,3 +55,6 @@ auth.json
 
 # Evaluation datasets (MovieLens may not be redistributed)
 data/
+
+# Local Redis snapshots (never data we ship)
+*.rdb

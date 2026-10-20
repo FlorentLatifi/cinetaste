@@ -113,7 +113,9 @@ export function GuestPage() {
             </div>
           </Link>
           <div className="landing-topbar-actions">
-            <ContrastToggle compact />
+            <span className="topbar-contrast">
+              <ContrastToggle compact />
+            </span>
             <Link className="btn ghost btn-sm" to="/login">
               Sign in
             </Link>

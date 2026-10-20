@@ -174,6 +174,10 @@ export function RegisterPage() {
         <button className="btn primary" type="submit" disabled={submitting}>
           {submitting ? "Creating…" : "Create account"}
         </button>
+        <p className="auth-legal">
+          By creating an account you agree to the <Link to="/terms">terms</Link>{" "}
+          and the <Link to="/privacy">privacy policy</Link>.
+        </p>
         <p className="auth-switch">
           Already have an account? <Link to="/login">Sign in</Link>
         </p>

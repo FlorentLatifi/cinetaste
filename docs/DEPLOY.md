@@ -206,6 +206,16 @@ VITE_API_BASE_URL=/api/v1
 
    and point the rewrite in `frontend/vercel.json` at your API host.
 
+   Optional, also in Vercel → Settings → Environment Variables:
+
+```
+VITE_CONTACT_EMAIL=you@example.com   # shown on /privacy and /terms
+VITE_SENTRY_DSN=…                    # frontend error tracking
+```
+
+   `VITE_SITE_URL` (absolute site URL for link previews) is committed in
+   `frontend/.env.production`; change it there if the domain changes.
+
 6. Deploy → copy the production URL into API `CORS_ORIGINS`
 7. Redeploy API if CORS changed
 8. Confirm browser login sets `ct_refresh` cookie on the **API** host (Application → Cookies)

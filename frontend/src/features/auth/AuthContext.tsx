@@ -4,6 +4,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -16,6 +17,14 @@ import {
 } from "../../api/client";
 import { clearLegacyTokenStorage, setAccessToken } from "../../api/tokenStore";
 import { broadcastSession, onSessionEvent } from "./sessionChannel";
+import { hasSessionHint, setSessionHint } from "./sessionHint";
+
+/**
+ * Why the last session ended, so the signed-in pages can send people somewhere
+ * that fits: a confirmation after deleting the account, the home page after
+ * signing out, the sign-in form when a session simply expired.
+ */
+export type SignOutReason = "signed_out" | "deleted" | "expired";
 
 export type RegisterResult =
   | { status: "signed_in" }
@@ -37,7 +46,20 @@ type AuthState = {
   register: (email: string, password: string, displayName?: string) => Promise<RegisterResult>;
   confirmRegistration: (token: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
+  /**
+   * Forget the session here and in other tabs without calling the API. For
+   * when the server has already ended it (account deletion clears the cookie).
+   */
+  endSession: (reason: SignOutReason) => void;
+  /** Why the last session ended, or null while signed in / never signed in. */
+  signOutReason: SignOutReason | null;
   refreshUser: () => Promise<void>;
+  /**
+   * True when this browser was signed in last time, so pages should wait for
+   * the session check. False for everyone else, who can be shown the public
+   * page while the check runs (see sessionHint).
+   */
+  sessionLikely: boolean;
 };
 
 const AuthContext = createContext<AuthState | null>(null);
@@ -50,8 +72,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [bootstrapSlow, setBootstrapSlow] = useState(false);
   const [bootstrapFailed, setBootstrapFailed] = useState(false);
   const [bootstrapAttempt, setBootstrapAttempt] = useState(0);
+  const [sessionLikely, setSessionLikely] = useState(hasSessionHint);
+  const [signOutReason, setSignOutReason] = useState<SignOutReason | null>(null);
+  // Bumped by every sign-in and sign-out here. The page-load session check
+  // compares it before applying its answer: a first-time visitor can sign in
+  // while that check is still waiting on a sleeping API, and its late "no
+  // session" must not undo the sign-in.
+  const sessionEpoch = useRef(0);
+
+  const forgetSession = useCallback(() => {
+    sessionEpoch.current += 1;
+    setSessionHint(false);
+    setSessionLikely(false);
+  }, []);
 
   const applySession = useCallback((tokens: authApi.TokenResponse) => {
+    sessionEpoch.current += 1;
+    // A sign-in answers what the session check was asking, so stop waiting.
+    setLoading(false);
+    setSessionHint(true);
+    setSessionLikely(true);
+    setSignOutReason(null);
     setAccessToken(tokens.access_token);
     setAccessTokenState(tokens.access_token);
     setUser(tokens.user);
@@ -89,17 +130,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }, SLOW_AFTER_MS);
 
     async function bootstrap() {
+      const epoch = sessionEpoch.current;
       try {
         // Goes through the shared single-flight refresh: StrictMode's double
         // effect and other tabs reuse one request instead of racing it.
         const tokens = await tryRefreshSession();
         if (cancelled) return;
+        // Signed in or out while this was in flight: that answer is newer.
+        if (sessionEpoch.current !== epoch) return;
         if (tokens) {
           applySession(tokens);
         } else {
           setAccessToken(null);
           setAccessTokenState(null);
           setUser(null);
+          forgetSession();
         }
       } catch {
         // tryRefreshSession swallows its own errors, so reaching here means
@@ -119,7 +164,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       cancelled = true;
       clearTimeout(slowTimer);
     };
-  }, [applySession, bootstrapAttempt]);
+  }, [applySession, forgetSession, bootstrapAttempt]);
 
   const retryBootstrap = useCallback(() => {
     setLoading(true);
@@ -129,14 +174,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // When apiFetch gets 401 and refresh fails, drop local session immediately.
   useEffect(() => {
     setSessionExpiredHandler(() => {
+      setSignOutReason("expired");
       setAccessToken(null);
       setAccessTokenState(null);
       setUser(null);
       setEmailVerificationRequired(false);
+      forgetSession();
       clearLegacyTokenStorage();
     });
     return () => setSessionExpiredHandler(null);
-  }, []);
+  }, [forgetSession]);
 
   // A 403 the user can actually resolve, unlike the rest of them.
   useEffect(() => {
@@ -151,17 +198,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     () =>
       onSessionEvent((event) => {
         if (event === "signed-out") {
+          setSignOutReason("signed_out");
           setAccessToken(null);
           setAccessTokenState(null);
           setUser(null);
           setEmailVerificationRequired(false);
+          forgetSession();
           return;
         }
         // Signed in elsewhere: fetch our own token through the shared cookie
         // rather than being handed one. Nothing sensitive crossed the channel.
         void refreshUser().catch(() => undefined);
       }),
-    [refreshUser],
+    [refreshUser, forgetSession],
   );
 
   const login = useCallback(
@@ -200,19 +249,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [applySession],
   );
 
+  const endSession = useCallback(
+    (reason: SignOutReason) => {
+      // Set together with the user so the guard sees both in one render.
+      setSignOutReason(reason);
+      setAccessToken(null);
+      setAccessTokenState(null);
+      setUser(null);
+      setEmailVerificationRequired(false);
+      forgetSession();
+      clearLegacyTokenStorage();
+      broadcastSession("signed-out");
+    },
+    [forgetSession],
+  );
+
   const logout = useCallback(async () => {
     try {
       await authApi.logout();
     } catch {
       // Still clear local session
     }
-    setAccessToken(null);
-    setAccessTokenState(null);
-    setUser(null);
-    setEmailVerificationRequired(false);
-    clearLegacyTokenStorage();
-    broadcastSession("signed-out");
-  }, []);
+    endSession("signed_out");
+  }, [endSession]);
 
   const value = useMemo(
     () => ({
@@ -227,7 +286,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       register,
       confirmRegistration,
       logout,
+      endSession,
+      signOutReason,
       refreshUser,
+      sessionLikely,
     }),
     [
       user,
@@ -241,7 +303,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       register,
       confirmRegistration,
       logout,
+      endSession,
+      signOutReason,
       refreshUser,
+      sessionLikely,
     ],
   );
 

@@ -101,6 +101,8 @@ export async function installApiMock(
     signedOut?: boolean;
     /** Server requires a proven email before any account exists (202 on register). */
     verifyFirst?: boolean;
+    /** The viewer's state on the title detail page (my_state). */
+    detailState?: string;
   } = {},
 ): Promise<ApiMockHandle> {
   const onboardingComplete = opts.onboardingComplete !== false;
@@ -109,6 +111,18 @@ export async function installApiMock(
   let interactionPosts = 0;
   const failedOnce = new Set<string>();
   let refreshCalls = 0;
+
+  // A signed-in user signed in before, so the browser carries the hint that
+  // makes pages wait for the session check (features/auth/sessionHint).
+  if (!opts.signedOut) {
+    await page.addInitScript(() => {
+      try {
+        window.localStorage.setItem("ct_signed_in", "1");
+      } catch {
+        // ignore
+      }
+    });
+  }
 
   await page.route("**/api/v1/**", async (route: Route) => {
     const req = route.request();
@@ -207,6 +221,37 @@ export async function installApiMock(
           201,
         ),
       );
+      return;
+    }
+
+    if (method === "POST" && path === "/auth/login") {
+      const body = JSON.parse(req.postData() || "{}");
+      if (body.password !== MOCK_SIGNUP_PASSWORD) {
+        await route.fulfill(
+          json({ message: "Invalid email or password", code: "invalid_credentials" }, 401),
+        );
+        return;
+      }
+      await route.fulfill(
+        json({
+          access_token: "mock-access-token",
+          token_type: "bearer",
+          user,
+          email_verification_required: false,
+        }),
+      );
+      return;
+    }
+
+    if (method === "DELETE" && path === "/me") {
+      const body = JSON.parse(req.postData() || "{}");
+      if (body.password !== MOCK_SIGNUP_PASSWORD) {
+        await route.fulfill(
+          json({ message: "Password is incorrect", code: "invalid_credentials" }, 401),
+        );
+        return;
+      }
+      await route.fulfill({ status: 204, body: "" });
       return;
     }
 
@@ -564,6 +609,8 @@ export async function installApiMock(
     if (method === "GET" && /^\/titles\/[^/]+$/.test(path)) {
       await route.fulfill(
         json({
+          my_state: opts.detailState ?? null,
+          my_rating: null,
           ...mockTitle,
           credits: [
             {

@@ -7,7 +7,7 @@ import {
   type FormEvent,
   type KeyboardEvent,
 } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { ApiError } from "../api/client";
 import * as authApi from "../api/auth";
 import type { TasteSummary } from "../api/auth";
@@ -41,10 +41,9 @@ function parseTab(raw: string | null): AccountTab {
 }
 
 export function AccountPage() {
-  const { user, accessToken, logout } = useAuth();
+  const { user, accessToken, endSession } = useAuth();
   const { isHigh, setContrast } = useContrast();
   const { preference: colorPref, setPreference: setColorPref } = useColorScheme();
-  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const tab = parseTab(searchParams.get("tab"));
   const tablistId = useId();
@@ -267,8 +266,10 @@ export function AccountPage() {
     setSubmitting(true);
     try {
       await authApi.deleteAccount(accessToken, password);
-      await logout();
-      navigate("/login", { replace: true });
+      // The server ended the session and cleared the cookie with the account,
+      // so there is nothing to call. The signed-in guard sees why the session
+      // ended and takes them to a page that says it worked.
+      endSession("deleted");
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not delete account");
       setSubmitting(false);

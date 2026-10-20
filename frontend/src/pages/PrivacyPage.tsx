@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import { ContrastToggle } from "../components/ContrastToggle";
+import { CONTACT_EMAIL, ISSUES_URL } from "../lib/contact";
 
 /**
  * Written from what the code actually stores, not from a template. Every list
@@ -161,10 +162,17 @@ export function PrivacyPage() {
         <h2>Contact</h2>
         <p>
           Questions, or a request this page does not cover:{" "}
-          <a href="mailto:PLACEHOLDER@example.com">PLACEHOLDER@example.com</a>.
+          {CONTACT_EMAIL ? (
+            <a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a>
+          ) : (
+            <a href={ISSUES_URL} target="_blank" rel="noreferrer noopener">
+              open an issue
+            </a>
+          )}
+          .
         </p>
 
-        <p className="legal-updated">Last updated 24 September 2026.</p>
+        <p className="legal-updated">Last updated 20 October 2026.</p>
 
         <p>
           <Link to="/">Back to CineTaste</Link>

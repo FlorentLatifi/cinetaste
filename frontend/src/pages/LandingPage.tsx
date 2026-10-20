@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Helmet } from "react-helmet-async";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { getGuestCards } from "../api/guest";
 import type { Title } from "../api/titles";
 import { SiteFooter } from "../components/SiteFooter";
@@ -50,15 +50,15 @@ function PosterWall() {
 }
 
 export function LandingPage() {
+  const location = useLocation();
+  const accountDeleted = Boolean(
+    (location.state as { accountDeleted?: boolean } | null)?.accountDeleted,
+  );
   return (
     <div className="landing">
       <Helmet>
         <title>CineTaste — Movie & TV Recommendations That Match Your Taste</title>
         <meta name="description" content="Rate a few films you know and get tonight's picks, each with the reason it was chosen. Try it without an account." />
-        <meta property="og:title" content="CineTaste — Taste-First Movie Discovery" />
-        <meta property="og:description" content="Rate three films. Get picks for tonight. Every pick explained." />
-        <meta property="og:type" content="website" />
-        <meta name="twitter:card" content="summary_large_image" />
       </Helmet>
 
       <a className="skip-link" href="#landing-main">
@@ -75,7 +75,9 @@ export function LandingPage() {
             </div>
           </Link>
           <div className="landing-topbar-actions">
-            <ContrastToggle compact />
+            <span className="topbar-contrast">
+              <ContrastToggle compact />
+            </span>
             <Link className="btn ghost btn-sm" to="/login">Sign in</Link>
             <Link className="btn primary btn-sm" to="/register">Create account</Link>
           </div>
@@ -83,6 +85,11 @@ export function LandingPage() {
       </header>
 
       <main id="landing-main" className="landing-main" tabIndex={-1}>
+        {accountDeleted && (
+          <p className="landing-notice" role="status">
+            Your account and everything in it have been deleted.
+          </p>
+        )}
         <section className="landing-hero" aria-labelledby="landing-hero-title">
           <div className="landing-ambient" aria-hidden="true" />
 

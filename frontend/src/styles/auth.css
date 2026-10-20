@@ -128,3 +128,4 @@
 }
 .link-button { appearance: none; border: none; background: none; padding: 0; font: inherit; color: var(--accent-strong); text-decoration: underline; text-underline-offset: 0.15em; cursor: pointer; }
 .auth-carry { color: var(--accent-strong); }
+.auth-legal { margin: 0; font-size: 0.82rem; color: var(--muted); }
