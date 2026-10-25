@@ -30,6 +30,10 @@ export type Title = {
 export type TitleDetail = Title & {
   credits: Credit[];
   keywords: string[];
+  /** The viewer's relationship to this title (watchlist, like, …), if any. */
+  my_state?: string | null;
+  /** The exact rating event (rate_1 … rate_4, mid) when they rated it. */
+  my_rating?: string | null;
 };
 
 export type ProviderOffer = {

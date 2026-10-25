@@ -10,6 +10,7 @@ from app.api.routes import api_router
 from app.core.config import get_settings
 from app.core.logging import configure_logging
 from app.core.middleware import (
+    BodySizeLimitMiddleware,
     RateLimitMiddleware,
     RequestContextMiddleware,
     SecurityHeadersMiddleware,
@@ -39,7 +40,10 @@ def create_app() -> FastAPI:
         openapi_url="/openapi.json" if not settings.is_production else None,
     )
 
-    # Order: last added = outermost for BaseHTTPMiddleware-style stacks
+    # Order: last added = outermost for BaseHTTPMiddleware-style stacks.
+    # The body limit sits innermost so its 413 still gets security headers,
+    # a request id and CORS headers from the layers around it.
+    app.add_middleware(BodySizeLimitMiddleware, max_bytes=settings.max_request_body_bytes)
     app.add_middleware(SecurityHeadersMiddleware, settings=settings)
     app.add_middleware(RequestContextMiddleware)
     app.add_middleware(RateLimitMiddleware, settings=settings)

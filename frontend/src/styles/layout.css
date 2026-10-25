@@ -102,3 +102,11 @@
   /* Clear of the bottom nav. */
   .site-footer { padding-bottom: calc(5.5rem + env(safe-area-inset-bottom, 0px)); }
 }
+
+/* One contrast toggle at a time: in the header on wide screens, in the
+   footer on phones, where the header would otherwise wrap onto two rows. */
+.footer-contrast { display: none; justify-content: center; margin-top: 0.75rem; }
+@media (max-width: 640px) {
+  .topbar-contrast { display: none; }
+  .footer-contrast { display: flex; }
+}

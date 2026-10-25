@@ -50,31 +50,39 @@ test("Register: password show toggle and strength meter", async ({ page }) => {
   );
 });
 
-test("Onboarding: skip advances to next card", async ({ page }) => {
+test("Onboarding: every poster is rateable at once, and a second tap takes it back", async ({
+  page,
+}) => {
   await installApiMock(page, { onboardingComplete: false });
   await page.goto("/onboarding");
   await page.getByRole("heading", { name: "Rate what you know" }).waitFor();
-  await expect(page.getByRole("heading", { name: mockTitle.name })).toBeVisible();
 
-  await page
-    .getByRole("button", { name: new RegExp(`Haven't seen ${mockTitle.name}`, "i") })
-    .click();
-  await expect(page.getByRole("heading", { name: "Mock Sequel" })).toBeVisible({
-    timeout: 5_000,
-  });
+  // A grid, not one card at a time: all four posters are on the page.
+  for (const name of [mockTitle.name, "Mock Sequel", "Mock Thriller", "Mock Comedy"]) {
+    await expect(page.getByRole("heading", { name })).toBeVisible();
+  }
+
+  const loved = page.getByRole("button", { name: `Loved it — ${mockTitle.name}` });
+  await loved.click();
+  await expect(loved).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator(".ob-progress-count strong")).toHaveText("1");
+
+  await loved.click();
+  await expect(loved).toHaveAttribute("aria-pressed", "false");
+  await expect(page.locator(".ob-progress-count strong")).toHaveText("0");
 });
 
-test("Onboarding: Rate opens scale and records a rating", async ({ page }) => {
+test("Onboarding: the finish button waits for enough ratings", async ({ page }) => {
   await installApiMock(page, { onboardingComplete: false });
   await page.goto("/onboarding");
-  await page.getByRole("heading", { name: mockTitle.name }).waitFor();
+  await page.getByRole("heading", { name: "Rate what you know" }).waitFor();
 
-  await page.getByRole("button", { name: `Rate ${mockTitle.name}` }).click();
-  await expect(page.getByText("How was it for you?")).toBeVisible();
-  await page.getByRole("button", { name: /Really liked it:/i }).click();
-  // Progress should reflect at least one rating
+  const finish = page.getByRole("button", { name: /See my recommendations/ });
+  await expect(finish).toBeDisabled();
+  await page.getByRole("button", { name: `Really liked it — ${mockTitle.name}` }).click();
   await expect(page.getByText(/of 6 rated/i)).toBeVisible();
-  await expect(page.locator(".ob-progress-count strong")).toHaveText("1");
+  await expect(page.getByText("Rate 5 more to unlock For You")).toBeVisible();
+  await expect(finish).toBeDisabled();
 });
 
 test("For You: several picks in a row, and a pass can be undone", async ({ page }) => {
@@ -367,15 +375,44 @@ test("For You: malformed item with null poster does not crash", async ({
   ).toBeVisible();
 });
 
-test("Title detail: Watched opens rate panel", async ({ page }) => {
+test("Title detail: shows what you did and lets you change or undo it", async ({ page }) => {
   await installApiMock(page, { onboardingComplete: true });
   await page.goto(`/titles/${mockTitle.id}`);
   await page.getByRole("heading", { name: mockTitle.name }).waitFor();
 
-  await page.getByRole("button", { name: /Mark .* as watched and rate/i }).click();
+  // Same words as For You.
+  const want = page.getByRole("button", { name: `Want to watch — ${mockTitle.name}` });
+  await expect(want).toBeVisible();
+  await expect(page.getByRole("button", { name: `Not for me — ${mockTitle.name}` })).toBeVisible();
+
+  await page.getByRole("button", { name: `Seen it — rate ${mockTitle.name}` }).click();
   await expect(page.getByText("How was it?")).toBeVisible();
   await page.getByRole("button", { name: `Rate ${mockTitle.name}: Really liked it` }).click();
   await expect(page.getByText(`Really liked it · ${mockTitle.name}`)).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: `Seen it — rate ${mockTitle.name}` }),
+  ).toHaveText(/Seen it · Really liked it/);
+
+  await want.click();
+  const inList = page.getByRole("button", { name: `In your watchlist — remove ${mockTitle.name}` });
+  await expect(inList).toHaveAttribute("aria-pressed", "true");
+
+  // Undo puts back the rating, not a blank slate.
+  await page.locator(".detail-action-status").getByRole("button", { name: "Undo" }).click();
+  await expect(
+    page.getByRole("button", { name: `Want to watch — ${mockTitle.name}` }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: `Seen it — rate ${mockTitle.name}` }),
+  ).toHaveText(/Seen it · Really liked it/);
+});
+
+test("Title detail: a title already in the watchlist says so on arrival", async ({ page }) => {
+  await installApiMock(page, { onboardingComplete: true, detailState: "watchlist" });
+  await page.goto(`/titles/${mockTitle.id}`);
+  await expect(
+    page.getByRole("button", { name: `In your watchlist — remove ${mockTitle.name}` }),
+  ).toHaveAttribute("aria-pressed", "true");
 });
 
 test("Account: unconfirmed email offers a confirmation link", async ({ page }) => {
@@ -450,8 +487,7 @@ test("Guest: rate three, get a row of picks, and the saves follow you to sign-up
 
   for (const name of [mockTitle.name, "Mock Sequel", "Mock Thriller"]) {
     await expect(page.getByRole("heading", { name })).toBeVisible();
-    await page.getByRole("button", { name: `Rate ${name}` }).click();
-    await page.getByRole("button", { name: /Really liked it:/i }).click();
+    await page.getByRole("button", { name: `Really liked it — ${name}` }).click();
   }
 
   await page.getByRole("button", { name: /Show my picks/i }).click();
@@ -538,6 +574,18 @@ test("Privacy: reachable signed out and says what is stored", async ({ page }) =
   await expect(page.getByRole("link", { name: "Back to CineTaste" })).toBeVisible();
 });
 
+test("Terms: linked from sign-up, readable signed out", async ({ page }) => {
+  // Agreeing to terms nobody can open first is not agreeing to anything.
+  await installApiMock(page, { signedOut: true });
+  await page.goto("/register");
+  await page.getByRole("link", { name: "terms", exact: true }).click();
+
+  await expect(page).toHaveURL(/\/terms$/);
+  await expect(page.getByRole("heading", { name: "Terms of use", level: 1 })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Your account" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "privacy page" })).toBeVisible();
+});
+
 test("TMDb attribution appears on the landing page and behind sign-in", async ({ page }) => {
   // Their terms require this wording wherever their data is shown.
   const required = /uses the TMDB API but is not endorsed or certified by TMDB/i;
@@ -579,11 +627,52 @@ test("A failed search offers Try again", async ({ page }) => {
 
 test("A slow first request explains itself instead of spinning silently", async ({ page }) => {
   // The API sleeps on its free tier; a cold start is about fifty seconds, and
-  // a bare spinner for that long reads as broken.
+  // a bare spinner for that long reads as broken. A returning user has to wait
+  // for it (only the API knows their session), so they are told why.
   await installApiMock(page, { onboardingComplete: true, refreshDelayMs: 7000 });
   await page.goto("/");
 
   await expect(page.getByText(/Waking the server/i)).toBeVisible({ timeout: 10_000 });
+});
+
+test("A first-time visitor sees the landing page without waiting for the API", async ({
+  page,
+}) => {
+  // Nobody new should meet a 50-second spinner: they were never signed in, so
+  // the landing page renders while the session check finishes behind it.
+  await installApiMock(page, { signedOut: true, refreshDelayMs: 8000 });
+  await page.goto("/");
+  await expect(
+    page.getByRole("heading", { name: "Rate three films. Get tonight’s picks. Every pick explained." }),
+  ).toBeVisible({ timeout: 2_000 });
+  await expect(page.getByText(/Waking the server/i)).toHaveCount(0);
+
+  await page.goto("/try");
+  await expect(page.getByRole("heading", { name: "Rate what you know" })).toBeVisible({
+    timeout: 3_000,
+  });
+});
+
+test("Signing in while the first session check is still out keeps the new session", async ({
+  page,
+}) => {
+  // A first-time visitor gets the sign-in form without waiting for a sleeping
+  // API, so they can sign in before the page-load session check answers. Its
+  // late "no session" must not sign them straight back out.
+  await installApiMock(page, { signedOut: true, refreshDelayMs: 2_500 });
+  await page.goto("/login");
+  await page.getByLabel("Email").fill("someone@example.com");
+  await page.getByLabel("Password", { exact: true }).fill(MOCK_SIGNUP_PASSWORD);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  const signOut = page.getByRole("button", { name: "Sign out of CineTaste" });
+  await expect(signOut).toBeVisible();
+
+  // Let the delayed check land, then use something that needs the token.
+  await page.waitForTimeout(3_000);
+  await expect(signOut).toBeVisible();
+  const request = page.waitForRequest((r) => new URL(r.url()).pathname.endsWith("/watchlist"));
+  await page.getByRole("link", { name: "Watchlist" }).first().click();
+  expect((await request).headers()["authorization"]).toBe("Bearer mock-access-token");
 });
 
 test("Signing out in one tab signs the other out too", async ({ page, context }) => {
@@ -597,9 +686,29 @@ test("Signing out in one tab signs the other out too", async ({ page, context })
   await expect(second.getByRole("heading", { name: "Details" })).toBeVisible();
 
   // Sign out in the first tab. The second shares the origin's localStorage, so
-  // it hears about it without making a request of its own.
+  // it hears about it without making a request of its own. A deliberate sign
+  // out goes home, in every tab, rather than to a sign-in form.
   await page.getByRole("button", { name: /Sign out/i }).click();
 
-  await expect(second).toHaveURL(/\/login$/, { timeout: 10_000 });
+  await expect(page).toHaveURL(/\/$/, { timeout: 10_000 });
+  await expect(second).toHaveURL(/\/$/, { timeout: 10_000 });
+  await expect(
+    second.getByRole("heading", { name: "Rate three films. Get tonight’s picks. Every pick explained." }),
+  ).toBeVisible();
   await second.close();
+});
+
+test("Deleting the account ends on a page that says it worked", async ({ page }) => {
+  await installApiMock(page, { onboardingComplete: true });
+  await page.goto("/account?tab=danger");
+  await page.getByRole("heading", { name: "Delete account" }).waitFor();
+
+  await page.locator('input[autocomplete="current-password"]').fill(MOCK_SIGNUP_PASSWORD);
+  await page.getByLabel("Type DELETE to confirm").fill("DELETE");
+  await page.getByRole("button", { name: "Delete my account" }).click();
+
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByRole("status")).toContainText(
+    "Your account and everything in it have been deleted.",
+  );
 });

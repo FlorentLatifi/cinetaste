@@ -12,7 +12,7 @@ import {
 import { DetailSkeleton } from "../components/CatalogSkeleton";
 import { LoadFailed } from "../components/LoadFailed";
 import { useAuth } from "../features/auth/AuthContext";
-import { POST_WATCH_RATINGS } from "../features/taste/ratingScale";
+import { POST_WATCH_RATINGS, ratingLabel } from "../features/taste/ratingScale";
 import { heroPosterUrl, posterSrcSet } from "../lib/poster";
 
 const WATCH_REGIONS = [
@@ -84,6 +84,53 @@ function splitCredits(credits: Credit[]) {
   return { cast, directors, writers };
 }
 
+type ViewerStatus = { state: string | null; rating: string | null };
+const NO_STATUS: ViewerStatus = { state: null, rating: null };
+
+/** What the API will report after this action (mirrors taste_signals). */
+function statusAfter(event: FeedbackAction | "clear"): ViewerStatus {
+  switch (event) {
+    case "clear":
+      return NO_STATUS;
+    case "rate_1":
+      return { state: "dislike", rating: event };
+    case "rate_3":
+    case "rate_4":
+      return { state: "like", rating: event };
+    case "rate_2":
+    case "mid":
+      return { state: "rated", rating: event };
+    case "watchlist":
+    case "not_interested":
+    case "watched":
+      return { state: event, rating: null };
+    default:
+      return { state: event, rating: null };
+  }
+}
+
+/** The single event that recreates a status, for Undo. */
+function eventFor(status: ViewerStatus): FeedbackAction | null {
+  if (status.rating) return status.rating as FeedbackAction;
+  switch (status.state) {
+    case "watchlist":
+    case "not_interested":
+    case "watched":
+    case "like":
+    case "dislike":
+      return status.state;
+    default:
+      return null;
+  }
+}
+
+/** "Loved it", "It was ok"… for a rated title, or null. */
+function ratedLabel(status: ViewerStatus): string | null {
+  if (status.rating) return ratingLabel(status.rating as FeedbackAction) ?? null;
+  if (status.state === "watched") return "no rating";
+  return null;
+}
+
 export function TitleDetailPage() {
   const { titleId } = useParams<{ titleId: string }>();
   const { accessToken } = useAuth();
@@ -98,7 +145,10 @@ export function TitleDetailPage() {
   const [reloadKey, setReloadKey] = useState(0);
   const [loadFailure, setLoadFailure] = useState<ApiError | null>(null);
   const [busy, setBusy] = useState(false);
-  const [lastAction, setLastAction] = useState<FeedbackAction | null>(null);
+  // What the viewer has already done with this title, as the API reports it.
+  const [status, setStatus] = useState<ViewerStatus>(NO_STATUS);
+  // The status before the last action, so Undo can put it back exactly.
+  const [undoTo, setUndoTo] = useState<ViewerStatus | null>(null);
   const [rateOpen, setRateOpen] = useState(false);
   const [toast, setToast] = useState<{ action: FeedbackAction; message: string } | null>(
     null,
@@ -119,7 +169,8 @@ export function TitleDetailPage() {
     setLoading(true);
     setSimilar([]);
     setWatch(null);
-    setLastAction(null);
+    setStatus(NO_STATUS);
+    setUndoTo(null);
     setRateOpen(false);
     setToast(null);
     (async () => {
@@ -127,6 +178,7 @@ export function TitleDetailPage() {
         const data = await titlesApi.getTitle(accessToken, titleId);
         if (cancelled) return;
         setTitle(data);
+        setStatus({ state: data.my_state ?? null, rating: data.my_rating ?? null });
         try {
           const sims = await titlesApi.getSimilarTitles(accessToken, titleId, 10);
           if (!cancelled) setSimilar(sims);
@@ -206,15 +258,22 @@ export function TitleDetailPage() {
     }, ACTION_TOAST_MS);
   }
 
-  async function act(event: FeedbackAction) {
-    if (!accessToken || !title) return;
+  async function act(event: FeedbackAction | "clear") {
+    if (!accessToken || !title || busy) return;
     setBusy(true);
     setError(null);
+    const before = status;
     try {
       await titlesApi.interact(accessToken, title.id, event);
-      setLastAction(event);
+      setStatus(statusAfter(event));
       setRateOpen(false);
-      showToast(event, title.name);
+      if (event === "clear") {
+        setUndoTo(null);
+        dismissToast();
+      } else {
+        setUndoTo(before);
+        showToast(event, title.name);
+      }
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Action failed");
     } finally {
@@ -228,13 +287,17 @@ export function TitleDetailPage() {
     requestAnimationFrame(() => rateFirstRef.current?.focus());
   }
 
+  /** Put back exactly what was there before the last action. */
   async function undoLast() {
-    if (!accessToken || !title || !lastAction || undoBusy) return;
+    if (!accessToken || !title || !undoTo || undoBusy) return;
     setUndoBusy(true);
     setError(null);
     try {
       await titlesApi.interact(accessToken, title.id, "clear");
-      setLastAction(null);
+      const restore = eventFor(undoTo);
+      if (restore) await titlesApi.interact(accessToken, title.id, restore);
+      setStatus(undoTo);
+      setUndoTo(null);
       setRateOpen(false);
       dismissToast();
     } catch (err) {
@@ -304,7 +367,7 @@ export function TitleDetailPage() {
               srcSet={posterSet ?? undefined}
               sizes={
                 posterSet
-                  ? "(max-width: 720px) 70vw, 320px"
+                  ? "(max-width: 720px) 34vw, 360px"
                   : undefined
               }
               alt={title.name}
@@ -315,7 +378,9 @@ export function TitleDetailPage() {
             <div className="poster-fallback">{title.name}</div>
           )}
         </div>
-        <div className="title-detail-body">
+        {/* Separate from the body so a phone can set it beside a small poster
+            and keep the actions on the first screen. */}
+        <div className="title-detail-head">
           <p className="eyebrow">{title.media_type}</p>
           <h1>{title.name}</h1>
           <p className="meta-line">
@@ -331,6 +396,8 @@ export function TitleDetailPage() {
               {title.genres.map((g) => g.name).join(" · ")}
             </p>
           )}
+        </div>
+        <div className="title-detail-body">
           <p className="title-overview">
             {title.overview || "No synopsis available."}
           </p>
@@ -349,83 +416,74 @@ export function TitleDetailPage() {
           )}
 
           <div
-            className="rec-actions"
+            className="rec-actions detail-actions"
             role="group"
             aria-label={`Actions for ${title.name}`}
           >
             <button
               type="button"
-              className="btn ghost"
-              disabled={busy || lastAction !== null}
-              aria-label={`Pass on ${title.name}`}
-              onClick={() => void act("dislike")}
+              className={`btn ${status.state === "watchlist" ? "primary" : "ghost"}`}
+              disabled={busy}
+              aria-pressed={status.state === "watchlist"}
+              aria-label={
+                status.state === "watchlist"
+                  ? `In your watchlist — remove ${title.name}`
+                  : `Want to watch — ${title.name}`
+              }
+              onClick={() => void act(status.state === "watchlist" ? "clear" : "watchlist")}
             >
-              Pass
+              {status.state === "watchlist" ? "✓ In your watchlist" : "＋ Want to watch"}
             </button>
             <button
               type="button"
-              className="btn ghost"
-              disabled={busy || lastAction !== null}
-              aria-label={`Save ${title.name} to watchlist`}
-              onClick={() => void act("watchlist")}
-            >
-              Save
-            </button>
-            <button
-              type="button"
-              className="btn danger"
-              disabled={busy || lastAction !== null}
-              aria-label={`Mark ${title.name} as not interested`}
-              onClick={() => void act("not_interested")}
-            >
-              Not interested
-            </button>
-            <button
-              type="button"
-              className="btn primary"
-              disabled={busy || lastAction !== null}
-              aria-label={`Like ${title.name}`}
-              onClick={() => void act("like")}
-            >
-              Like
-            </button>
-            <button
-              type="button"
-              className="btn ghost"
-              disabled={busy || lastAction !== null}
+              className={`btn ${ratedLabel(status) ? "primary" : "ghost"}`}
+              disabled={busy}
               aria-expanded={rateOpen}
               aria-controls="detail-rate-panel"
-              aria-label={`Mark ${title.name} as watched and rate it`}
+              aria-label={`Seen it — rate ${title.name}`}
               onClick={() => (rateOpen ? setRateOpen(false) : openRatePanel())}
             >
-              Watched
+              {ratedLabel(status) ? `Seen it · ${ratedLabel(status)}` : "Seen it"}
+            </button>
+            <button
+              type="button"
+              className={`btn ${status.state === "not_interested" ? "primary" : "ghost"}`}
+              disabled={busy}
+              aria-pressed={status.state === "not_interested"}
+              aria-label={
+                status.state === "not_interested"
+                  ? `Marked not for you — undo for ${title.name}`
+                  : `Not for me — ${title.name}`
+              }
+              onClick={() =>
+                void act(status.state === "not_interested" ? "clear" : "not_interested")
+              }
+            >
+              {status.state === "not_interested" ? "✓ Not for you" : "Not for me"}
             </button>
           </div>
 
-          {rateOpen && !lastAction && (
+          {rateOpen && (
             <div
               id="detail-rate-panel"
               className="detail-rate-panel"
               role="group"
-              aria-label={`Rate ${title.name} after watching`}
+              aria-label={`Rate ${title.name}`}
             >
               <p className="detail-rate-lead">How was it?</p>
               <div className="detail-rate-row">
-                {(
-                  [
-                    ...POST_WATCH_RATINGS,
-                  ] as const
-                ).map((opt, i) => (
+                {POST_WATCH_RATINGS.map((opt, i) => (
                   <button
                     key={opt.event}
                     ref={i === 0 ? rateFirstRef : undefined}
                     type="button"
                     className={`btn detail-rate-btn rate-${opt.event}`}
                     disabled={busy}
+                    aria-pressed={status.rating === opt.event}
                     aria-label={`Rate ${title.name}: ${opt.label}`}
                     onClick={() => void act(opt.event)}
                   >
-                    {opt.label}
+                    <span aria-hidden="true">{opt.emoji}</span> {opt.label}
                   </button>
                 ))}
               </div>
@@ -435,14 +493,14 @@ export function TitleDetailPage() {
                 disabled={busy}
                 onClick={() => void act("watched")}
               >
-                Watched — skip rating
+                Seen it — skip rating
               </button>
             </div>
           )}
 
-          {lastAction && (
+          {undoTo && toast && (
             <p className="toast-ok detail-action-status" role="status">
-              {FEEDBACK_ACTION_LABELS[lastAction]}.{" "}
+              {FEEDBACK_ACTION_LABELS[toast.action]}.{" "}
               <Link to="/">Back to For You</Link>
               {" · "}
               <button

@@ -1,0 +1,14 @@
+# Public pages are welcome. Everything behind sign-in is personal and empty to
+# a crawler anyway; the API is not a page.
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /account
+Disallow: /history
+Disallow: /watchlist
+Disallow: /search
+Disallow: /onboarding
+Disallow: /titles/
+Disallow: /confirm-registration
+Disallow: /verify-email
+Disallow: /reset-password

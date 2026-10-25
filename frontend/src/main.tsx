@@ -6,6 +6,12 @@ import App from "./App";
 import { AuthProvider } from "./features/auth/AuthContext";
 import { initColorScheme } from "./features/theme/colorScheme";
 import { initFrontendObservability } from "./observability";
+// Fonts are bundled, not loaded from Google: no visitor IP goes to a third
+// party just to draw text, and the CSP needs no outside font host.
+import "@fontsource-variable/dm-sans";
+import "@fontsource-variable/dm-sans/wght-italic.css";
+import "@fontsource/instrument-serif/400.css";
+import "@fontsource/instrument-serif/400-italic.css";
 import "./styles/global.css";
 import "./styles/layout.css";
 import "./styles/auth.css";

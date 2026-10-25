@@ -17,6 +17,7 @@ const guestRoutes: { path: string; ready: string }[] = [
   { path: "/forgot-password", ready: "role=heading[name='Forgot password']" },
   { path: "/reset-password", ready: "role=heading[name='Reset password']" },
   { path: "/privacy", ready: "role=heading[name='Privacy']" },
+  { path: "/terms", ready: "role=heading[name='Terms of use']" },
   {
     path: "/confirm-registration?token=mock-token-abcdef",
     ready: "role=heading[name='Finish creating your account']",
@@ -47,8 +48,7 @@ test("axe: /try (guest deck and guest results)", async ({ page }) => {
 
   for (const name of [mockTitle.name, "Mock Sequel", "Mock Thriller"]) {
     await page.getByRole("heading", { name }).waitFor();
-    await page.getByRole("button", { name: `Rate ${name}` }).click();
-    await page.getByRole("button", { name: /Loved it:/i }).click();
+    await page.getByRole("button", { name: `Loved it — ${name}` }).click();
   }
   await page.getByRole("button", { name: /Show my picks/i }).click();
   await page.getByRole("heading", { name: /what we.d watch/i }).waitFor();

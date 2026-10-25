@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { ContrastToggle } from "./ContrastToggle";
 
 /**
  * The attribution line is not decoration: TMDb's terms of use require both the
@@ -35,6 +36,8 @@ export function SiteFooter() {
       <p className="site-footer-links">
         <Link to="/privacy">Privacy</Link>
         {" · "}
+        <Link to="/terms">Terms</Link>
+        {" · "}
         <a
           href="https://github.com/FlorentLatifi/cinetaste"
           target="_blank"
@@ -43,6 +46,10 @@ export function SiteFooter() {
           Source
         </a>
       </p>
+      {/* On phones the header has no room for it; it lives here instead. */}
+      <div className="footer-contrast">
+        <ContrastToggle compact />
+      </div>
     </footer>
   );
 }

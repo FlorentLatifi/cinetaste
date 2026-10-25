@@ -1,20 +1,64 @@
+import { useEffect, useState } from "react";
 import { Helmet } from "react-helmet-async";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
+import { getGuestCards } from "../api/guest";
+import type { Title } from "../api/titles";
 import { SiteFooter } from "../components/SiteFooter";
 import { ContrastToggle } from "../components/ContrastToggle";
+import { posterSrc } from "../lib/poster";
 
-const DEMO_TITLE = "The Shawshank Redemption";
+/**
+ * Real posters from the catalog, the same ones the trial starts with. The
+ * page used to show a hand-drawn "S" standing in for a poster; this shows
+ * what the product is actually about before anyone reads a word.
+ * Decorative: it fails quietly to a plain gradient.
+ */
+function PosterWall() {
+  const [titles, setTitles] = useState<Title[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    getGuestCards({ limit: 18 })
+      .then((data) => {
+        if (!cancelled) setTitles(data.items.filter((t) => posterSrc(t)));
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Too few posters looks broken rather than decorative; show nothing instead.
+  if (titles.length < 6) return null;
+
+  return (
+    <div className="landing-wall" aria-hidden="true">
+      <div className="landing-wall-grid">
+        {titles.slice(0, 18).map((t, i) => (
+          <img
+            key={t.id}
+            src={posterSrc(t) ?? undefined}
+            alt=""
+            loading={i < 6 ? "eager" : "lazy"}
+            decoding="async"
+            draggable={false}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export function LandingPage() {
+  const location = useLocation();
+  const accountDeleted = Boolean(
+    (location.state as { accountDeleted?: boolean } | null)?.accountDeleted,
+  );
   return (
     <div className="landing">
       <Helmet>
         <title>CineTaste — Movie & TV Recommendations That Match Your Taste</title>
         <meta name="description" content="Rate a few films you know and get tonight's picks, each with the reason it was chosen. Try it without an account." />
-        <meta property="og:title" content="CineTaste — Taste-First Movie Discovery" />
-        <meta property="og:description" content="Rate three films. Get picks for tonight. Every pick explained." />
-        <meta property="og:type" content="website" />
-        <meta name="twitter:card" content="summary_large_image" />
       </Helmet>
 
       <a className="skip-link" href="#landing-main">
@@ -31,7 +75,9 @@ export function LandingPage() {
             </div>
           </Link>
           <div className="landing-topbar-actions">
-            <ContrastToggle compact />
+            <span className="topbar-contrast">
+              <ContrastToggle compact />
+            </span>
             <Link className="btn ghost btn-sm" to="/login">Sign in</Link>
             <Link className="btn primary btn-sm" to="/register">Create account</Link>
           </div>
@@ -39,6 +85,11 @@ export function LandingPage() {
       </header>
 
       <main id="landing-main" className="landing-main" tabIndex={-1}>
+        {accountDeleted && (
+          <p className="landing-notice" role="status">
+            Your account and everything in it have been deleted.
+          </p>
+        )}
         <section className="landing-hero" aria-labelledby="landing-hero-title">
           <div className="landing-ambient" aria-hidden="true" />
 
@@ -60,41 +111,14 @@ export function LandingPage() {
             </Link>
           </div>
 
-          <div className="landing-stage" aria-label="Product preview">
-            <div className="landing-poster-wrap">
-              <div className="landing-poster" aria-hidden="true">
-                <span className="landing-poster-letter">S</span>
-                <span className="landing-poster-label">{DEMO_TITLE}</span>
-                <span className="landing-poster-year">1994 · ★ 9.3</span>
-              </div>
-            </div>
+          <PosterWall />
 
-            <h2 className="landing-film-title">{DEMO_TITLE}</h2>
-            <p className="landing-film-meta">
-              <span className="ob-pill">movie</span>
-              <span>1994</span>
-              <span className="ob-score">★ 9.3</span>
-              <span>Drama</span>
-            </p>
-
-            <div className="landing-why">
-              <p className="why-label">Why this pick</p>
-              <ul className="reasons">
-                <li className="reason-primary">
-                  Prison drama matches the emotional depth in your taste
-                </li>
-                <li>Highly rated but not a chart-topper — a hidden gem</li>
-              </ul>
-            </div>
-
-            <div className="landing-demo-actions" aria-hidden="true">
-              <span className="pick-btn pick-btn-primary landing-demo-btn">＋ Want to watch</span>
-              <span className="pick-btn landing-demo-btn">Seen it</span>
-              <span className="pick-btn pick-btn-quiet landing-demo-btn">Not for me</span>
-            </div>
-            <p className="landing-demo-note">
-              Preview — the real slate is a row of picks you swipe through.
-            </p>
+          <div className="landing-why landing-why-example">
+            <p className="why-label">Every pick says why — for example</p>
+            <ul className="reasons">
+              <li className="reason-primary">Because you loved Arrival: same director</li>
+              <li>Highly rated but not a chart-topper — a hidden gem</li>
+            </ul>
           </div>
 
           <div className="landing-cta">
