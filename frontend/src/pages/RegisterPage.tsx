@@ -53,6 +53,12 @@ export function RegisterPage() {
             password you just chose — your account is created at that moment, not
             before.
           </p>
+          {/* Same screen either way, so the form can't be used to find out who
+              has an account; the email itself says which case it is. */}
+          <p className="lede">
+            If you already have an account with this email, the message will tell
+            you how to sign in instead.
+          </p>
           {hasGuestDraft(draft) && (
             <p className="lede auth-carry">
               Your guest answers stay in this browser and will be waiting.
@@ -94,6 +100,10 @@ export function RegisterPage() {
               {error}
             </p>
           )}
+          <p className="auth-switch">
+            Already have an account? <Link to="/login">Sign in</Link> ·{" "}
+            <Link to="/forgot-password">Forgot password?</Link>
+          </p>
           <p className="auth-switch">
             Wrong address?{" "}
             <button

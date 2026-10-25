@@ -541,6 +541,9 @@ test("Verify-first sign-up: no account until the link is opened with the passwor
 
   await expect(page.getByRole("heading", { name: "Check your inbox" })).toBeVisible();
   await expect(page.getByText("someone@example.com")).toBeVisible();
+  // The same screen whether or not the address is taken; it says so.
+  await expect(page.getByText(/If you already have an account with this email/)).toBeVisible();
+  await expect(page.getByRole("link", { name: "Forgot password?" })).toBeVisible();
   // Not signed in: the app chrome never appears.
   await expect(page.getByRole("navigation", { name: "Main" })).toHaveCount(0);
 
@@ -554,6 +557,8 @@ test("Verify-first sign-up: no account until the link is opened with the passwor
 
   await pw.fill(MOCK_SIGNUP_PASSWORD);
   await page.getByRole("button", { name: "Create my account" }).click();
+  await expect(page.getByRole("heading", { name: "Your account is ready" })).toBeVisible();
+  await page.getByRole("button", { name: "Continue" }).click();
   await expect(page).toHaveURL(/\/onboarding$/);
   await expect(page.getByRole("heading", { name: "Rate what you know" })).toBeVisible();
 });
