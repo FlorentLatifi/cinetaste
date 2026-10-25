@@ -160,6 +160,12 @@ class Settings(BaseSettings):
     smtp_password: str = ""
     smtp_from: str = ""
     smtp_use_tls: bool = True
+    # Brevo's HTTPS email API. Preferred over SMTP when set: hosts such as
+    # Render's free plan block outbound SMTP ports, and HTTPS is never blocked.
+    brevo_api_key: str = ""
+    # Sender for every provider, e.g. "CineTaste <hello@example.com>". Falls
+    # back to SMTP_FROM, then SMTP_USER.
+    email_from: str = ""
 
     @field_validator("app_env", mode="before")
     @classmethod
@@ -186,9 +192,26 @@ class Settings(BaseSettings):
         elif value.startswith("postgresql://"):
             value = value.replace("postgresql://", "postgresql+asyncpg://", 1)
 
-        # Managed Postgres (Render/Railway) usually requires TLS.
+        # Providers (Neon, Supabase) hand out libpq options that asyncpg does
+        # not accept as keywords: it would fail at connect with a TypeError.
+        # sslmode means the same as asyncpg's ssl; channel_binding has no
+        # asyncpg equivalent and TLS is still enforced without it.
+        base, sep, query = value.partition("?")
+        if sep:
+            params = [p for p in query.split("&") if p]
+            kept: list[str] = []
+            for param in params:
+                key, _, val = param.partition("=")
+                if key == "channel_binding":
+                    continue
+                if key == "sslmode":
+                    param = f"ssl={val}"
+                kept.append(param)
+            value = f"{base}?{'&'.join(kept)}" if kept else base
+
+        # Managed Postgres (Render/Railway/Neon) usually requires TLS.
         local = any(h in value for h in ("localhost", "127.0.0.1", "@db:", "@db/"))
-        if not local and "ssl=" not in value and "sslmode=" not in value:
+        if not local and "ssl=" not in value:
             sep = "&" if "?" in value else "?"
             value = f"{value}{sep}ssl=require"
         return value
@@ -229,7 +252,11 @@ class Settings(BaseSettings):
 
     @property
     def email_configured(self) -> bool:
-        return bool(self.smtp_host.strip())
+        return bool(self.smtp_host.strip() or self.brevo_api_key.strip())
+
+    @property
+    def email_sender(self) -> str:
+        return (self.email_from or self.smtp_from or self.smtp_user).strip()
 
     @model_validator(mode="after")
     def validate_production_safety(self) -> Settings:
@@ -265,7 +292,12 @@ class Settings(BaseSettings):
 
         if self.require_email_verification and not self.email_configured:
             raise ValueError(
-                "REQUIRE_EMAIL_VERIFICATION needs SMTP_* configured — without it nobody can verify, and every account is locked out"
+                "REQUIRE_EMAIL_VERIFICATION needs BREVO_API_KEY or SMTP_* configured — without it nobody can verify, and every account is locked out"
+            )
+
+        if self.brevo_api_key.strip() and "@" not in self.email_sender:
+            raise ValueError(
+                "BREVO_API_KEY needs a sender: set EMAIL_FROM to an address verified in Brevo"
             )
 
         if self.email_configured and (

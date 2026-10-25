@@ -6,13 +6,14 @@ rest is already in the code and is listed so it can be checked, not redone.
 
 ## 1. Owner actions (before inviting anyone)
 
-- [ ] **Database on a paid plan.** Render deletes free databases after 30 days
-      and does not back them up. Upgrade `cinetaste-db` before real accounts
-      exist, then take one backup and drill one restore —
-      `backend/tools/backup_database.sh` and
+- [ ] **Database that lasts.** Render deletes free databases after 30 days, so
+      the API uses Neon's free Postgres (no expiry, pgvector included): paste
+      its connection string, pooling off, as `DATABASE_URL` on the API and as
+      the `DATABASE_URL` repository secret. Take one backup and drill one
+      restore — `backend/tools/backup_database.sh` and
       [RUNBOOK.md](RUNBOOK.md#5-database-backup-and-restore).
-- [ ] **Email.** Set `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`,
-      `SMTP_FROM` on the API (a Gmail app password works to start). Check that
+- [ ] **Email.** Set `BREVO_API_KEY` and `EMAIL_FROM` on the API (Render's free
+      plan blocks SMTP; see [DEPLOY.md](DEPLOY.md)). Check that
       *Forgot password* delivers a mail, **then** set
       `REQUIRE_EMAIL_VERIFICATION=true`. With it on, sign-up is verify-first:
       no account exists until the mailed link is opened with the chosen
