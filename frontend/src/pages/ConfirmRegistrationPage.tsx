@@ -19,6 +19,7 @@ export function ConfirmRegistrationPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<{ message: string; expired: boolean } | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [done, setDone] = useState(false);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -26,7 +27,7 @@ export function ConfirmRegistrationPage() {
     setSubmitting(true);
     try {
       await confirmRegistration(token, password);
-      navigate("/onboarding", { replace: true });
+      setDone(true);
     } catch (err) {
       setError({
         message: err instanceof ApiError ? err.message : "Could not finish signing up.",
@@ -35,6 +36,33 @@ export function ConfirmRegistrationPage() {
     } finally {
       setSubmitting(false);
     }
+  }
+
+  if (done) {
+    // Signed in already; this screen only says so before moving on.
+    return (
+      <div className="auth-layout">
+        <div className="auth-aside">
+          <p className="eyebrow">Email confirmed</p>
+          <h1>Your account is ready</h1>
+          <p className="lede">
+            You&rsquo;re signed in. Next time, sign in with this email and
+            password.
+          </p>
+        </div>
+        <div className="auth-card" role="status">
+          <h2>Welcome to CineTaste</h2>
+          <p className="lede">Rate a few films and your first picks are ready.</p>
+          <button
+            className="btn primary"
+            type="button"
+            onClick={() => navigate("/onboarding", { replace: true })}
+          >
+            Continue
+          </button>
+        </div>
+      </div>
+    );
   }
 
   return (
