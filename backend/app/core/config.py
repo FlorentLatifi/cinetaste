@@ -109,6 +109,9 @@ class Settings(BaseSettings):
     # Guest routes are public and one of them ranks a whole slate, so they get
     # their own, lower ceiling. A real guest session is a handful of calls.
     rate_limit_guest_requests: int = 30
+    # Largest request body accepted. The biggest real one, a taste-snapshot
+    # import, is a few tens of KB; anything near this is not a client of ours.
+    max_request_body_bytes: int = 256 * 1024
     # Per-account throttle for login and password reset. Keyed by the email
     # in the request, not the source IP, so it still holds when the caller
     # controls X-Forwarded-For or spreads attempts across many addresses.

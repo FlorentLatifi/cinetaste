@@ -91,6 +91,10 @@ class TitleDetailOut(TitleSummaryOut):
 
     credits: list[CreditOut] = Field(default_factory=list)
     keywords: list[str] = Field(default_factory=list)
+    # The viewer's own relationship to this title, so the page can say
+    # "In your watchlist" or "You loved it" instead of offering it afresh.
+    my_state: str | None = None
+    my_rating: str | None = None
 
     @classmethod
     def from_title_detail(cls, title) -> TitleDetailOut:

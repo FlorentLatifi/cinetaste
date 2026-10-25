@@ -49,7 +49,9 @@ export function AppShell({ children }: { children: ReactNode }) {
             ))}
           </nav>
           <div className="topbar-right">
-            <ContrastToggle compact />
+            <span className="topbar-contrast">
+              <ContrastToggle compact />
+            </span>
             <span className="user-chip" title={user?.email || undefined}>
               <span className="sr-only">Signed in as </span>
               {user?.display_name || user?.email}

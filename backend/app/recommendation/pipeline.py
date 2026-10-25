@@ -81,6 +81,11 @@ EXPLORATION_MIN_VOTE = 6.8
 COLD_START_POSITIVE_MASS = 0.8
 # Ratings from a handful of votes are noise; don't call those "hidden gems".
 GEM_MIN_VOTES = 50
+# How many picks per slate may carry the "hidden gem" label. The score bonus
+# still applies to every qualifying title; only the label is rationed. Most
+# well-rated films are not blockbusters, so without a cap whole slates came
+# back labelled "hidden gem" and the badge stopped meaning anything.
+MAX_GEM_LABELS = 3
 
 
 def gem_boost(vote_average: float, popularity: float, vote_count: int | None = None) -> float:
@@ -445,6 +450,14 @@ def rank_titles(
 
     final = _interleave(core + backfill, exploration)[:slate_size]
     exploration_set = set(exploration)
+    # The strongest gems keep the label: biggest bonus, then best rated.
+    gem_labelled = set(
+        sorted(
+            (i for i in final if gems[i] > 0),
+            key=lambda i: (gems[i], float(pool[i].vote_average)),
+            reverse=True,
+        )[:MAX_GEM_LABELS]
+    )
 
     results: list[RankedItem] = []
     for i in final:
@@ -462,7 +475,7 @@ def rank_titles(
             )
             reasons = annotate_discovery_reasons(
                 reasons,
-                is_hidden_gem=gems[i] > 0,
+                is_hidden_gem=i in gem_labelled,
                 is_exploration=i in exploration_set,
                 vote_average=float(title.vote_average),
                 popularity=float(title.popularity),
