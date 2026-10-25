@@ -1,0 +1,83 @@
+name: Backup
+
+# Weekly encrypted copy of the production database, kept as a workflow
+# artifact for 90 days (about 13 copies).
+#
+# Neon's free plan can only rewind a few hours, so without this a bad
+# migration or a mistaken DELETE noticed the next day loses every account.
+#
+# This repository is public, and artifacts of a public repository can be
+# downloaded by any signed-in GitHub user. The dump holds every user's email
+# and password hash, so it is encrypted (AES-256, gpg) before upload and
+# never leaves the runner in the clear. Without the passphrase the artifact
+# is useless; lose the passphrase and so are the backups.
+#
+# Repository secrets (Settings → Secrets and variables → Actions → Secrets):
+#   DATABASE_URL       the same one the Catalog workflow uses
+#   BACKUP_PASSPHRASE  a long random passphrase, also kept in a password
+#                      manager: it is the only way to open a backup
+#
+# Restoring: docs/RUNBOOK.md §5.
+
+on:
+  schedule:
+    - cron: "41 2 * * 0"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    name: Dump, verify, encrypt
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check secrets
+        run: |
+          [ -n "$DATABASE_URL" ] || { echo "::error::Set the DATABASE_URL repository secret."; exit 1; }
+          if [ "${#BACKUP_PASSPHRASE}" -lt 20 ]; then
+            echo "::error::Set the BACKUP_PASSPHRASE repository secret (20 or more characters)."
+            exit 1
+          fi
+
+      # The runner's pg_dump can be older than the server, and pg_dump refuses
+      # to dump a newer server. The PGDG client is the newest major, which
+      # dumps every older one.
+      - name: Install the current PostgreSQL client
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q postgresql-common
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y -q postgresql-client
+          pg_dump --version
+
+      - name: Dump and verify
+        run: bash backend/tools/backup_database.sh "$RUNNER_TEMP/backups" 1
+
+      - name: Encrypt
+        run: |
+          dump=$(ls "$RUNNER_TEMP"/backups/cinetaste-*.dump)
+          printf '%s' "$BACKUP_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback \
+            --passphrase-fd 0 --symmetric --cipher-algo AES256 \
+            --output "$dump.gpg" "$dump"
+          rm -f "$dump"
+          mkdir -p "$RUNNER_TEMP/upload"
+          mv "$dump.gpg" "$RUNNER_TEMP/upload/"
+          ls -lh "$RUNNER_TEMP/upload"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: cinetaste-db-${{ github.run_number }}
+          path: ${{ runner.temp }}/upload/*.gpg
+          retention-days: 90
+          if-no-files-found: error

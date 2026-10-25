@@ -141,9 +141,28 @@ The script refuses to report success unless `pg_restore --list` can read the
 archive and finds `users`, `interaction_events` and `taste_profiles` in it — a
 truncated dump fails at backup time rather than at restore time.
 
-Render's free Postgres plan has no automated backups, so until this is on a
-schedule somewhere (a cron, a small VPS, a scheduled workflow with the URL as a
-secret) the only copy is whatever you took by hand.
+### The weekly backup
+
+The **Backup** workflow (`.github/workflows/backup.yml`) runs this script every
+Sunday, encrypts the dump with `BACKUP_PASSPHRASE` and keeps it as an artifact
+for 90 days. Neon's free plan can only rewind a few hours, so these are the
+copies that matter. Run it by hand (Actions → Backup → Run workflow) before
+anything risky: a migration you are unsure of, a bulk delete.
+
+The artifact is readable by anyone signed in to GitHub (the repository is
+public); only the passphrase protects it. Keep the passphrase in a password
+manager. Lose it and every backup is lost with it.
+
+To get a dump back:
+
+1. Actions → Backup → the run you want → Artifacts → download, then unzip.
+2. Decrypt (gpg asks for the passphrase):
+
+   ```bash
+   gpg --output cinetaste.dump --decrypt cinetaste-<stamp>.dump.gpg
+   ```
+
+3. Restore it as below.
 
 ### Restore
 
