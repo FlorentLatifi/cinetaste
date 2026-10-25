@@ -9,8 +9,9 @@ rest is already in the code and is listed so it can be checked, not redone.
 - [ ] **Database that lasts.** Render deletes free databases after 30 days, so
       the API uses Neon's free Postgres (no expiry, pgvector included): paste
       its connection string, pooling off, as `DATABASE_URL` on the API and as
-      the `DATABASE_URL` repository secret. Take one backup and drill one
-      restore — `backend/tools/backup_database.sh` and
+      the `DATABASE_URL` repository secret. Add a `BACKUP_PASSPHRASE`
+      repository secret (keep a copy in a password manager), run Actions →
+      Backup once, and drill one restore —
       [RUNBOOK.md](RUNBOOK.md#5-database-backup-and-restore).
 - [ ] **Email.** Set `BREVO_API_KEY` and `EMAIL_FROM` on the API (Render's free
       plan blocks SMTP; see [DEPLOY.md](DEPLOY.md)). Check that

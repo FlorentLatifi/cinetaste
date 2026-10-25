@@ -29,6 +29,10 @@ fi
 # The app uses postgresql+asyncpg://; pg_dump speaks plain postgresql://.
 DUMP_URL="${DATABASE_URL/postgresql+asyncpg:/postgresql:}"
 DUMP_URL="${DUMP_URL/postgres+asyncpg:/postgresql:}"
+# And the app's TLS option is asyncpg's "ssl"; libpq calls it "sslmode" and
+# rejects "ssl" outright. Neon's own string already says sslmode and is kept.
+DUMP_URL="${DUMP_URL/\?ssl=/?sslmode=}"
+DUMP_URL="${DUMP_URL/&ssl=/&sslmode=}"
 
 for tool in pg_dump pg_restore; do
   command -v "$tool" >/dev/null || { echo "$tool is not on PATH." >&2; exit 2; }
