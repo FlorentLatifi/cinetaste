@@ -145,3 +145,38 @@ def test_no_duplicates_when_the_platform_host_is_also_listed() -> None:
         )
     ).trusted_host_list
     assert len(hosts) == len(set(hosts))
+
+
+def test_neon_style_url_is_usable_as_pasted() -> None:
+    """Neon hands out libpq options asyncpg rejects; pasting it must still work."""
+    settings = Settings(
+        **_base(
+            database_url=(
+                "postgresql://owner:pw@ep-x-1.us-west-2.aws.neon.tech/neondb"
+                "?sslmode=require&channel_binding=require"
+            )
+        )
+    )
+    assert settings.database_url == (
+        "postgresql+asyncpg://owner:pw@ep-x-1.us-west-2.aws.neon.tech/neondb?ssl=require"
+    )
+
+
+def test_remote_url_without_options_gets_tls() -> None:
+    settings = Settings(**_base(database_url="postgresql://o:p@ep-x.neon.tech/neondb"))
+    assert settings.database_url.endswith("/neondb?ssl=require")
+
+
+def test_brevo_counts_as_email_and_needs_a_sender() -> None:
+    with pytest.raises(ValidationError):
+        Settings(**_base(brevo_api_key="xkeysib-1", public_app_url="https://cinetaste.app"))
+    ok = Settings(
+        **_base(
+            brevo_api_key="xkeysib-1",
+            email_from="CineTaste <hello@example.com>",
+            public_app_url="https://cinetaste.app",
+            require_email_verification=True,
+        )
+    )
+    assert ok.email_configured
+    assert ok.email_sender == "CineTaste <hello@example.com>"

@@ -28,7 +28,7 @@ python -c "import secrets; print(secrets.token_urlsafe(48))"
 
 ## 1. Backend on Render (blueprint)
 
-**Production:** `render.yaml` → services `cinetaste-api`, `cinetaste-db`, `cinetaste-redis`  
+**Production:** `render.yaml` → service `cinetaste-api` (database on Neon, see `DATABASE_URL`)  
 **Staging:** `render.staging.yaml` → services `*-staging` (see §9d)
 
 1. Open [Render](https://render.com) → **New** → **Blueprint**
@@ -100,25 +100,34 @@ Request logs already emit `method path status duration_ms request_id` — pair w
 
 Set `PUBLIC_APP_URL` to your SPA origin so reset links are correct.
 
-**SMTP is required for password reset outside local/test.** Set `SMTP_HOST`,
-`SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`, `SMTP_USE_TLS` (Resend,
-SendGrid, Mailgun and a Gmail app password all work).
+**An email provider is required for password reset outside local/test.**
 
-Without SMTP, `POST /auth/forgot-password` returns **503** in staging and
+- **Brevo (use this on Render's free plan).** Render's free instances block
+  outbound SMTP ports, so SMTP fails there with a timeout. Brevo sends over
+  HTTPS, is free for 300 mails a day, and needs no domain: sign up, verify the
+  sender address under *Senders*, create a key under *SMTP & API → API Keys*,
+  then set `BREVO_API_KEY` and `EMAIL_FROM` (e.g. `CineTaste <you@gmail.com>`,
+  the verified address) on the API.
+- **SMTP** (paid hosts, or anywhere port 587 is open): `SMTP_HOST`,
+  `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`, `SMTP_USE_TLS`.
+
+When both are set, Brevo is used. A failed send logs
+`email_send_failed provider=… reason=…` with the provider's answer.
+
+Without a provider, `POST /auth/forgot-password` returns **503** in staging and
 production rather than pretending to send. Reset tokens are never written to
 logs and never returned in the response; only `APP_ENV=local`/`test` get a
 `dev_reset_token` back so you can test without a mail server. Production also
-refuses to start if SMTP is on while `PUBLIC_APP_URL` is not a public https URL,
+refuses to start if email is on while `PUBLIC_APP_URL` is not a public https URL,
 because that is where reset links point.
 
 ### Requiring a confirmed email
 
 Off by default. With it on, a new account can do nothing but confirm its
 address, so nobody can use an email they don't own. Production refuses to start
-with it on and no SMTP, because then nobody could ever confirm.
+with it on and no email provider, because then nobody could ever confirm.
 
-1. Set up SMTP (Resend's free tier is enough): `SMTP_HOST`, `SMTP_PORT`,
-   `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`, and `PUBLIC_APP_URL`.
+1. Set up email (see above: Brevo on Render's free plan) and `PUBLIC_APP_URL`.
 2. Check that "Forgot password" delivers a mail.
 3. Only then set `REQUIRE_EMAIL_VERIFICATION=true` on the API and redeploy.
 
@@ -278,7 +287,7 @@ Render's free plan has no shell, and running the ingest from a laptop against
 the external database URL is slow and dies when the machine sleeps.
 
 1. GitHub → Settings → Secrets and variables → Actions → **Secrets**:
-   - `DATABASE_URL` = Render → `cinetaste-db` → Connect → **External** Database URL
+   - `DATABASE_URL` = the same connection string the API uses (Neon → Connect)
    - `TMDB_API_KEY`
 2. Actions → **Catalog** → Run workflow. `seed-only` fills the onboarding deck in
    a few minutes; `popular` with 10 pages adds about 800 titles.

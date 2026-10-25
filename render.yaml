@@ -27,10 +27,11 @@ services:
         value: https://cinetaste-rho.vercel.app
       - key: JWT_SECRET
         generateValue: true
+      # Neon (free, no expiry, pgvector) rather than Render's free Postgres,
+      # which is deleted after 30 days. Paste Neon's connection string as is,
+      # with pooling off; the app translates its sslmode options.
       - key: DATABASE_URL
-        fromDatabase:
-          name: cinetaste-db
-          property: connectionString
+        sync: false
       - key: TMDB_API_KEY
         sync: false
       - key: WATCH_PROVIDER_REGION
@@ -62,8 +63,14 @@ services:
         value: CineTaste
       - key: SENTRY_DSN
         sync: false
-      # Password reset needs SMTP; without it the endpoint returns 503
-      # (it never logs or returns the token). Any provider works.
+      # Email (sign-up confirmation, password reset). Without a provider those
+      # endpoints return 503; they never log or return the token.
+      # Brevo's HTTPS API is the one that works here: Render's free plan blocks
+      # outbound SMTP ports, so SMTP_* only helps on a paid instance.
+      - key: BREVO_API_KEY
+        sync: false
+      - key: EMAIL_FROM
+        sync: false
       - key: SMTP_HOST
         sync: false
       - key: SMTP_USER
@@ -75,14 +82,9 @@ services:
       - key: SENTRY_TRACES_SAMPLE_RATE
         value: "0.1"
 
-databases:
-  - name: cinetaste-db
-    plan: free
-    postgresMajorVersion: "16"
-    # After first deploy, run via Render dashboard SQL or psql:
-    #   CREATE EXTENSION IF NOT EXISTS vector;
-    #   CREATE EXTENSION IF NOT EXISTS pg_trgm;
-    # The 0006 migration also runs these; this comment is a reminder.
+# No Render database: Render's free Postgres is deleted after 30 days. The
+# migrations create the vector and pg_trgm extensions on whatever DATABASE_URL
+# points at.
 #
 # Filling the catalog: the free plan has no shell, so use the "Catalog"
 # workflow in GitHub Actions (.github/workflows/catalog.yml). It runs
