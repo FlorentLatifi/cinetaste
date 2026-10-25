@@ -117,7 +117,9 @@ class AuthService:
                     body=(
                         "Hi,\n\n"
                         "Someone tried to create a CineTaste account with this address, "
-                        "but you already have one. Sign in, or reset your password here:\n\n"
+                        "but you already have one.\n\n"
+                        f"Sign in: {self._settings.public_app_url.rstrip('/')}/login\n"
+                        "Forgot your password? Reset it here: "
                         f"{self._settings.public_app_url.rstrip('/')}/forgot-password\n\n"
                         "If this wasn't you, you can ignore this email.\n"
                     ),
