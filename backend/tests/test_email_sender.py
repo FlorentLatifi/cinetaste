@@ -9,10 +9,17 @@ from __future__ import annotations
 import smtplib
 from email.message import EmailMessage
 
+import httpx
 import pytest
 
 from app.core.config import Settings
-from app.infrastructure.email import LogEmailSender, SmtpEmailSender, get_email_sender
+from app.infrastructure.email import (
+    BrevoEmailSender,
+    EmailDeliveryError,
+    LogEmailSender,
+    SmtpEmailSender,
+    get_email_sender,
+)
 
 
 class FakeSMTP:
@@ -160,6 +167,7 @@ async def test_a_refused_recipient_propagates(monkeypatch) -> None:
 
 
 def test_sender_selection_follows_configuration() -> None:
+    assert isinstance(get_email_sender(_settings(brevo_api_key="k")), BrevoEmailSender)
     assert isinstance(get_email_sender(_settings()), SmtpEmailSender)
     assert isinstance(get_email_sender(_settings(smtp_host="")), LogEmailSender)
     assert isinstance(get_email_sender(_settings(smtp_host="   ")), LogEmailSender)
@@ -177,3 +185,62 @@ async def test_the_log_sender_never_writes_the_body(caplog) -> None:
 
     assert "SECRET" not in caplog.text
     assert "no_smtp_configured" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_brevo_posts_the_message_with_the_key_in_a_header() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(201, json={"messageId": "<1@brevo>"})
+
+    sender = BrevoEmailSender(
+        _settings(brevo_api_key="xkeysib-secret", email_from="CineTaste <hello@example.com>"),
+        transport=httpx.MockTransport(handler),
+    )
+    await sender.send(to="user@example.com", subject="Reset", text_body="https://app/reset?t=1")
+
+    request = seen[0]
+    assert str(request.url) == BrevoEmailSender.API_URL
+    assert request.headers["api-key"] == "xkeysib-secret"
+    assert "xkeysib-secret" not in str(request.url)
+    import json
+
+    body = json.loads(request.content)
+    assert body["sender"] == {"email": "hello@example.com", "name": "CineTaste"}
+    assert body["to"] == [{"email": "user@example.com"}]
+    assert body["textContent"] == "https://app/reset?t=1"
+
+
+@pytest.mark.asyncio
+async def test_brevo_refusal_raises_and_logs_why(caplog) -> None:
+    """A rejected send must fail loudly, with a log line that names the cause."""
+    import logging
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(400, json={"code": "invalid_parameter", "message": "sender not valid"})
+
+    sender = BrevoEmailSender(
+        _settings(brevo_api_key="xkeysib-secret"), transport=httpx.MockTransport(handler)
+    )
+    with caplog.at_level(logging.ERROR, logger="app.infrastructure.email"):
+        with pytest.raises(EmailDeliveryError):
+            await sender.send(to="user@example.com", subject="Reset", text_body="link")
+
+    assert "provider=brevo" in caplog.text
+    assert "sender not valid" in caplog.text
+    assert "xkeysib-secret" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_smtp_failure_logs_the_reason(monkeypatch, caplog) -> None:
+    import logging
+
+    monkeypatch.setattr(smtplib, "SMTP", ExplodingSMTP)
+    with caplog.at_level(logging.ERROR, logger="app.infrastructure.email"):
+        with pytest.raises(smtplib.SMTPRecipientsRefused):
+            await SmtpEmailSender(_settings()).send(to="a@b.com", subject="Reset", text_body="x")
+
+    assert "provider=smtp reason=SMTPRecipientsRefused" in caplog.text
+    assert "hunter2" not in caplog.text

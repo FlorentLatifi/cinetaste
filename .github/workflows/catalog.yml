@@ -12,7 +12,7 @@ name: Catalog
 #
 # Set these repository secrets to switch it on (Settings → Secrets and
 # variables → Actions → Secrets):
-#   DATABASE_URL  Render → cinetaste-db → Connect → External Database URL
+#   DATABASE_URL  the API's connection string (Neon → Connect, pooling off)
 #   TMDB_API_KEY  https://www.themoviedb.org/settings/api
 # Then Actions → Catalog → Run workflow.
 
@@ -77,7 +77,7 @@ jobs:
           fi
           case "$DATABASE_URL" in
             *localhost*|*127.0.0.1*)
-              echo "::error::DATABASE_URL points at localhost. Use Render's External Database URL."
+              echo "::error::DATABASE_URL points at localhost. Use the hosted database's connection string."
               exit 1 ;;
           esac
 
