@@ -178,6 +178,48 @@ hit rate 0.265, MRR 0.048, diversity 0.749, novelty 0.549, coverage 0.420.
   each user was shown so acting-on-recommendations can be measured once the app
   has real traffic.
 
+## Online: what people do with their picks
+
+Offline metrics cannot value a pleasant surprise; real behaviour can. Every
+computed For You slate is logged to `recommendation_impressions`, every action
+to `interaction_events`, and `app/application/engagement.py` joins them:
+
+```bash
+cd backend
+python -m app.scripts.engagement_report                                # last 30 days
+python -m app.scripts.engagement_report --since 2026-11-01 --until 2026-12-01
+```
+
+In production run the **Engagement report** workflow (Actions, manual): it uses
+the Catalog workflow's `DATABASE_URL` secret, is read-only, and writes the
+tables to the job summary.
+
+**Method.** One row per user and title — its *first* impression in the period
+(a title shown again on the next visit is the same recommendation). Its outcome
+is the first answer within `--window-days` (default 7):
+
+| outcome | events | reads as |
+|---|---|---|
+| saved | `watchlist` | the discovery success: wants to watch it |
+| seen_liked | `rate_2`–`rate_4`, `like`, `watched_liked` | a right guess the person had already found |
+| seen_other | `mid`, `watched` | seen, no strong opinion |
+| passed | `not_interested`, `dislike`, `rate_1`, `watched_disliked` | wrong for them |
+
+`clear`, `skip`, `view` and `haven't_seen` are not answers. `good` = saved +
+seen_liked; `good_of_acted` is the same among picks that got any answer.
+Rates are reported overall, by position band and by reason code (`hidden_gem`,
+`discovery`, `because_you_liked`, …); groups under 20 picks show a count only.
+
+**Reading it honestly.**
+* Every card of a computed slate is logged, swiped to or not, so later
+  positions look worse partly because fewer people reached them. Compare
+  reason codes within a position band before concluding a reason "works".
+* Impressions carry no ranker version: compare configurations by date range,
+  before and after a deploy, over similar lengths of time.
+* `seen_liked` is accuracy, `saved` is discovery. A change that trades one for
+  the other is a product decision, not a regression.
+* Early on, most groups will be too small. That is the honest answer.
+
 ## Reproducing
 
 ```bash

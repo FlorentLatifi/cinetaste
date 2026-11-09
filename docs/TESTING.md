@@ -4,14 +4,14 @@ Three layers, each answering a different question.
 
 | Layer | Count | Question | Needs |
 |---|---|---|---|
-| Unit — backend (`backend/tests/*.py`) | 287 | Is the logic right? | nothing |
+| Unit — backend (`backend/tests/*.py`) | 297 | Is the logic right? | nothing |
 | Unit — frontend (`frontend/src/**/*.test.ts`) | 99 | Do the pure functions hold? | nothing |
-| Integration (`backend/tests/integration/`) | 38 | Do the API, migrations and database agree? | Postgres + pgvector |
+| Integration (`backend/tests/integration/`) | 39 | Do the API, migrations and database agree? | Postgres + pgvector |
 | End-to-end (`frontend/e2e/`) | 63 | Does the app work in a browser, accessibly? | built SPA |
 
 ## Coverage
 
-Backend 86.7% (November 2026), gated in CI two ways: `--cov-fail-under=80` on the total, and
+Backend 86.2% (November 2026), gated in CI two ways: `--cov-fail-under=80` on the total, and
 `backend/tools/coverage_gate.py` on each package, because a total is easy to
 hold up with well-covered trivia while ranking and taste quietly rot.
 
@@ -100,6 +100,7 @@ uses; a re-implementation would measure the re-implementation.
 | Concurrent ratings, rebuilds and version bumps (real Postgres) | `integration/test_profile_concurrency.py` |
 | Director cap, hidden gems by reach, explanation wording | `test_recommender_invariants.py`, `test_recommendation_pipeline.py`, `test_explanations.py` |
 | Evaluation fidelity (parallel = serial, no held-out leakage) | `test_metrics_and_evaluation.py` |
+| Engagement report (event classification, rates; impression→outcome join on Postgres) | `test_engagement.py`, `integration/test_engagement.py` |
 | Ingestion (failures, TV creators, idempotency) | `integration/test_catalog_ingest.py` |
 | Full user journey | `integration/test_api_flow.py`, `frontend/e2e/interactions.spec.ts` |
 

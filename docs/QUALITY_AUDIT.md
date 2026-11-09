@@ -262,10 +262,12 @@ limits if `WEB_CONCURRENCY` is raised without Redis.
 
 ## 6. Roadmap — the next five improvements
 
-1. **Measure online, not just offline.** Join `recommendation_impressions` with
-   interactions to report save/rate/pass rates per position and per reason
-   code, and compare configurations (quality prior on/off, director cap) on
-   real users before tuning further. This is the only way to value discovery.
+1. **Measure online, not just offline.** *Done (follow-up):*
+   `python -m app.scripts.engagement_report` and the **Engagement report**
+   workflow report save / already-loved / pass rates per position and reason
+   code from `recommendation_impressions` + `interaction_events`
+   ([EVALUATION.md](EVALUATION.md#online-what-people-do-with-their-picks)).
+   Next: run it before and after this release's deploy.
 2. **Re-ingest the catalog and benchmark on real metadata.** Run the Catalog
    workflow (now with the gem list), then enrich MovieLens via TMDb to measure
    the director, cast and keyword channels the production catalog relies on.

@@ -1,0 +1,78 @@
+name: Engagement report
+
+# What people did with their recommendations: saves, passes, picks they had
+# already seen and loved — by position and by reason. Read-only, aggregates
+# only (no user ids), written to the job summary.
+#
+# Uses the same DATABASE_URL secret as the Catalog workflow. Compare ranking
+# changes by running it for the date ranges before and after a deploy.
+
+on:
+  workflow_dispatch:
+    inputs:
+      since:
+        description: "Start date YYYY-MM-DD (empty = 30 days before 'until')"
+        type: string
+        default: ""
+      until:
+        description: "End date YYYY-MM-DD, exclusive (empty = now)"
+        type: string
+        default: ""
+      window_days:
+        description: "Days after a pick that an action still counts"
+        type: number
+        default: 7
+
+permissions:
+  contents: read
+
+jobs:
+  report:
+    name: Engagement report
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      # Settings validation only; the script issues no tokens and uses no cache.
+      APP_ENV: local
+      APP_DEBUG: "false"
+      REDIS_URL: ""
+      JWT_SECRET: engagement-report-only-never-signs-a-token-0000
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check secrets
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "::error::Set the DATABASE_URL repository secret (see catalog.yml)"
+            exit 1
+          fi
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Report
+        env:
+          SINCE: ${{ inputs.since }}
+          UNTIL: ${{ inputs.until }}
+          WINDOW: ${{ inputs.window_days }}
+        run: |
+          args=(--window-days "$WINDOW" --json engagement.json)
+          [ -n "$SINCE" ] && args+=(--since "$SINCE")
+          [ -n "$UNTIL" ] && args+=(--until "$UNTIL")
+          python -m app.scripts.engagement_report "${args[@]}" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: engagement
+          path: backend/engagement.json
+          retention-days: 30

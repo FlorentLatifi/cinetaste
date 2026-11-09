@@ -296,6 +296,9 @@ the external database URL is slow and dies when the machine sleeps.
    2026 lack the third list — run the workflow once after upgrading.
 3. It then refreshes monthly on its own. Re-running is always safe (upserts).
 
+To see how recommendations land with real users, run Actions → **Engagement
+report** (same `DATABASE_URL` secret, read-only, results in the job summary).
+
 `/api/v1/ready` reports `"catalog":"empty"` or `"unembedded"` when this is missing.
 
 Then:
