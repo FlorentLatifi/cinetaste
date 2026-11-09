@@ -117,7 +117,7 @@ export function LandingPage() {
             <p className="why-label">Every pick says why — for example</p>
             <ul className="reasons">
               <li className="reason-primary">Because you loved Arrival: same director</li>
-              <li>Highly rated but not a chart-topper — a hidden gem</li>
+              <li>Rated ★8.1, yet far less seen than most films we considered — a hidden gem</li>
             </ul>
           </div>
 

@@ -495,7 +495,7 @@ export async function installApiMock(
                 {
                   code: "hidden_gem",
                   message:
-                    "Highly rated (★7.8) but not a chart-topper — a hidden gem",
+                    "Rated ★7.8, yet far less seen than most films we considered — a hidden gem",
                   evidence: {},
                 },
               ],

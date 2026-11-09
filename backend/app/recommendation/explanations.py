@@ -8,6 +8,7 @@ Goals:
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any
 from uuid import UUID
@@ -177,8 +178,65 @@ def _overlap_score(overlap: dict[str, list[str]]) -> float:
     )
 
 
+# Tone tags as the adjectives a person would use. Tags are snake_case keys
+# (embeddings._KEYWORD_TONE_RULES); printing them raw gave "action heavy
+# storytelling" and "coming of age thrillers".
+_TONE_ADJECTIVES: dict[str, str] = {
+    "coming_of_age": "coming-of-age",
+    "melancholy": "melancholic",
+    "horror": "scary",
+    "war": "wartime",
+    "action_heavy": "action-packed",
+    "meditative": "slow-burn",
+    "anime": "anime-style",
+}
+
+# A tone that only restates the genre next to it ("wartime war films").
+_TONE_SAME_AS_GENRE: dict[str, str] = {
+    "war": "war",
+    "horror": "horror",
+    "romantic": "romance",
+    "comedic": "comedy",
+    "anime": "animation",
+}
+
+# Genre → plural noun phrase. Appending "s" produced "comedys", "familys",
+# "science fictions" and "war actions" in front of real users.
+_GENRE_NOUNS: dict[str, str] = {
+    "action": "action films",
+    "adventure": "adventure films",
+    "animation": "animated films",
+    "comedy": "comedies",
+    "crime": "crime films",
+    "documentary": "documentaries",
+    "drama": "dramas",
+    "family": "family films",
+    "fantasy": "fantasy films",
+    "history": "historical films",
+    "horror": "horror films",
+    "music": "music films",
+    "musical": "musicals",
+    "mystery": "mysteries",
+    "romance": "romances",
+    "science fiction": "sci-fi films",
+    "sci-fi": "sci-fi films",
+    "thriller": "thrillers",
+    "tv movie": "TV movies",
+    "war": "war films",
+    "western": "westerns",
+    "film-noir": "film noirs",
+    "children": "family films",
+    "imax": "IMAX films",
+}
+_GENRE_ADJECTIVES: dict[str, str] = {"science fiction": "sci-fi", "history": "historical"}
+
+
+def _tone_word(tone: str) -> str:
+    return _TONE_ADJECTIVES.get(tone, _pretty_label(tone))
+
+
 def _tone_phrase(tones: list[str]) -> str:
-    labels = [_pretty_label(t) for t in tones[:3]]
+    labels = [_tone_word(t) for t in tones[:3]]
     if not labels:
         return ""
     if len(labels) == 1:
@@ -188,13 +246,77 @@ def _tone_phrase(tones: list[str]) -> str:
     return f"{labels[0]}, {labels[1]}, and {labels[2]}"
 
 
-def _genre_phrase(genres: list[str]) -> str:
-    labels = [g.replace("_", " ").title() for g in genres[:3]]
+def _genre_phrase(genres: list[str], *, series: bool = False) -> str:
+    """'thrillers', 'comedies', 'action and crime films' — never 'comedys'."""
+    labels = [g.replace("_", " ").strip().lower() for g in genres[:2] if str(g).strip()]
     if not labels:
-        return "films"
+        return "series" if series else "films"
+    if series:
+        return " and ".join(_GENRE_ADJECTIVES.get(g, g) for g in labels) + " series"
     if len(labels) == 1:
-        return f"{labels[0].lower()}s" if not labels[0].endswith("s") else labels[0].lower()
-    return " / ".join(g.lower() for g in labels)
+        return _GENRE_NOUNS.get(labels[0], f"{labels[0]} films")
+    return " and ".join(_GENRE_ADJECTIVES.get(g, g) for g in labels) + " films"
+
+
+def _drop_tones_restating_genres(tones: list[str], genres: list[str]) -> list[str]:
+    lowered = {g.lower() for g in genres}
+    return [t for t in tones if _TONE_SAME_AS_GENRE.get(t) not in lowered]
+
+
+# Origin and language reasons name places, never ISO codes. English and the US
+# are left out on purpose: in a catalog that is mostly American, "in a language
+# you enjoy (en)" explains nothing and takes a slot from a real reason.
+_UNINFORMATIVE_ORIGINS = frozenset({"US", "en"})
+_COUNTRY_ADJECTIVES: dict[str, str] = {
+    "AR": "Argentine", "AT": "Austrian", "AU": "Australian", "BE": "Belgian",
+    "BR": "Brazilian", "CA": "Canadian", "CH": "Swiss", "CL": "Chilean",
+    "CN": "Chinese", "CO": "Colombian", "CZ": "Czech", "DE": "German",
+    "DK": "Danish", "EG": "Egyptian", "ES": "Spanish", "FI": "Finnish",
+    "FR": "French", "GB": "British", "GR": "Greek", "HK": "Hong Kong",
+    "HU": "Hungarian", "ID": "Indonesian", "IE": "Irish", "IL": "Israeli",
+    "IN": "Indian", "IR": "Iranian", "IS": "Icelandic", "IT": "Italian",
+    "JP": "Japanese", "KR": "Korean", "MX": "Mexican", "NG": "Nigerian",
+    "NL": "Dutch", "NO": "Norwegian", "NZ": "New Zealand", "PH": "Filipino",
+    "PL": "Polish", "PT": "Portuguese", "RO": "Romanian", "RU": "Russian",
+    "SE": "Swedish", "TH": "Thai", "TR": "Turkish", "TW": "Taiwanese",
+    "UA": "Ukrainian", "VN": "Vietnamese", "ZA": "South African",
+}
+_LANGUAGE_NAMES: dict[str, str] = {
+    "ar": "Arabic", "cn": "Cantonese", "cs": "Czech", "da": "Danish",
+    "de": "German", "el": "Greek", "es": "Spanish", "fa": "Persian",
+    "fi": "Finnish", "fr": "French", "he": "Hebrew", "hi": "Hindi",
+    "hu": "Hungarian", "id": "Indonesian", "is": "Icelandic", "it": "Italian",
+    "ja": "Japanese", "ko": "Korean", "ml": "Malayalam", "nl": "Dutch",
+    "no": "Norwegian", "pl": "Polish", "pt": "Portuguese", "ro": "Romanian",
+    "ru": "Russian", "sv": "Swedish", "ta": "Tamil", "te": "Telugu",
+    "th": "Thai", "tl": "Tagalog", "tr": "Turkish", "uk": "Ukrainian",
+    "vi": "Vietnamese", "zh": "Mandarin",
+}
+
+
+def _origin_reason(code: str, value: str) -> tuple[str, str] | None:
+    """(reason code, message) for a shared origin or language, or None to skip."""
+    if value in _UNINFORMATIVE_ORIGINS:
+        return None
+    if code == "similar_origin":
+        name = _COUNTRY_ADJECTIVES.get(value.upper())
+        return (code, f"{name} cinema, which you keep rating highly") if name else None
+    if code == "similar_language":
+        name = _LANGUAGE_NAMES.get(value.lower())
+        return (code, f"In {name} — a language you keep rating highly") if name else None
+    if code == "similar_era":
+        return code, f"From the {value}s — an era that scores well for you"
+    return None
+
+
+# Theme keywords worth naming in the taste-blend sentence, matched as whole
+# words: a substring test turned "wartime" into a "time" theme and
+# "immortality" into a "moral" one.
+_THEME_WORD = re.compile(
+    r"(?<![a-z])(moral|psychological|identity|revenge|conspiracy|philosophy|"
+    r"time travel|time loop|memory|grief|obsession)(?![a-z])"
+)
+_GENRE_WORDS = re.compile(r"\b(thriller|drama|horror|comedy|film|movie)\b")
 
 
 def _cite(anchors: list[dict[str, Any]], names: list[str]) -> str:
@@ -228,6 +350,7 @@ def build_reasons(
         }
 
     title_features = _feature_snapshot(title_extra)
+    series = "media:tv" in title_features
     anchors: list[dict[str, Any]] = list((explain_memory or {}).get("anchors") or [])
 
     cand_directors = set(_keys_with_prefix(title_features, "person:director:"))
@@ -333,7 +456,7 @@ def build_reasons(
             if best_overlap["cast"]:
                 link_bits.append(f"shared cast ({_pretty_person(best_overlap['cast'][0])})")
             if best_overlap["genres"] and len(link_bits) < 2:
-                link_bits.append(_genre_phrase(best_overlap["genres"]))
+                link_bits.append(_genre_phrase(best_overlap["genres"], series=series))
             if not link_bits:
                 link_bits.append("a similar vibe")
             bridge = " and ".join(link_bits[:2])
@@ -355,30 +478,16 @@ def build_reasons(
     kw_hits = [k.split(":", 1)[1] for k, s in overlap_feats if s > 0 and k.startswith("kw:")]
 
     if tone_hits and genre_hits and len(reasons) < max_reasons:
-        # Craft "Strong match on tense psychological thrillers..."
-        tone_bit = _tone_phrase(tone_hits[:2])
-        genre_bit = _genre_phrase(genre_hits[:2])
-        extra = ""
-        complex_kw = [
-            k
-            for k in kw_hits
-            if any(
-                x in k
-                for x in (
-                    "moral",
-                    "psychological",
-                    "identity",
-                    "revenge",
-                    "conspiracy",
-                    "philosophy",
-                    "time",
-                    "memory",
-                )
-            )
-        ]
-        # Only mention a theme that is an actual keyword on both sides.
-        if complex_kw:
-            extra = f" with {_pretty_label(complex_kw[0])}"
+        # "Strong match on tense thrillers exploring memory"
+        genre_bit = _genre_phrase(genre_hits[:2], series=series)
+        tone_bit = _tone_phrase(_drop_tones_restating_genres(tone_hits, genre_hits[:2])[:2])
+        # Only a theme that is an actual keyword on both sides, and one that
+        # does not just repeat the genre ("psychological thriller").
+        theme = next(
+            (k for k in kw_hits if _THEME_WORD.search(k) and not _GENRE_WORDS.search(k)),
+            None,
+        )
+        extra = f" exploring {_pretty_label(theme)}" if theme else ""
         msg = f"Strong match on {tone_bit} {genre_bit}{extra}".replace("  ", " ").strip()
         _add(
             Reason(
@@ -493,24 +602,20 @@ def build_reasons(
             )
 
     # --- 6) Origin / era / language (only if still need slots) ---
-    for prefix, code, template in (
-        ("country:", "similar_origin", "Leans into {x} cinema you've been rewarding"),
-        ("lang:", "similar_language", "In a language lane you already enjoy ({x})"),
-        ("decade:", "similar_era", "Sits in the {x}s — an era that scores well for you"),
+    for prefix, code in (
+        ("country:", "similar_origin"),
+        ("lang:", "similar_language"),
+        ("decade:", "similar_era"),
     ):
         if len(reasons) >= max_reasons:
             break
         hits = [k.split(":", 1)[1] for k, s in overlap_feats if s > 0 and k.startswith(prefix)]
-        if not hits:
-            continue
-        label = hits[0]
-        _add(
-            Reason(
-                code=code,
-                message=template.format(x=label),
-                evidence={code: hits[:2]},
-            )
-        )
+        for value in hits:
+            made = _origin_reason(code, value)
+            if made is None:
+                continue
+            _add(Reason(code=made[0], message=made[1], evidence={code: hits[:2]}))
+            break
 
     # --- 7) Genre only as last structural resort, still humanized ---
     if len(reasons) < max_reasons and genre_hits:
@@ -520,12 +625,12 @@ def build_reasons(
             if set(a.get("genres") or []) & set(genre_hits[:2])
             and float(a.get("weight") or 0) >= _ANCHOR_MIN_WEIGHT
         ][:2]
-        gphrase = _genre_phrase(genre_hits[:2])
+        gphrase = _genre_phrase(genre_hits[:2], series=series)
         if liked_genre_titles:
             _add(
                 Reason(
                     code="shared_genre",
-                    message=f"In the same {gphrase} pocket as {_join_names(liked_genre_titles)}",
+                    message=f"In the same territory as {_join_names(liked_genre_titles)} — {gphrase}",
                     evidence={"genres": genre_hits[:3], "liked_titles": liked_genre_titles},
                 )
             )
@@ -533,7 +638,11 @@ def build_reasons(
             _add(
                 Reason(
                     code="shared_genre",
-                    message=f"Fits the {gphrase} side of your taste",
+                    message=(
+                        "Fits the "
+                        + " and ".join(_GENRE_ADJECTIVES.get(g, g) for g in genre_hits[:2])
+                        + " side of your taste"
+                    ),
                     evidence={"genres": genre_hits[:3]},
                 )
             )

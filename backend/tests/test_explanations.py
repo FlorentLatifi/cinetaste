@@ -2,6 +2,8 @@
 
 from uuid import uuid4
 
+import pytest
+
 from app.recommendation.embeddings import PersonSignal, features_from_title
 from app.recommendation.explanations import (
     EXPLAIN_MEMORY_KEY,
@@ -155,3 +157,84 @@ def test_explain_wrapper_reads_memory_from_features() -> None:
     assert all(r.message for r in reasons)
     # Should not dump mechanical "Matches genres you like" as only line when director exists
     assert reasons[0].code in {"because_you_liked", "same_director", "taste_blend", "similar_style"}
+
+
+# ---------------------------------------------------------------------------
+# Wording seen by real users (live audit, 2026-11)
+# ---------------------------------------------------------------------------
+
+
+def _reasons_for(user: dict[str, float], **title) -> list[str]:
+    from app.recommendation.embeddings import features_from_title
+
+    snap = features_from_title(
+        genres=title.get("genres", ["Drama"]),
+        keywords=title.get("keywords", []),
+        people=title.get("people", []),
+        release_year=title.get("year", 2015),
+        runtime=110,
+        media_type=title.get("media_type", "movie"),
+        original_language=title.get("lang", "en"),
+        countries=title.get("countries", ["US"]),
+    )
+    return [
+        r.message
+        for r in build_reasons(
+            user_features=user,
+            explain_memory={},
+            title_name="Candidate",
+            title_extra={"feature_snapshot": snap},
+            title_genres=title.get("genres", ["Drama"]),
+            similarity=0.2,
+        )
+    ]
+
+
+@pytest.mark.parametrize(
+    ("genre", "noun"),
+    [("Comedy", "comedies"), ("Family", "family films"), ("Science Fiction", "sci-fi films")],
+)
+def test_single_genre_phrases_are_real_plurals(genre: str, noun: str) -> None:
+    """Appending "s" shipped "comedys", "familys" and "war actions"."""
+    from app.recommendation.explanations import _genre_phrase
+
+    assert _genre_phrase([genre.lower()]) == noun
+
+
+def test_blend_does_not_repeat_the_genre_as_a_tone() -> None:
+    messages = _reasons_for(
+        {"genre:war": 1.5, "genre:action": 1.0, "tone:war": 1.0},
+        genres=["War", "Action"],
+        keywords=["world war ii"],
+    )
+    blend = next(m for m in messages if m.startswith("Strong match"))
+    assert "war war" not in blend.lower() and "wartime war" not in blend.lower()
+    assert "actions" not in blend
+
+
+def test_theme_words_match_whole_words_only() -> None:
+    """A substring test made "wartime" a "time" theme and "immortality" a "moral" one."""
+    messages = _reasons_for(
+        {"genre:thriller": 1.5, "tone:tense": 1.0, "kw:wartime": 1.0, "kw:immortality": 1.0},
+        genres=["Thriller"],
+        keywords=["suspense", "wartime", "immortality"],
+    )
+    blend = next(m for m in messages if m.startswith("Strong match"))
+    assert "exploring" not in blend
+
+
+def test_no_reason_shows_a_raw_country_or_language_code() -> None:
+    messages = _reasons_for(
+        {"country:KR": 2.0, "lang:ko": 2.0},
+        genres=["Drama"],
+        lang="ko",
+        countries=["KR"],
+    )
+    assert "Korean cinema, which you keep rating highly" in messages
+    assert not any("(ko)" in m or " KR " in m for m in messages)
+
+
+def test_english_and_american_origin_are_not_offered_as_reasons() -> None:
+    """In a mostly-American catalog they explain nothing and take a real reason's slot."""
+    messages = _reasons_for({"country:US": 2.0, "lang:en": 2.0}, genres=["Drama"])
+    assert not any("cinema" in m or "language" in m for m in messages)
