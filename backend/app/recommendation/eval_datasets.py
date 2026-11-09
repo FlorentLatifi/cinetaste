@@ -140,6 +140,7 @@ def load_movielens_dataset(
     max_users: int | None = 500,
     test_fraction: float = 0.2,
     seed: int = 7,
+    title_stats: str = "train",
 ) -> Dataset:
     """Load ml-latest-small (movies.csv, ratings.csv, optional tags.csv).
 
@@ -147,7 +148,16 @@ def load_movielens_dataset(
     ratings are held out, and the held-out titles rated >= 4 stars are the
     relevant set. Recommending something a user later rated highly is the
     closest offline proxy for "a good recommendation".
+
+    Title statistics (popularity, average rating, vote count) come from the
+    *train* portion of every user's history by default, the same split applied
+    to all 610 users. Counting held-out ratings too (``title_stats="all"``,
+    how this loader used to work) leaks the answers into the popularity
+    baseline and into every prior that reads ratings; the effect turned out
+    small (popular recall@20 0.072 → 0.070), but a benchmark should not have it.
     """
+    if title_stats not in {"train", "all"}:
+        raise ValueError("title_stats must be 'train' or 'all'")
     directory = Path(directory)
     movies_path = directory / "movies.csv"
     ratings_path = directory / "ratings.csv"
@@ -166,19 +176,36 @@ def load_movielens_dataset(
                 if tag and len(tags[row["movieId"]]) < 12:
                     tags[row["movieId"]].append(tag)
 
-    rating_count: dict[str, int] = defaultdict(int)
-    rating_sum: dict[str, float] = defaultdict(float)
+    by_user: dict[str, list[tuple[float, str, float]]] = defaultdict(list)
     with ratings_path.open(encoding="utf-8", newline="") as handle:
         for row in csv.DictReader(handle):
-            rating_count[row["movieId"]] += 1
-            rating_sum[row["movieId"]] += float(row["rating"])
+            by_user[row["userId"]].append(
+                (float(row["timestamp"]), row["movieId"], float(row["rating"]))
+            )
+    # The same temporal split for every user, so title statistics can be
+    # computed from training data only.
+    split: dict[str, tuple[list[tuple[float, str, float]], list[tuple[float, str, float]]]] = {}
+    for user_id, rows in by_user.items():
+        rows.sort()
+        cut = max(int(len(rows) * (1 - test_fraction)), 1)
+        split[user_id] = (rows[:cut], rows[cut:])
+
+    seen_count: dict[str, int] = defaultdict(int)
+    rating_count: dict[str, int] = defaultdict(int)
+    rating_sum: dict[str, float] = defaultdict(float)
+    for train_rows, test_rows in split.values():
+        for _ts, movie_id, _stars in train_rows + test_rows:
+            seen_count[movie_id] += 1
+        for _ts, movie_id, stars in train_rows if title_stats == "train" else train_rows + test_rows:
+            rating_count[movie_id] += 1
+            rating_sum[movie_id] += stars
 
     titles: list[EvalTitle] = []
     id_by_movie: dict[str, UUID] = {}
     with movies_path.open(encoding="utf-8", newline="") as handle:
         for row in csv.DictReader(handle):
             movie_id = row["movieId"]
-            if rating_count[movie_id] == 0:
+            if seen_count[movie_id] == 0:
                 continue
             raw_title = row["title"].strip()
             match = _YEAR_RE.search(raw_title)
@@ -205,20 +232,16 @@ def load_movielens_dataset(
                     embedding=embedding,
                     extra=meta,
                     popularity=float(rating_count[movie_id]),
-                    vote_average=round(rating_sum[movie_id] / rating_count[movie_id] * 2, 2),
+                    vote_average=(
+                        round(rating_sum[movie_id] / rating_count[movie_id] * 2, 2)
+                        if rating_count[movie_id]
+                        else 0.0
+                    ),
                     vote_count=rating_count[movie_id],
                     year=year,
                     genre_names=tuple(genres),
                 )
             )
-
-    by_user: dict[str, list[tuple[float, str, float]]] = defaultdict(list)
-    with ratings_path.open(encoding="utf-8", newline="") as handle:
-        for row in csv.DictReader(handle):
-            if row["movieId"] in id_by_movie:
-                by_user[row["userId"]].append(
-                    (float(row["timestamp"]), row["movieId"], float(row["rating"]))
-                )
 
     rng = random.Random(seed)
     user_ids = [uid for uid, rows in by_user.items() if len(rows) >= min_ratings]
@@ -228,12 +251,12 @@ def load_movielens_dataset(
 
     users: list[EvalUser] = []
     for user_id in user_ids:
-        rows = sorted(by_user[user_id])
-        split_at = max(int(len(rows) * (1 - test_fraction)), 1)
-        train_rows, test_rows = rows[:split_at], rows[split_at:]
+        train_rows, test_rows = split[user_id]
 
         events: list[tuple[UUID, str, float, datetime]] = []
         for timestamp, movie_id, stars in train_rows:
+            if movie_id not in id_by_movie:
+                continue
             event_type, weight = _EVENT_BY_RATING[stars]
             events.append(
                 (
@@ -246,12 +269,12 @@ def load_movielens_dataset(
         test_ids = {
             id_by_movie[movie_id]
             for _ts, movie_id, stars in test_rows
-            if stars >= POSITIVE_RATING_THRESHOLD
+            if stars >= POSITIVE_RATING_THRESHOLD and movie_id in id_by_movie
         }
         gains = {
             id_by_movie[movie_id]: (2.0 if stars >= 4.5 else 1.0)
             for _ts, movie_id, stars in test_rows
-            if stars >= POSITIVE_RATING_THRESHOLD
+            if stars >= POSITIVE_RATING_THRESHOLD and movie_id in id_by_movie
         }
         if events and test_ids:
             users.append(

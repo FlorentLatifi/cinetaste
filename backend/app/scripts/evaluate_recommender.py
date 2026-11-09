@@ -2,7 +2,7 @@
 
     python -m app.scripts.evaluate_recommender                      # synthetic
     python -m app.scripts.evaluate_recommender --dataset movielens \
-        --path ../data/ml-latest-small
+        --path ../data/ml-latest-small --workers 4
 
 Prints a Markdown table (paste-able into docs/EVALUATION.md) and optionally
 writes the raw numbers as JSON. No database required.
@@ -28,12 +28,24 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--titles", type=int, default=800)
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--json", type=Path, help="Write raw metrics here")
+    parser.add_argument(
+        "--workers", type=int, default=1, help="Processes to spread users over (POSIX)"
+    )
+    parser.add_argument(
+        "--title-stats",
+        choices=("train", "all"),
+        default="train",
+        help="MovieLens: compute title popularity/ratings from training data only (default) "
+        "or from every rating, held-out ones included (the old, leaky protocol)",
+    )
     args = parser.parse_args(argv)
 
     if args.dataset == "movielens":
         if not args.path:
             parser.error("--path is required for --dataset movielens")
-        dataset = load_movielens_dataset(args.path, max_users=args.users, seed=args.seed)
+        dataset = load_movielens_dataset(
+            args.path, max_users=args.users, seed=args.seed, title_stats=args.title_stats
+        )
     else:
         dataset = build_synthetic_dataset(
             n_titles=args.titles, n_users=args.users, seed=args.seed
@@ -44,7 +56,7 @@ def main(argv: list[str] | None = None) -> int:
         f"users_evaluated={len(dataset.users)} k={args.k}",
         file=sys.stderr,
     )
-    results = evaluate(dataset, k=args.k)
+    results = evaluate(dataset, k=args.k, workers=args.workers)
     print(format_report(results, k=args.k))
 
     if args.json:

@@ -79,3 +79,60 @@ def test_recommender_beats_popularity_and_random_on_synthetic_data() -> None:
     assert results["hybrid_no_diversity"]["recall@10"] >= hybrid
     # Popularity-only recommendations are by definition not novel.
     assert results["popular"]["novelty"] < results["hybrid"]["novelty"]
+
+
+def test_parallel_evaluation_matches_serial() -> None:
+    """--workers is a speed-up only: every strategy is deterministic per user."""
+    from app.recommendation.evaluation import (
+        make_production_strategy,
+        make_ranking_strategy,
+        popularity_strategy,
+    )
+
+    dataset = build_synthetic_dataset(n_titles=120, n_users=12, seed=3)
+    strategies = {
+        "popular": popularity_strategy,
+        "hybrid": make_ranking_strategy(mmr_lambda=0.8),
+        "production": make_production_strategy(ann_candidates=40, popular_candidates=20),
+    }
+    serial = evaluate(dataset, strategies, k=10, workers=1)
+    parallel = evaluate(dataset, strategies, k=10, workers=2)
+    assert serial == parallel
+
+
+def _write_movielens(tmp_path) -> None:
+    """Two users, three films. User 1's last rating (film 30) is held out."""
+    (tmp_path / "movies.csv").write_text(
+        "movieId,title,genres\n"
+        "10,Old Favourite (1990),Drama\n"
+        "20,Other Film (1995),Comedy\n"
+        "30,Held Out (2000),Drama\n",
+        encoding="utf-8",
+    )
+    rows = ["userId,movieId,rating,timestamp"]
+    # user 1: 10 ratings of film 10/20 alternating, then film 30 last (held out)
+    for i in range(10):
+        rows.append(f"1,{10 if i % 2 == 0 else 20},4.0,{1000 + i}")
+    rows.append("1,30,5.0,2000")
+    # user 2: rates film 30 early (train) — that rating may count
+    rows.append("2,30,4.0,500")
+    for i in range(9):
+        rows.append(f"2,{10 if i % 2 == 0 else 20},3.0,{600 + i}")
+    (tmp_path / "ratings.csv").write_text("\n".join(rows) + "\n", encoding="utf-8")
+
+
+def test_movielens_title_stats_exclude_held_out_ratings(tmp_path) -> None:
+    """Held-out ratings must not inflate the popularity they are scored against."""
+    from app.recommendation.eval_datasets import load_movielens_dataset
+
+    _write_movielens(tmp_path)
+    clean = load_movielens_dataset(tmp_path, min_ratings=5, max_users=None, test_fraction=0.1)
+    leaky = load_movielens_dataset(
+        tmp_path, min_ratings=5, max_users=None, test_fraction=0.1, title_stats="all"
+    )
+    held_out_clean = next(t for t in clean.titles if t.name == "Held Out")
+    held_out_leaky = next(t for t in leaky.titles if t.name == "Held Out")
+    # Only user 2's training rating counts; user 1's held-out 5-star does not.
+    assert held_out_clean.vote_count == 1
+    assert held_out_leaky.vote_count == 2
+    assert held_out_clean.vote_average == 8.0

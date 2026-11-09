@@ -16,6 +16,7 @@ Strategies share that protocol, so the numbers compare like with like:
 
 from __future__ import annotations
 
+import multiprocessing
 import random
 import zlib
 from collections.abc import Callable, Mapping, Sequence
@@ -24,6 +25,8 @@ from datetime import UTC, datetime
 from statistics import mean
 from typing import Any
 from uuid import UUID
+
+import numpy as np
 
 from app.domain.taste_signals import EffectiveSignal, effective_title_signals
 from app.recommendation import metrics as M
@@ -109,6 +112,7 @@ def make_ranking_strategy(
     mmr_lambda: float = 0.7,
     exploration_slots: int = 0,
     max_per_genre: int | None = None,
+    max_per_director: int | None = None,
 ) -> Strategy:
     """The production ranker with a given configuration."""
 
@@ -123,6 +127,76 @@ def make_ranking_strategy(
             mmr_lambda=mmr_lambda,
             exploration_slots=exploration_slots,
             max_per_genre=max_per_genre,
+            max_per_director=max_per_director,
+            weights=weights,
+            with_reasons=False,
+        )
+        return [item.title_id for item in ranked]
+
+    return strategy
+
+
+# RecommendationService._load_candidates defaults (Settings.rec_*).
+PRODUCTION_ANN_CANDIDATES = 250
+PRODUCTION_POPULAR_CANDIDATES = 120
+PRODUCTION_OVERFETCH_MAX = 150
+
+
+def make_production_strategy(
+    *,
+    weights: RankingWeights = DEFAULT_WEIGHTS,
+    mmr_lambda: float = 0.8,
+    exploration_slots: int = 3,
+    ann_candidates: int = PRODUCTION_ANN_CANDIDATES,
+    popular_candidates: int = PRODUCTION_POPULAR_CANDIDATES,
+) -> Strategy:
+    """What the API serves: candidate generation first, then the ranker.
+
+    The other ranking strategies score the *whole* catalog, which production
+    never does. Production ranks a pool of nearest neighbours of the taste
+    vector plus the most popular titles (``RecommendationService.
+    _load_candidates``); ranking the full catalog measured something else —
+    on MovieLens it understated recall by about a fifth. Exact cosine here
+    stands in for pgvector's approximate HNSW search.
+    """
+    cache: dict[int, tuple[np.ndarray, list[int]]] = {}
+
+    def strategy(user: EvalUser, dataset: Dataset, k: int) -> list[UUID]:
+        key = id(dataset)
+        if key not in cache:
+            dim = next((len(t.embedding) for t in dataset.titles if t.embedding), 0)
+            matrix = np.asarray(
+                [t.embedding if t.embedding else [0.0] * dim for t in dataset.titles],
+                dtype=np.float64,
+            )
+            by_popularity = sorted(
+                range(len(dataset.titles)),
+                key=lambda i: dataset.titles[i].popularity,
+                reverse=True,
+            )
+            cache[key] = (matrix, by_popularity)
+        matrix, by_popularity = cache[key]
+
+        vector, features = _profile(user, dataset)
+        seen = _seen(user)
+        overfetch = min(len(seen), PRODUCTION_OVERFETCH_MAX)
+        if vector is not None:
+            nearest = np.argsort(-(matrix @ np.asarray(vector, dtype=np.float64)))
+            indices = [
+                *nearest[: max(ann_candidates, k * 4) + overfetch].tolist(),
+                *by_popularity[: max(popular_candidates, 20)],
+            ]
+        else:
+            indices = by_popularity[: max(ann_candidates + popular_candidates, 400) + overfetch]
+        pool = [dataset.titles[i] for i in dict.fromkeys(indices)]
+        ranked = rank_titles(
+            user_vector=vector,
+            user_features=features,
+            titles=pool,
+            exclude_ids=seen,
+            slate_size=k,
+            mmr_lambda=mmr_lambda,
+            exploration_slots=exploration_slots,
             weights=weights,
             with_reasons=False,
         )
@@ -151,23 +225,68 @@ DEFAULT_STRATEGIES: dict[str, Strategy] = {
     "random": random_strategy,
     "popular": popularity_strategy,
     "dense_only": make_ranking_strategy(
-        weights=RankingWeights(similarity=1.0, sparse_positive=0.0, sparse_negative=0.0),
+        weights=RankingWeights(
+            similarity=1.0, sparse_positive=0.0, sparse_negative=0.0, quality=0.0
+        ),
         mmr_lambda=1.0,
         max_per_genre=999,
+        max_per_director=999,
     ),
     "sparse_only": make_ranking_strategy(
-        weights=RankingWeights(similarity=0.0, sparse_positive=1.0, sparse_negative=0.3),
+        weights=RankingWeights(
+            similarity=0.0, sparse_positive=1.0, sparse_negative=0.3, quality=0.0
+        ),
         mmr_lambda=1.0,
         max_per_genre=999,
+        max_per_director=999,
     ),
-    "hybrid_no_diversity": make_ranking_strategy(mmr_lambda=1.0, max_per_genre=999),
+    "hybrid_no_diversity": make_ranking_strategy(
+        mmr_lambda=1.0, max_per_genre=999, max_per_director=999
+    ),
+    # Ablation: the production weights without the quality prior.
+    "hybrid_no_quality": make_ranking_strategy(
+        weights=RankingWeights(quality=0.0), mmr_lambda=0.8
+    ),
     "hybrid": make_ranking_strategy(mmr_lambda=0.8),
     "hybrid_with_exploration": make_ranking_strategy(mmr_lambda=0.8, exploration_slots=3),
     # Not the default: shows what an accuracy-first popularity prior costs in novelty.
     "hybrid_plus_popularity": make_ranking_strategy(
         weights=RankingWeights(warm_popularity=0.2), mmr_lambda=0.8
     ),
+    # What the API serves: candidate generation, ranking, 3 exploration slots.
+    "production": make_production_strategy(),
 }
+
+
+# Set in the parent before forking workers; forked children inherit it, so
+# strategies (closures) never need pickling.
+_EVAL_STATE: dict[str, Any] = {}
+
+
+def _score_one(job: tuple[str, int, int]) -> tuple[str, dict[str, float], list[UUID]]:
+    name, user_index, k = job
+    dataset: Dataset = _EVAL_STATE["dataset"]
+    catalog: dict[UUID, EvalTitle] = _EVAL_STATE["catalog"]
+    user = dataset.users[user_index]
+    recommended = _EVAL_STATE["strategies"][name](user, dataset, k)
+    gains = user.test_gains or {tid: 1.0 for tid in user.test_positive_ids}
+    vectors = [
+        catalog[tid].embedding
+        for tid in recommended
+        if tid in catalog and catalog[tid].embedding is not None
+    ]
+    genres = [primary_genre(catalog[tid]) for tid in recommended if tid in catalog]
+    row = {
+        f"recall@{k}": M.recall_at_k(recommended, user.test_positive_ids, k=k),
+        f"precision@{k}": M.precision_at_k(recommended, user.test_positive_ids, k=k),
+        f"ndcg@{k}": M.ndcg_at_k(recommended, gains, k=k),
+        f"hit_rate@{k}": M.hit_rate_at_k(recommended, user.test_positive_ids, k=k),
+        "mrr": M.reciprocal_rank(recommended, user.test_positive_ids),
+        "diversity": M.intra_list_diversity(vectors),
+        "genre_variety": M.distinct_ratio(genres),
+        "novelty": M.novelty(recommended, _EVAL_STATE["popularity_rank"]),
+    }
+    return name, row, list(recommended)
 
 
 def evaluate(
@@ -175,40 +294,38 @@ def evaluate(
     strategies: Mapping[str, Strategy] | None = None,
     *,
     k: int = DEFAULT_K,
+    workers: int = 1,
 ) -> dict[str, dict[str, float]]:
-    """Run every strategy over every user; return metric → value per strategy."""
-    strategies = strategies or DEFAULT_STRATEGIES
-    catalog = dataset.by_id
-    popularity_rank = _popularity_percentiles(dataset.titles)
-    results: dict[str, dict[str, float]] = {}
+    """Run every strategy over every user; return metric → value per strategy.
 
-    for name, strategy in strategies.items():
-        per_user: list[dict[str, float]] = []
-        slates: list[Sequence[UUID]] = []
-        for user in dataset.users:
-            if not user.test_positive_ids:
-                continue
-            recommended = strategy(user, dataset, k)
-            slates.append(recommended)
-            gains = user.test_gains or {tid: 1.0 for tid in user.test_positive_ids}
-            vectors = [
-                catalog[tid].embedding
-                for tid in recommended
-                if tid in catalog and catalog[tid].embedding is not None
-            ]
-            genres = [primary_genre(catalog[tid]) for tid in recommended if tid in catalog]
-            per_user.append(
-                {
-                    f"recall@{k}": M.recall_at_k(recommended, user.test_positive_ids, k=k),
-                    f"precision@{k}": M.precision_at_k(recommended, user.test_positive_ids, k=k),
-                    f"ndcg@{k}": M.ndcg_at_k(recommended, gains, k=k),
-                    f"hit_rate@{k}": M.hit_rate_at_k(recommended, user.test_positive_ids, k=k),
-                    "mrr": M.reciprocal_rank(recommended, user.test_positive_ids),
-                    "diversity": M.intra_list_diversity(vectors),
-                    "genre_variety": M.distinct_ratio(genres),
-                    "novelty": M.novelty(recommended, popularity_rank),
-                }
-            )
+    ``workers > 1`` spreads users over forked processes (POSIX only; falls back
+    to one process elsewhere). Results are identical either way — every
+    strategy is deterministic per user — just faster: the MovieLens run ranks
+    ~9.7k titles per user per strategy.
+    """
+    strategies = strategies or DEFAULT_STRATEGIES
+    _EVAL_STATE.clear()
+    _EVAL_STATE.update(
+        dataset=dataset,
+        strategies=strategies,
+        catalog=dataset.by_id,
+        popularity_rank=_popularity_percentiles(dataset.titles),
+    )
+    users = [i for i, user in enumerate(dataset.users) if user.test_positive_ids]
+    jobs = [(name, i, k) for name in strategies for i in users]
+    try:
+        if workers > 1 and "fork" in multiprocessing.get_all_start_methods():
+            with multiprocessing.get_context("fork").Pool(workers) as pool:
+                rows = pool.map(_score_one, jobs, chunksize=4)
+        else:
+            rows = [_score_one(job) for job in jobs]
+    finally:
+        _EVAL_STATE.clear()
+
+    results: dict[str, dict[str, float]] = {}
+    for name in strategies:
+        per_user = [row for n, row, _slate in rows if n == name]
+        slates: list[Sequence[UUID]] = [slate for n, _row, slate in rows if n == name]
         if not per_user:
             continue
         summary = {metric: mean(row[metric] for row in per_user) for metric in per_user[0]}
@@ -233,6 +350,7 @@ def format_report(results: Mapping[str, Mapping[str, float]], *, k: int = DEFAUL
         return "(no results)"
     columns = [
         f"recall@{k}",
+        f"precision@{k}",
         f"ndcg@{k}",
         f"hit_rate@{k}",
         "mrr",
