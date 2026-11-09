@@ -4,6 +4,81 @@ Lightweight ADR-style log. Newest first.
 
 ---
 
+## 2026-11-09 — Rank for quality, cap directors, and call only rare films gems
+
+### Decision
+Three ranking changes from the November quality audit
+([QUALITY_AUDIT.md](QUALITY_AUDIT.md)):
+
+* A **quality prior** (`RankingWeights.quality = 0.10`): the pool percentile
+  of a vote-count-shrunk average rating.
+* A **per-director cap** (2 per 20-card slate, proportional), alongside the
+  genre cap, in MMR, exploration and backfill.
+* **Hidden gems by reach**: well rated, at least 50 votes, in the bottom 35% of
+  the candidate pool by vote count, and not trending. The label says exactly
+  that.
+
+### Rationale
+* On MovieLens 74% of films share an identical feature snapshot with another,
+  and ties fell to catalog order. The quality prior breaks them toward films
+  people rate well. Production recall@20 +43%, NDCG +61%, MRR +63%, diversity
+  +18% on the same users; novelty halves but stays 70× the popularity
+  baseline. At equal novelty a popularity prior gave 42% less recall, and
+  matching quality's NDCG with popularity cost 40% of the novelty, so it
+  stays off.
+* The live site opened one guest's slate with eight Nolan films in nine cards;
+  the genre cap could not see it. The director cap costs ~8% recall on the
+  synthetic benchmark, which is generated from director clusters and rewards
+  that bubble.
+* The old gem rule used TMDb `popularity` (current buzz) and badged *Pulp
+  Fiction* a hidden gem. A false reason is worse than none.
+
+### Status
+Active.
+
+---
+
+## 2026-11-09 — Profile rebuilds are serialised per user
+
+### Decision
+`recompute_profile` takes a transaction-scoped advisory lock keyed by the user
+and writes the profile as an upsert with `version = version + 1` in SQL. The
+request-path version bump is the same kind of upsert and never takes the lock.
+Snapshot import and clear take the lock before touching the row.
+
+### Rationale
+Deferred rebuilds made overlapping rebuilds normal for anyone rating quickly.
+The rebuild that read the log first could commit last and overwrite the newer
+profile — reproduced in `test_overlapping_rebuilds_keep_the_latest_rating`.
+Row locks were rejected: the row may not exist yet, and a `SELECT … FOR UPDATE`
+in the rebuild would make the request's bump wait for it, undoing the reason
+rebuilds were deferred. Import and clear lock first because the opposite order
+(row, then lock) deadlocks against a background rebuild holding the lock.
+
+### Status
+Active.
+
+---
+
+## 2026-11-09 — The benchmark measures what production serves
+
+### Decision
+A `production` strategy emulates candidate generation (250 nearest + 120
+popular) before ranking; MovieLens title statistics come from training data
+only; `precision@k` is reported; `--workers` parallelises the run.
+
+### Rationale
+Strategies used to rank the whole catalog, which production never does, and
+held-out ratings leaked into the popularity they were scored against. Weights
+were being chosen against a different system. The leak turned out small
+(popular recall 0.072 → 0.070); the candidate pool did not (old ranker 0.024 →
+0.030 on the same users).
+
+### Status
+Active.
+
+---
+
 ## 2026-09-24 — The taste rebuild happens after the response
 
 ### Decision

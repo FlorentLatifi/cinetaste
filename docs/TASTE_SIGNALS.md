@@ -164,15 +164,22 @@ When “mark as watched” ships:
 
 Implemented in `TasteService.recompute_profile`:
 
+0. Take the user's rebuild lock (a transaction-scoped Postgres advisory lock).
+   Ratings rebuild after the response, so quick ratings start overlapping
+   rebuilds; without the lock the one that read the log first could commit
+   last and drop the newest rating.
 1. Load all `InteractionEvent`s for the user (append-only history).
 2. Skip events where `affects_taste(event_type, weight)` is false  
    (includes **haven't_seen** and any `abs(weight) < ε`).
 3. Accumulate sparse features; blend embeddings.
 4. Cap and **family-normalize** features so keywords don’t drown directors.
 5. Build explain memory from strong positive anchors.
-6. Bump profile `version` (invalidates cached For You slates).
+6. Upsert the profile with `version = version + 1` in SQL (invalidates cached
+   For You slates; a bump that landed meanwhile is kept, not overwritten).
 
-Negative weights contribute to sparse features and the vector blend so scoring can **penalize** matching directors/tones the user dislikes.
+Negative weights contribute to the sparse features only, so scoring can
+**penalize** matching directors/tones the user dislikes. The dense vector is
+built from positive signals alone (see *Detailed rules* above).
 
 ---
 

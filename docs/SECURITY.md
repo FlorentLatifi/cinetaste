@@ -92,7 +92,9 @@ will — which is why there is a second limiter.
 **Per account** ([`core/throttle.py`](../backend/app/core/throttle.py)) —
 counts failed logins and reset requests against the email in the request.
 Neither header forgery nor a botnet changes that key. Only failures count, so
-an active user is never locked out. Identifiers are hashed before they become
+a user who signs in correctly is never counted against — but someone who knows
+an address can deliberately spend its budget and lock its owner out for the
+window (see *Known gaps*). Identifiers are hashed before they become
 keys, so no address reaches Redis or a log line.
 
 Both fail **closed** on credential routes: if the counter store is unreachable
@@ -133,6 +135,15 @@ Request bodies reject fields they do not declare. Pydantic's default is to drop
 unknown keys, which meant a client sending `new_pasword` got a `200` and an
 unchanged password.
 
+## One-time tokens
+
+Reset, verification and sign-up confirmation tokens are stored as SHA-256
+hashes, expire, and are spent under a row lock (`SELECT … FOR UPDATE`). Before
+November 2026 the reset and verification tokens were read without one, so the
+same link submitted twice at once (two tabs, a double click) was accepted
+twice — `test_a_reset_link_works_once_even_when_submitted_twice_at_once`
+reproduces it.
+
 ## Email verification
 
 Registration accepts an address; verification proves the person owns it. Until
@@ -171,7 +182,9 @@ Auth logging records user ids only — never an email, a token or a password.
 ## Transport and headers
 
 The API sets `X-Content-Type-Options`, `X-Frame-Options: DENY`,
-`Referrer-Policy`, `Permissions-Policy`, a restrictive CSP and HSTS. HSTS keys
+`Referrer-Policy`, `Permissions-Policy`, a restrictive CSP and HSTS — verified
+on the live API in November 2026 (`strict-transport-security: max-age=31536000;
+includeSubDomains`), and on the SPA with `preload`. HSTS keys
 off the environment rather than `request.url.scheme`: TLS terminates at the
 platform proxy, uvicorn does not trust that proxy by default, and the scheme
 therefore stays `http` — which meant production sent no HSTS header at all.
@@ -208,5 +221,7 @@ Stated rather than hidden:
   needs verification to be mandatory first.
 - **No 2FA.** A single-factor account holding viewing history is a reasonable
   trade for a project of this size; it would not be for one holding payments.
-- **HSTS in production is unverified until deploy.** Confirm with
-  `curl -sI https://<api-host>/api/v1/health | grep -i strict-transport`.
+- **Targeted login lockout.** The per-account limiter counts failures against
+  the address, so anyone who knows an address can keep its owner locked out
+  (10 failures per 15 minutes). The usual remedies — keying the lock on
+  account *and* network, or a challenge after N failures — are not built.

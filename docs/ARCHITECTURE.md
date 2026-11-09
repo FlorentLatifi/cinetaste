@@ -68,22 +68,31 @@ any scoring change. That is why Undo is a `clear` event rather than a delete.
 ## Recommendation pipeline
 
 1. **Ingest** (`application/catalog_ingest.py`) — TMDb details fetched
-   concurrently in batches, each title upserted in a savepoint. For every title
-   it stores a **sparse feature snapshot** and a **384-d content vector**.
+   concurrently in batches, each title upserted in a savepoint. Three discover
+   lists per media type: most popular, most voted, and top-rated with a modest
+   vote count — the last is where hidden gems come from. For every title it
+   stores a **sparse feature snapshot** and a **384-d content vector**.
 2. **Signals** (`domain/taste_signals.py`) — one policy table: weight, polarity,
    tier, resulting state, feed exclusion. Per title the latest event of the
    strongest tier wins (opinion > intent > implicit), after the last `clear`.
 3. **Profile** (`recommendation/profile.py`) — sparse features accumulate
    `snapshot × weight`, clamped and normalised per family so keywords can't
    drown directors; the dense vector is the weighted mean of **positively**
-   rated titles. Strong positives become explanation anchors.
+   rated titles. Strong positives become explanation anchors. Rebuilds for
+   one user are serialised by a transaction-scoped advisory lock and written
+   as an atomic upsert, so overlapping rebuilds after quick ratings cannot
+   overwrite each other.
 4. **Candidates** (`application/recommendation_service.py`) — pgvector ANN
    (cosine, `hnsw.ef_search` raised to match the requested limit) plus a
    popularity slice; cold start is popularity-ordered.
 5. **Ranking** (`recommendation/pipeline.py`) —
-   `0.2·cosine + 0.6·overlap − 0.12·penalty + gem + cold prior`, then MMR
-   (λ=0.8), a per-genre cap of 40% of the slate, exploration slots interleaved,
-   and score-ordered backfill. Vectorised with numpy and run in a worker thread.
+   `0.2·cosine + 0.6·overlap − 0.12·penalty + 0.1·quality + gem + cold prior`,
+   then MMR (λ=0.8) under two caps — 40% of the slate per genre, 2 per 20 per
+   director — exploration slots interleaved, and score-ordered backfill that
+   relaxes the caps only when the pool cannot fill the slate. The quality prior
+   is the pool percentile of a vote-count-shrunk rating; a hidden gem is a
+   well-rated title in the bottom 35% of the pool by vote count that is not
+   trending. Vectorised with numpy and run in a worker thread.
 6. **Explanations** (`recommendation/explanations.py`) — templates fed only by
    evidence that exists: shared director, shared keywords, shared tone, cited
    anchor titles.
@@ -133,7 +142,8 @@ once per computed slate, not per cache hit.
 | Candidate generation | ANN via HNSW with `ef_search` raised so filtering doesn't silently shrink the pool |
 | N+1 queries | Relationships never load implicitly (`lazy="raise"`); each query states what it needs |
 | Password hashing | bcrypt in a worker thread |
-| Profile recompute | Still O(interactions), but off the request path: the rating bumps `profile.version` so the next slate is rebuilt, and the profile itself is rebuilt after the response. A rating costs ~18 ms at any history, against 558 ms inline at 2,000 ratings |
+| Profile recompute | Still O(interactions), but off the request path: the rating bumps `profile.version` (one atomic upsert) so the next slate is rebuilt, and the profile itself is rebuilt after the response, serialised per user. A rating costs ~18 ms at any history, against 558 ms inline at 2,000 ratings |
+| Feature scoring | Feature families are read off the key, not found by scanning every prefix: that scan was ~45% of ranking time (guest slate 90–114 ms → 64–72 ms locally on 1,200 titles) |
 | Free-tier Redis | Optional by design: one process uses an in-process store |
 | Cache invalidation | Each user's slate keys are tracked in a Redis set and deleted by name. Deleting by prefix means SCAN, which walks the whole keyspace — measured 449 ms at 100k keys, on a path that runs for every rating |
 | Already-seen titles | Over-fetched from the ANN query rather than excluded in SQL: ranking filters them anyway, and a 2,000-id `NOT IN` cost 210 ms against 98 ms for a larger pool |

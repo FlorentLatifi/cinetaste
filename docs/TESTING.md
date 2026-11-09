@@ -4,14 +4,14 @@ Three layers, each answering a different question.
 
 | Layer | Count | Question | Needs |
 |---|---|---|---|
-| Unit — backend (`backend/tests/*.py`) | 237 | Is the logic right? | nothing |
-| Unit — frontend (`frontend/src/**/*.test.ts`) | 77 | Do the pure functions hold? | nothing |
-| Integration (`backend/tests/integration/`) | 22 | Do the API, migrations and database agree? | Postgres + pgvector |
-| End-to-end (`frontend/e2e/`) | 47 | Does the app work in a browser, accessibly? | built SPA |
+| Unit — backend (`backend/tests/*.py`) | 287 | Is the logic right? | nothing |
+| Unit — frontend (`frontend/src/**/*.test.ts`) | 99 | Do the pure functions hold? | nothing |
+| Integration (`backend/tests/integration/`) | 38 | Do the API, migrations and database agree? | Postgres + pgvector |
+| End-to-end (`frontend/e2e/`) | 63 | Does the app work in a browser, accessibly? | built SPA |
 
 ## Coverage
 
-Backend 84%, gated in CI two ways: `--cov-fail-under=80` on the total, and
+Backend 86.7% (November 2026), gated in CI two ways: `--cov-fail-under=80` on the total, and
 `backend/tools/coverage_gate.py` on each package, because a total is easy to
 hold up with well-covered trivia while ranking and taste quietly rot.
 
@@ -97,11 +97,19 @@ uses; a re-implementation would measure the re-implementation.
 | Config safety, cookies, rate-limit IPs, cache store | `test_config_production.py`, `test_cookies.py`, `test_middleware_and_ready.py` |
 | TMDb retries | `test_tmdb_client.py` |
 | Every API endpoint | `integration/test_api_endpoints.py` |
+| Concurrent ratings, rebuilds and version bumps (real Postgres) | `integration/test_profile_concurrency.py` |
+| Director cap, hidden gems by reach, explanation wording | `test_recommender_invariants.py`, `test_recommendation_pipeline.py`, `test_explanations.py` |
+| Evaluation fidelity (parallel = serial, no held-out leakage) | `test_metrics_and_evaluation.py` |
 | Ingestion (failures, TV creators, idempotency) | `integration/test_catalog_ingest.py` |
 | Full user journey | `integration/test_api_flow.py`, `frontend/e2e/interactions.spec.ts` |
 
 ## Gaps worth knowing
 
-- Coverage is reported in CI but not gated; pick a floor from a measured run.
-- No frontend unit tests (hooks are covered indirectly through e2e).
-- No load testing; latency claims come from micro-benchmarks, not a load run.
+- Frontend hooks and pages are covered through E2E, not unit tests.
+- E2E runs against a mocked API. The real API path is covered by the
+  integration suite, not by a browser driving a live backend.
+- Concurrency is tested where it bit (overlapping profile rebuilds, version
+  bumps, one-time tokens); other read-modify-write paths rely on their
+  transaction alone.
+- No load testing; latency claims come from micro-benchmarks and profiles, not
+  a load run.

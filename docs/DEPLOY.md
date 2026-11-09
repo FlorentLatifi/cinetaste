@@ -290,7 +290,10 @@ the external database URL is slow and dies when the machine sleeps.
    - `DATABASE_URL` = the same connection string the API uses (Neon → Connect)
    - `TMDB_API_KEY`
 2. Actions → **Catalog** → Run workflow. `seed-only` fills the onboarding deck in
-   a few minutes; `popular` with 10 pages adds about 800 titles.
+   a few minutes; `popular` with 10 pages adds about 1,200 titles from three
+   lists per media type: most popular, most voted, and top-rated with a modest
+   vote count (the source of hidden gems). Catalogs ingested before November
+   2026 lack the third list — run the workflow once after upgrading.
 3. It then refreshes monthly on its own. Re-running is always safe (upserts).
 
 `/api/v1/ready` reports `"catalog":"empty"` or `"unembedded"` when this is missing.

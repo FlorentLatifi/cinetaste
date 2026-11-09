@@ -26,7 +26,7 @@ rating, ranks a catalog against it, keeps the slate varied, and says why.
 | **Low-friction onboarding** | Rate a curated deck of recognisable titles. "Haven't seen it" costs nothing and pulls in a fresh card. |
 | **A taste profile, not a genre checkbox** | Every rating moves weights over genres, keywords, directors, writers, cast, tone, decade, language and country. |
 | **Explained recommendations** | Every card carries reasons built from real evidence — a shared director, shared themes, a tone you keep rating highly. |
-| **Discovery on purpose** | Diversity control, per-genre caps, exploration slots and hidden gems (well-rated titles that are not chart-toppers). |
+| **Discovery on purpose** | Diversity control, per-genre and per-director caps, exploration slots and hidden gems (well-rated titles far fewer people have seen). |
 | **You can inspect and undo it** | A profile page shows the signals learned, History lists every action, Undo reverses one, and the taste snapshot exports as JSON. |
 | **Where to watch** | Streaming, rent and buy options per region (TMDb/JustWatch). |
 
@@ -46,10 +46,11 @@ rating ──▶ interaction_events (append-only)
    candidates      pgvector ANN (HNSW, cosine) + a popular slice   ~370 titles
              │
              ▼
-   score = 0.2·cosine + 0.6·feature overlap − 0.12·penalty + hidden-gem + cold-start prior
+   score = 0.2·cosine + 0.6·feature overlap − 0.12·penalty
+           + 0.1·quality prior + hidden-gem + cold-start prior
              │
              ▼
-   MMR (λ=0.8) ──▶ genre cap (40% of slate) ──▶ exploration slots ──▶ reasons
+   MMR (λ=0.8) ──▶ genre cap (40%) + director cap (2 per 20) ──▶ exploration slots ──▶ reasons
 ```
 
 **Two representations, on purpose.** The sparse feature map is interpretable, so
@@ -77,32 +78,38 @@ held-out ratings through the production ranking code and compares it with
 baselines. Full method, all metrics and caveats in
 [docs/EVALUATION.md](docs/EVALUATION.md).
 
-**On real ratings (MovieLens, 193 users, slate of 20):**
+**On real ratings (MovieLens, 193 users, slate of 20, leakage-free protocol):**
 
-| strategy | recall@20 | hit rate@20 | novelty |
-|---|---|---|---|
-| random | 0.001 | 0.026 | 0.511 |
-| **most popular** | **0.072** | **0.415** | 0.002 |
-| **production** | 0.025 | 0.254 | **0.225** |
-| production + popularity prior (opt-in) | 0.049 | 0.404 | 0.044 |
+| strategy | recall@20 | NDCG@20 | hit rate@20 | novelty |
+|---|---|---|---|---|
+| random | 0.003 | 0.003 | 0.062 | 0.504 |
+| **most popular** | **0.070** | **0.067** | **0.415** | 0.002 |
+| production, before Nov 2026 | 0.030 | 0.028 | 0.259 | 0.273 |
+| **production, now** | 0.043 | 0.045 | 0.352 | **0.139** |
 
-The honest headline: **on MovieLens, recommending the most popular films is more
-accurate than this recommender.** MovieLens only gives genres, a few tags and a
-year — no cast, director or synopsis — so content-based ranking has little to
-work with, and what people rate next there is dominated by popular films.
+The honest headline: **on MovieLens, recommending the most popular films is
+still more accurate than this recommender** — though the gap has narrowed from
+about a third of popularity's recall to about 60%, at 70× its novelty.
+MovieLens gives only genres, a few tags and a year (no cast, director or
+synopsis): 74% of its films share an identical feature snapshot with another,
+so content alone cannot separate them, and what people rate next there is
+dominated by popular films.
 
 What the evaluation changed:
 
 - It showed the hashed content vector was the weakest signal on real data, so
-  weight moved to the interpretable features. On the same users, hit rate went
-  from 0.155 to 0.254 and NDCG rose 65%, with no loss on the synthetic benchmark.
-- A popularity prior closes most of the gap (hit rate 0.404) but mostly
-  recommends the charts (novelty 0.044). For a discovery product that is the
-  wrong default, so it ships switched off and documented.
-- On a synthetic benchmark where taste is learnable from metadata, the same
-  ranker finds 3.5× more held-out favourites than random or popular. The
-  diversity controls' cost (about a third of recall) is what set the genre cap
-  and MMR λ.
+  weight moved to the interpretable features.
+- It showed ties between indistinguishable films were being broken by catalog
+  order. A **quality prior** (a vote-count-shrunk rating, not popularity) now
+  breaks them: production recall +43%, NDCG +61%, MRR +63%, diversity +18% on
+  the same users. A popularity prior closes more of the gap but mostly
+  recommends the charts, so it stays off by default.
+- It now measures what production serves: candidate generation included, and
+  no held-out rating leaking into title statistics. The audit behind these
+  changes is in [docs/QUALITY_AUDIT.md](docs/QUALITY_AUDIT.md).
+- On a synthetic benchmark where taste is learnable from metadata, the ranker
+  finds 3.5–4.5× more held-out favourites than random or popular. The diversity
+  controls' cost (about 30% of recall) is what set the genre cap and MMR λ.
 
 ## Screenshots
 
@@ -204,11 +211,11 @@ Errors share one shape: `{code, message, request_id}` (validation adds `errors[]
 ## Testing
 
 ```bash
-cd backend && pytest -m "not integration"   # 237 unit tests
+cd backend && pytest -m "not integration"   # 287 unit tests
 docker compose up -d db                      # integration needs Postgres
-INTEGRATION_REQUIRED=1 pytest -m integration # 15 API + DB tests, run the migrations
-cd frontend && npm test                     # 77 unit tests (vitest)
-cd frontend && npx playwright test           # 47 e2e + axe accessibility tests
+INTEGRATION_REQUIRED=1 pytest -m integration # 38 API + DB tests, run the migrations
+cd frontend && npm test                     # 99 unit tests (vitest)
+cd frontend && npx playwright test           # 63 e2e + axe accessibility tests
 ```
 
 Integration tests build the schema with `alembic upgrade head` (migrations are
@@ -233,6 +240,11 @@ same features.
 **Why cap a genre at 40% of the slate?** Uncapped, a 20-card slate held barely
 more than one distinct genre. The cap costs measurable recall; that trade is
 made deliberately and written down rather than tuned by feel.
+
+**Why also cap a director?** A genre cap cannot see an auteur bubble: loving
+*Inception* and *The Dark Knight* produced a live slate opening with eight
+Christopher Nolan films, spread over five genres. Two per director in twenty
+cards still says "you like Nolan" and leaves room to discover.
 
 **Why is `rank_titles` a pure function?** It takes title-like objects and returns
 ids, so unit tests, the API and the evaluation harness all exercise the same
