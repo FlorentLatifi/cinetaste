@@ -4,6 +4,7 @@ import { ApiError } from "../api/client";
 import { ContrastToggle } from "../components/ContrastToggle";
 import { PasswordField } from "../components/PasswordField";
 import { useAuth } from "../features/auth/AuthContext";
+import { returnPath } from "../features/auth/returnTo";
 
 export function LoginPage() {
   const { login } = useAuth();
@@ -23,7 +24,7 @@ export function LoginPage() {
     setSubmitting(true);
     try {
       await login(email, password);
-      navigate("/", { replace: true });
+      navigate(returnPath(location.state) ?? "/", { replace: true });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not sign in");
     } finally {
