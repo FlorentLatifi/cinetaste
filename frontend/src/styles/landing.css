@@ -1,4 +1,8 @@
-.landing { min-height: 100vh; display: flex; flex-direction: column; }
+/* The hero glow (.landing-ambient) bleeds 30% past each side on purpose. Without
+   clipping, phones widened the layout to fit it (an iPhone 13 rendered the page
+   507px wide and zoomed out). `clip`, unlike `hidden`, creates no scroll
+   container, so the sticky top bar keeps working. */
+.landing { min-height: 100vh; display: flex; flex-direction: column; overflow-x: clip; }
 .landing-topbar { position: sticky; top: 0; z-index: 20; border-bottom: 1px solid var(--border); background: rgba(11, 12, 16, 0.82); backdrop-filter: blur(14px); }
 .landing-topbar-inner { max-width: 1080px; margin: 0 auto; padding: 0.75rem 1.25rem; display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
 .landing-brand { text-decoration: none; color: inherit; display: flex; align-items: center; gap: 0.65rem; }

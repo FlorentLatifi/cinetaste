@@ -717,3 +717,66 @@ test("Deleting the account ends on a page that says it worked", async ({ page })
     "Your account and everything in it have been deleted.",
   );
 });
+
+test("Guest: a pick you've already seen can be rated, not only passed", async ({ page }) => {
+  // Before, a guest shown a film they loved could only answer "Want to watch"
+  // or "Not for me" — and the rejection followed them into their account.
+  await installApiMock(page, { signedOut: true });
+  await page.goto("/try");
+  for (const name of [mockTitle.name, "Mock Sequel", "Mock Thriller"]) {
+    await page.getByRole("button", { name: `Really liked it — ${name}` }).click();
+  }
+  await page.getByRole("button", { name: /Show my picks/i }).click();
+  await expect(page.getByRole("heading", { name: /what we.d watch/i })).toBeVisible();
+
+  // Guests have no keyboard shortcuts, so none are announced.
+  const want = page.getByRole("button", { name: `Want to watch — ${mockSecondPick.name}` });
+  await expect(want).toBeVisible();
+  await expect(want).not.toHaveAttribute("aria-keyshortcuts", /.+/);
+
+  await page.getByRole("button", { name: `Seen it — rate ${mockSecondPick.name}` }).click();
+  await page.getByRole("button", { name: `Loved it — ${mockSecondPick.name}` }).click();
+  await expect(want).toHaveCount(0);
+
+  const draft = await page.evaluate(() =>
+    JSON.parse(window.localStorage.getItem("cinetaste.guestDraft.v1") ?? "{}"),
+  );
+  expect(draft.reactions).toContainEqual({ title_id: mockSecondPick.id, action: "rate_4" });
+});
+
+test("A shared title link survives signing in", async ({ page }) => {
+  await installApiMock(page, { signedOut: true });
+  await page.goto(`/titles/${mockTitle.id}`);
+  await expect(page).toHaveURL(/\/login$/);
+
+  await page.getByLabel("Email").fill("someone@example.com");
+  await page.getByLabel("Password", { exact: true }).fill(MOCK_SIGNUP_PASSWORD);
+  await page.getByRole("button", { name: "Sign in" }).click();
+
+  await expect(page).toHaveURL(new RegExp(`/titles/${mockTitle.id}$`));
+  await expect(page.getByRole("heading", { name: mockTitle.name })).toBeVisible();
+});
+
+test("Landing: a phone never has to scroll sideways", async ({ browser }) => {
+  // The hero glow bled past the viewport: an iPhone-sized screen laid the
+  // page out 507px wide and rendered it zoomed out.
+  const context = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+    isMobile: true,
+    hasTouch: true,
+  });
+  const page = await context.newPage();
+  await installApiMock(page, { signedOut: true });
+  await page.goto("/");
+  await page.getByRole("heading", { level: 1 }).waitFor();
+  const widths = await page.evaluate(() => ({
+    layout: window.innerWidth,
+    scroll: document.documentElement.scrollWidth,
+  }));
+  expect(widths.layout).toBe(390);
+  expect(widths.scroll).toBeLessThanOrEqual(390);
+  // The top bar is still sticky with the overflow clipped.
+  await page.mouse.wheel(0, 800);
+  await expect(page.locator(".landing-topbar")).toBeInViewport();
+  await context.close();
+});

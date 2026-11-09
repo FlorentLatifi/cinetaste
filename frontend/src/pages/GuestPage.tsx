@@ -4,11 +4,14 @@ import { Link } from "react-router-dom";
 import { ApiError } from "../api/client";
 import { getGuestRecommendations } from "../api/guest";
 import type { OnboardingReaction, RecommendationItem } from "../api/titles";
+import type { FeedbackAction } from "../components/ActionToast";
 import { ContrastToggle } from "../components/ContrastToggle";
+import { PickActions } from "../components/PickActions";
 import { PickCarousel } from "../components/PickCarousel";
 import { SiteFooter } from "../components/SiteFooter";
 import { loadGuestDraft, saveGuestDraft } from "../features/guest/guestDraft";
 import { isRating } from "../features/onboarding/constants";
+import { POST_WATCH_RATINGS } from "../features/taste/ratingScale";
 import { OnboardingDeckView } from "./OnboardingPage";
 
 type Phase = "deck" | "results";
@@ -79,6 +82,34 @@ export function GuestPage() {
       void remove(item.title.id);
     },
     [remove],
+  );
+
+  /**
+   * "Seen it" on a pick: a guest who already knows a film can rate it instead
+   * of choosing between "Want to watch" and "Not for me" — the only two
+   * options before, so a film someone loved could only be recorded as a
+   * rejection, and that rejection followed them into their account.
+   */
+  const rate = useCallback(
+    (item: RecommendationItem, action: OnboardingReaction["action"]) => {
+      const draft = loadGuestDraft();
+      saveGuestDraft({
+        reactions: [...draft.reactions, { title_id: item.title.id, action }],
+        saved: draft.saved.filter((id) => id !== item.title.id),
+      });
+      void remove(item.title.id);
+    },
+    [remove],
+  );
+
+  const onPickAction = useCallback(
+    (item: RecommendationItem, event: FeedbackAction) => {
+      if (event === "watchlist") return save(item);
+      if (event === "not_interested") return pass(item);
+      const rating = POST_WATCH_RATINGS.find((option) => option.event === event);
+      if (rating) rate(item, rating.event as OnboardingReaction["action"]);
+    },
+    [save, pass, rate],
   );
 
   const morePicks = useCallback(async () => {
@@ -165,28 +196,7 @@ export function GuestPage() {
                 label="Your picks"
                 leavingIds={leaving}
                 renderActions={(item) => (
-                  <div
-                    className="pick-choice"
-                    role="group"
-                    aria-label={`Actions for ${item.title.name}`}
-                  >
-                    <button
-                      type="button"
-                      className="pick-btn pick-btn-primary"
-                      aria-label={`Want to watch — ${item.title.name}`}
-                      onClick={() => save(item)}
-                    >
-                      <span aria-hidden="true">＋</span> Want to watch
-                    </button>
-                    <button
-                      type="button"
-                      className="pick-btn pick-btn-quiet pick-btn-wide"
-                      aria-label={`Not for me — ${item.title.name}`}
-                      onClick={() => pass(item)}
-                    >
-                      Not for me
-                    </button>
-                  </div>
+                  <PickActions item={item} onAct={onPickAction} shortcuts={false} />
                 )}
               />
             ) : (

@@ -1,6 +1,7 @@
 import { lazy, Suspense, type ReactNode } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { useAuth } from "./features/auth/AuthContext";
+import { returnPath, returnState } from "./features/auth/returnTo";
 import { AppLoading } from "./components/AppLoading";
 import { AppShell } from "./components/AppShell";
 import { ErrorBoundary } from "./components/ErrorBoundary";
@@ -60,7 +61,7 @@ function Protected({ children }: { children: ReactNode }) {
     bootstrapFailed,
     retryBootstrap,
   } = useAuth();
-  const { pathname } = useLocation();
+  const { pathname, search, hash } = useLocation();
   if (loading) {
     return (
       <AppLoading slow={bootstrapSlow} failed={bootstrapFailed} onRetry={retryBootstrap} />
@@ -72,7 +73,8 @@ function Protected({ children }: { children: ReactNode }) {
       return <Navigate to="/" replace state={{ accountDeleted: true }} />;
     }
     if (signOutReason === "signed_out") return <Navigate to="/" replace />;
-    return <Navigate to="/login" replace />;
+    // Remember where they were going: a shared title link must survive sign-in.
+    return <Navigate to="/login" replace state={returnState(pathname, search, hash)} />;
   }
   // The server is enforcing email verification: nothing but "check your
   // inbox" until it's done. /account stays reachable (none of its calls are
@@ -86,6 +88,7 @@ function Protected({ children }: { children: ReactNode }) {
 function GuestOnly({ children }: { children: ReactNode }) {
   const { user, loading, sessionLikely, bootstrapSlow, bootstrapFailed, retryBootstrap } =
     useAuth();
+  const location = useLocation();
   // Someone who was never signed in here doesn't wait for the session check;
   // if it does find a session, the redirect below happens when it lands.
   if (loading && sessionLikely) {
@@ -93,7 +96,7 @@ function GuestOnly({ children }: { children: ReactNode }) {
       <AppLoading slow={bootstrapSlow} failed={bootstrapFailed} onRetry={retryBootstrap} />
     );
   }
-  if (user) return <Navigate to="/" replace />;
+  if (user) return <Navigate to={returnPath(location.state) ?? "/"} replace />;
   return children;
 }
 

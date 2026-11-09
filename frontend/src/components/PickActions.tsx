@@ -9,6 +9,8 @@ type Props = {
   /** Open the rating row (e.g. from the S shortcut). */
   ratingOpen?: boolean;
   onRatingOpenChange?: (open: boolean) => void;
+  /** Announce the W / S / N shortcuts. Off where nothing listens for them. */
+  shortcuts?: boolean;
 };
 
 /**
@@ -18,7 +20,13 @@ type Props = {
  * "do you want to watch it?", not "how would you rate it?". Rating is one
  * step away behind "Seen it" for the picks they already know.
  */
-export function PickActions({ item, onAct, ratingOpen, onRatingOpenChange }: Props) {
+export function PickActions({
+  item,
+  onAct,
+  ratingOpen,
+  onRatingOpenChange,
+  shortcuts = true,
+}: Props) {
   const [localOpen, setLocalOpen] = useState(false);
   const open = ratingOpen ?? localOpen;
   const setOpen = onRatingOpenChange ?? setLocalOpen;
@@ -67,7 +75,7 @@ export function PickActions({ item, onAct, ratingOpen, onRatingOpenChange }: Pro
         type="button"
         className="pick-btn pick-btn-primary"
         aria-label={`Want to watch — ${name}`}
-        aria-keyshortcuts="w"
+        aria-keyshortcuts={shortcuts ? "w" : undefined}
         onClick={() => onAct(item, "watchlist")}
       >
         <span aria-hidden="true">＋</span> Want to watch
@@ -77,7 +85,7 @@ export function PickActions({ item, onAct, ratingOpen, onRatingOpenChange }: Pro
         type="button"
         className="pick-btn"
         aria-label={`Seen it — rate ${name}`}
-        aria-keyshortcuts="s"
+        aria-keyshortcuts={shortcuts ? "s" : undefined}
         aria-expanded={false}
         onClick={() => setOpen(true)}
       >
@@ -87,7 +95,7 @@ export function PickActions({ item, onAct, ratingOpen, onRatingOpenChange }: Pro
         type="button"
         className="pick-btn pick-btn-quiet"
         aria-label={`Not for me — ${name}`}
-        aria-keyshortcuts="n"
+        aria-keyshortcuts={shortcuts ? "n" : undefined}
         onClick={() => onAct(item, "not_interested")}
       >
         Not for me
