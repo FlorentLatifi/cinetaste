@@ -271,3 +271,31 @@ def test_rank_titles_returns_slate() -> None:
     )
     assert len(ranked) == 2
     assert ranked[0].reasons
+
+
+def test_fast_feature_family_matches_the_prefix_scan() -> None:
+    """feature_family reads the family off the key; it must agree with the scan."""
+    from app.recommendation.embeddings import (
+        FAMILY_SCORE_WEIGHTS,
+        _feature_family_by_scan,
+        feature_family,
+    )
+
+    keys = [f"{prefix}x" for prefix in FAMILY_SCORE_WEIGHTS] + [
+        "person:director:christopher nolan",
+        "person:producer:someone",
+        "person:director",
+        "person:",
+        "person",
+        "genre:science fiction",
+        "genre",
+        "kw:time:travel",
+        "plot:heist",
+        "media:tv",
+        "__explain_memory__",
+        "",
+        ":",
+        "tone:",
+    ]
+    for key in keys:
+        assert feature_family(key) == _feature_family_by_scan(key), key

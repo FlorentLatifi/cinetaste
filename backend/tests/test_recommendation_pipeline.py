@@ -14,7 +14,7 @@ from app.recommendation.embeddings import (
 from app.recommendation.explanations import Reason
 from app.recommendation.pipeline import (
     annotate_discovery_reasons,
-    gem_boost,
+    gem_bonuses,
     mmr_select,
     rank_titles,
 )
@@ -305,11 +305,43 @@ def test_rank_mmr_reduces_same_director_cluster(thriller_catalog: list[FakeTitle
 # ---------------------------------------------------------------------------
 
 
-def test_gem_boost_thresholds() -> None:
-    assert gem_boost(7.5, 20) == 0.08
-    assert gem_boost(7.6, 50) == 0.04
-    assert gem_boost(6.5, 10) == 0.0
-    assert gem_boost(8.0, 200) == 0.0
+def _gems(rows: list[tuple[float, float, float]]) -> list[float]:
+    """rows: (vote_average, popularity, vote_count) → bonus per title."""
+    import numpy as np
+
+    va, pop, vc = (np.asarray(col, dtype=float) for col in zip(*rows, strict=True))
+    return [float(x) for x in gem_bonuses(va, pop, vc)]
+
+
+def test_a_widely_seen_classic_is_never_a_hidden_gem() -> None:
+    """Regression: Pulp Fiction shipped labelled "not a chart-topper — a hidden gem".
+
+    Its trending popularity was modest, but 29k people had rated it. Reach is
+    what makes a film hidden, so vote count decides, not this week's buzz.
+    """
+    classic = (8.5, 12.0, 29_000)  # low buzz, enormous reach
+    niche = (8.1, 30.0, 400)  # some buzz, few voters
+    others = [(6.8, 40.0 + i, 5_000 + 900 * i) for i in range(8)]
+    bonuses = _gems([classic, niche, *others])
+    assert bonuses[0] == 0.0
+    assert bonuses[1] == 0.08
+
+
+def test_gem_needs_quality_reliability_and_low_reach() -> None:
+    pool = [(6.5, 30.0, 10_000 + 1000 * i) for i in range(8)]
+    good_but_thin = (8.8, 1.0, 12)  # too few votes to trust the rating
+    mediocre_niche = (6.9, 2.0, 300)  # rarely seen, but not well rated
+    decent_niche = (7.3, 3.0, 450)  # qualifies, at the lower strength
+    bonuses = _gems([*pool, good_but_thin, mediocre_niche, decent_niche])
+    assert bonuses[-3:] == [0.0, 0.0, 0.04]
+    assert all(b == 0.0 for b in bonuses[:-3])
+
+
+def test_trending_titles_are_not_hidden_even_with_few_votes() -> None:
+    """A brand-new release can have few votes and huge buzz: not hidden."""
+    new_release = (8.0, 500.0, 300)
+    pool = [(6.5, 10.0 + i, 20_000 + i) for i in range(9)]
+    assert _gems([new_release, *pool])[0] == 0.0
 
 
 def test_annotate_discovery_reasons_adds_gem_and_exploration() -> None:

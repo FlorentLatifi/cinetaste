@@ -200,6 +200,92 @@ def test_cap_relaxes_only_when_catalog_has_one_genre() -> None:
     assert len(ranked) == 10
 
 
+def _auteur_catalog() -> tuple[list[FakeTitle], list[FakeTitle]]:
+    """Ten films by one director across genres, plus thirty by others."""
+    genres = ["Action", "Drama", "Thriller", "Science Fiction", "War"]
+    auteur = [
+        FakeTitle(
+            name=f"Auteur {i}",
+            genres=[genres[i % len(genres)]],
+            keywords=["time", "memory"],
+            people=[("Christopher Nolan", "director"), (f"Lead {i}", "cast", 0)],
+        )
+        for i in range(10)
+    ]
+    others = [
+        FakeTitle(
+            name=f"Other {i}",
+            genres=[genres[i % len(genres)]],
+            keywords=["memory"] if i % 2 else ["heist"],
+            people=[(f"Director {i}", "director")],
+        )
+        for i in range(30)
+    ]
+    return auteur, others
+
+
+def test_one_director_cannot_take_over_the_slate() -> None:
+    """Live repro: loving Inception and The Dark Knight gave eight Nolan films
+    in the first nine cards. The genre cap could not see it — they spanned five
+    genres. Two per director in a slate of twenty leaves room to discover."""
+    auteur, others = _auteur_catalog()
+    liked = auteur[:2]
+    vector, features = _profile_from(liked)
+    ranked = rank_titles(
+        user_vector=vector,
+        user_features=features,
+        titles=auteur + others,
+        exclude_ids={t.id for t in liked},
+        slate_size=20,
+        mmr_lambda=0.8,
+        exploration_slots=3,
+    )
+    from_auteur = [r for r in ranked if r.title_id in {t.id for t in auteur}]
+    assert len(ranked) == 20
+    assert 1 <= len(from_auteur) <= 2
+    # The director is still the strongest signal: one of theirs leads the slate.
+    assert ranked[0].title_id in {t.id for t in auteur}
+
+
+def test_director_cap_relaxes_when_the_catalog_cannot_fill_the_slate() -> None:
+    auteur, _others = _auteur_catalog()
+    ranked = rank_titles(
+        user_vector=list(auteur[0].embedding),
+        user_features={"person:director:christopher nolan": 2.5},
+        titles=auteur,
+        exclude_ids={auteur[0].id},
+        slate_size=6,
+        mmr_lambda=0.8,
+        exploration_slots=0,
+    )
+    assert len(ranked) == 6
+
+
+def test_titles_without_a_director_are_not_capped_together() -> None:
+    """TV shows carry creators, not directors; no shared 'unknown' bucket."""
+    shows = [
+        FakeTitle(name=f"Show {i}", genres=[["Drama", "Comedy", "Crime"][i % 3]], media_type="tv")
+        for i in range(12)
+    ]
+
+    def slate(director_cap: int) -> list:
+        ranked = rank_titles(
+            user_vector=list(shows[0].embedding),
+            user_features={"genre:drama": 1.0, "genre:comedy": 1.0, "genre:crime": 1.0},
+            titles=shows,
+            exclude_ids=set(),
+            slate_size=9,
+            mmr_lambda=0.8,
+            exploration_slots=0,
+            max_per_director=director_cap,
+        )
+        return [r.title_id for r in ranked]
+
+    # With no directors at all, the cap must change nothing.
+    assert slate(1) == slate(999)
+    assert len(slate(1)) == 9
+
+
 def _mixed_catalog() -> list[FakeTitle]:
     genres = ["Drama", "Comedy", "Thriller", "Horror", "Documentary", "Animation"]
     return [

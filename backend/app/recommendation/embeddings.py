@@ -300,13 +300,35 @@ def tones_from_keywords(keywords: Iterable[str]) -> dict[str, float]:
     return tones
 
 
-def feature_family(key: str) -> str:
-    """Return the longest matching family prefix for a feature key."""
+def _feature_family_by_scan(key: str) -> str:
+    """Reference implementation: the longest family prefix the key starts with."""
     best = ""
     for prefix in FAMILY_SCORE_WEIGHTS:
         if key.startswith(prefix) and len(prefix) > len(best):
             best = prefix
     return best or "other:"
+
+
+def feature_family(key: str) -> str:
+    """Return the longest matching family prefix for a feature key.
+
+    Called for every feature of every candidate on every slate (~7,400 times
+    for a 370-title pool). Scanning all prefixes with ``startswith`` made it
+    ~45% of ranking time, which on a 0.1-CPU free-tier instance is seconds.
+    Family prefixes are ``<head>:`` or ``person:<role>:``, so the family is
+    read straight off the key; anything else falls back to the scan.
+    """
+    head, sep, rest = key.partition(":")
+    if not sep:
+        return "other:"
+    if head == "person":
+        role, sep, _name = rest.partition(":")
+        candidate = f"person:{role}:" if sep else ""
+    else:
+        candidate = f"{head}:"
+    if candidate in FAMILY_SCORE_WEIGHTS:
+        return candidate
+    return _feature_family_by_scan(key)
 
 
 def family_score_weight(key: str) -> float:
