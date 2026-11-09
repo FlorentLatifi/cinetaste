@@ -458,3 +458,28 @@ async def test_a_rating_is_recorded_even_if_the_rebuild_would_fail(
 
     history = (await client.get(f"{api_prefix}/me/history", headers=headers)).json()
     assert [i["title"]["id"] for i in history["items"]] == [str(titles[0].id)]
+
+
+async def test_a_reset_link_works_once_even_when_submitted_twice_at_once(
+    client: AsyncClient, api_prefix: str
+) -> None:
+    """Two tabs (or a double-click) racing the same one-time link: one wins.
+
+    The token row was read without a lock, so both requests saw it unused,
+    both changed the password, and the "one-time" link was used twice.
+    """
+    user = await _register(client, api_prefix)
+    forgot = await client.post(f"{api_prefix}/auth/forgot-password", json={"email": user["email"]})
+    token = forgot.json()["dev_reset_token"]
+
+    first, second = await asyncio.gather(
+        client.post(
+            f"{api_prefix}/auth/reset-password",
+            json={"token": token, "new_password": "racing-pass-one-1"},
+        ),
+        client.post(
+            f"{api_prefix}/auth/reset-password",
+            json={"token": token, "new_password": "racing-pass-two-2"},
+        ),
+    )
+    assert sorted([first.status_code, second.status_code]) == [204, 400]
