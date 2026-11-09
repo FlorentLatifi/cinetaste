@@ -81,3 +81,25 @@ def test_httpx_request_logs_are_silenced() -> None:
 
     configure_logging(debug=True)
     assert logging.getLogger("httpx").getEffectiveLevel() >= logging.WARNING
+
+
+@pytest.mark.asyncio
+async def test_discover_passes_the_vote_count_window(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The hidden-gem list needs an upper bound on votes, not just a floor."""
+    seen: list[httpx.QueryParams] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.params)
+        return httpx.Response(200, json={"results": [{"id": 1}]})
+
+    client = _client(handler, monkeypatch)
+    try:
+        await client.discover(
+            "movie", sort_by="vote_average.desc", vote_count_gte=300, vote_count_lte=5000
+        )
+        await client.discover("movie")
+    finally:
+        await client.aclose()
+    assert seen[0]["vote_count.gte"] == "300" and seen[0]["vote_count.lte"] == "5000"
+    assert seen[0]["sort_by"] == "vote_average.desc"
+    assert "vote_count.lte" not in seen[1]

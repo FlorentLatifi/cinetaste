@@ -48,6 +48,21 @@ logger = logging.getLogger(__name__)
 DETAIL_CONCURRENCY = 8
 BATCH_SIZE = 25
 DISCOVER_SORTS = ("popularity.desc", "vote_count.desc")
+# Acclaimed but less-seen titles. The two lists above are what is trending and
+# the most-rated canon, so a catalog built from them alone held almost nothing
+# for "hidden gems" and discovery picks to find: every candidate was a film most
+# people had heard of. Top-rated with a modest vote count is where gems live.
+GEM_DISCOVER_FILTERS: dict[str, dict[str, int]] = {
+    "movie": {"vote_count_gte": 300, "vote_count_lte": 5000},
+    "tv": {"vote_count_gte": 150, "vote_count_lte": 3000},
+}
+
+
+def discover_sources(media_type: str) -> list[tuple[str, dict[str, int]]]:
+    """(sort order, extra filters) for every discover list the ingest walks."""
+    sources: list[tuple[str, dict[str, int]]] = [(sort, {}) for sort in DISCOVER_SORTS]
+    sources.append(("vote_average.desc", GEM_DISCOVER_FILTERS[media_type]))
+    return sources
 MAX_KEYWORDS = 25
 MAX_CAST = 8
 CREW_JOBS = {"Director", "Writer", "Screenplay"}
@@ -152,10 +167,12 @@ class CatalogIngestService:
 
         targets: dict[tuple[str, int], None] = {}
         for media_type in ("movie", "tv") if include_tv else ("movie",):
-            for sort_by in DISCOVER_SORTS:
+            for sort_by, filters in discover_sources(media_type):
                 for page in range(1, pages + 1):
                     try:
-                        results = await self._tmdb.discover(media_type, page=page, sort_by=sort_by)
+                        results = await self._tmdb.discover(
+                            media_type, page=page, sort_by=sort_by, **filters
+                        )
                     except Exception:
                         logger.exception(
                             "tmdb_discover_failed media_type=%s sort=%s page=%s",

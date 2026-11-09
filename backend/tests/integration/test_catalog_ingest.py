@@ -22,11 +22,15 @@ TV_ID = 9_100_001
 class FakeTmdb:
     def __init__(self) -> None:
         self.detail_calls = 0
+        self.discover_calls: list[tuple[str, str, dict[str, Any]]] = []
 
     async def get_genres(self, media_type: str) -> list[dict[str, Any]]:
         return [{"id": 18, "name": "Drama"}, {"id": 35, "name": "Comedy"}]
 
-    async def discover(self, media_type: str, *, page: int = 1, sort_by: str = "") -> list[dict]:
+    async def discover(
+        self, media_type: str, *, page: int = 1, sort_by: str = "", **filters: Any
+    ) -> list[dict]:
+        self.discover_calls.append((media_type, sort_by, filters))
         if page > 1:
             return []
         if media_type == "tv":
@@ -93,6 +97,12 @@ async def test_ingest_isolates_failures_and_is_idempotent(db_session: AsyncSessi
     seed = stats["onboarding_seed"]
     assert seed["failed"] == 0 and seed["created"] == seed["seed_requested"]
     assert stats["discovered"] == 5
+    # The acclaimed-but-less-seen list is walked for both media types, so the
+    # catalog has hidden gems to find, not only the trending and the canon.
+    assert ("movie", "vote_average.desc", {"vote_count_gte": 300, "vote_count_lte": 5000}) in (
+        tmdb.discover_calls
+    )
+    assert any(m == "tv" and s == "vote_average.desc" for m, s, _f in tmdb.discover_calls)
     assert stats["failed"] == 2  # TMDb error + malformed payload, the rest persisted
     assert stats["created"] == 3
 

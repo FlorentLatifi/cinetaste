@@ -98,16 +98,17 @@ class TmdbClient:
         page: int = 1,
         sort_by: str = "popularity.desc",
         vote_count_gte: int = 100,
+        vote_count_lte: int | None = None,
     ) -> list[dict[str, Any]]:
-        data = await self._get(
-            f"/discover/{media_type}",
-            {
-                "page": page,
-                "sort_by": sort_by,
-                "vote_count.gte": vote_count_gte,
-                "include_adult": "false",
-            },
-        )
+        params: dict[str, Any] = {
+            "page": page,
+            "sort_by": sort_by,
+            "vote_count.gte": vote_count_gte,
+            "include_adult": "false",
+        }
+        if vote_count_lte is not None:
+            params["vote_count.lte"] = vote_count_lte
+        data = await self._get(f"/discover/{media_type}", params)
         return data.get("results", [])
 
     async def get_movie(self, tmdb_id: int) -> dict[str, Any]:
