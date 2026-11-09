@@ -184,6 +184,11 @@ async def test_onboarding_gates_and_full_recommendation_flow(
     assert again.status_code == 200
     assert len(again.json()["items"]) >= 1
 
+    # Server-Timing tells a computed slate from a cached one.
+    computed, cached = for_you.headers["server-timing"], again.headers["server-timing"]
+    assert "candidates;dur=" in computed and "rank;dur=" in computed
+    assert "hydrate;dur=" in cached and "rank;dur=" not in cached
+
 
 @pytest.mark.asyncio
 async def test_for_you_requires_auth(client: AsyncClient, api_prefix: str) -> None:

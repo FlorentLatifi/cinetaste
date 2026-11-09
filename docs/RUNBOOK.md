@@ -128,6 +128,27 @@ first (needs `TMDB_API_KEY`).
 
 ---
 
+## 4b. Slates are slow
+
+Every For You and guest slate reports where its time went, so start there
+rather than guessing:
+
+* **Browser:** dev tools → Network → the `for-you` or `guest/recommendations`
+  request → *Timing*, which shows the `Server-Timing` header:
+  `profile;dur=1.6, candidates;dur=37.3, rank;dur=16.6, db;dur=15.7;desc="9 queries", app;dur=58.9`
+* **Logs:** one line per slate —
+  `slate_timing who=guest items=20 total_ms=… db_ms=… queries=… candidates_ms=… rank_ms=…`
+  (For You adds `cache=hit|miss`; a hit shows `hydrate` instead of `rank`).
+
+Reading it (local reference, 1,200 titles: ~60 ms total, 9 round trips):
+
+| Symptom | Likely cause | Action |
+|---|---|---|
+| `db` is most of `app`, `queries` normal (~9) | Round-trip latency to the database (API and Neon in different regions) or a suspended Neon compute waking up | Put the API and database in the same region; on Neon, raise the auto-suspend delay or keep it warm |
+| `rank` or `candidates` minus `db` is large | CPU-starved instance (free tier is 0.1 CPU) | Paid instance; profile with the 1,200-title script in QUALITY_AUDIT §P2-9 |
+| `queries` much higher than ~9 | A query added per title (N+1) | Find it with `APP_DEBUG=true` locally |
+| `app` small but the browser waited long | Cold start, proxy or network — not the app | Check the platform's request timing |
+
 ## 5. Database backup and restore
 
 ### Take a backup

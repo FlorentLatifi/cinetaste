@@ -271,10 +271,16 @@ limits if `WEB_CONCURRENCY` is raised without Redis.
 2. **Re-ingest the catalog and benchmark on real metadata.** Run the Catalog
    workflow (now with the gem list), then enrich MovieLens via TMDb to measure
    the director, cast and keyword channels the production catalog relies on.
-3. **Make slates fast on the free tier.** Hydrate candidates as columns and
-   load full rows only for the 20 picks; binary pgvector codec; cache guest
-   slates by answer set; consider a paid instance (0.1 CPU is the bottleneck).
-   Target the documented p95s (< 800 ms cold).
+3. **Make slates fast on the free tier.** *Follow-up, measured:* loading
+   candidates as plain columns and full rows only for the picks was tried and
+   reverted — interleaved A/B end to end, 68 → 66 ms, within noise; the
+   saving is eaten by the extra hydration query. The binary pgvector codec
+   would save ~17 ms of vector parsing but needs a custom column type across
+   ingest, ANN and recompute. Local CPU (~60 ms) cannot explain production's
+   4–5 s, so slates now report `Server-Timing` and a `slate_timing` log line
+   splitting database time and round trips (9 per guest slate) from ranking
+   (RUNBOOK §4b). Next: read production numbers, then fix what they show —
+   most likely API↔database region and Neon cold starts.
 4. **A learned text embedding for the dense channel** (same 384 dimensions,
    batch re-embed), evaluated against the hashed vector before it ships. It is
    the weakest channel today and the only one that can link "heist" and

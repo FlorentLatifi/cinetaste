@@ -3,6 +3,7 @@ from collections.abc import AsyncGenerator
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.config import get_settings
+from app.core.timing import install_query_timing
 
 settings = get_settings()
 
@@ -18,6 +19,9 @@ engine = create_async_engine(
     pool_timeout=settings.db_pool_timeout_seconds,
     pool_recycle=settings.db_pool_recycle_seconds,
 )
+
+# Count and time round trips for requests that ask (app.core.timing).
+install_query_timing(engine.sync_engine)
 
 async_session_factory = async_sessionmaker(
     engine,

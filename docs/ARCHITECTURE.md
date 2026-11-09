@@ -131,7 +131,9 @@ once per computed slate, not per cache hit.
 - **Errors** — every failure is `{code, message, request_id}`; validation adds
   `errors[]`.
 - **Observability** — request-id middleware, structured access logs, optional
-  Sentry on both sides. httpx request logging is capped at WARNING because TMDb
+  Sentry on both sides. Slate endpoints add a `Server-Timing` header and a
+  `slate_timing` log line: per-stage time plus database round trips and time
+  (`core/timing.py`, RUNBOOK §4b). httpx request logging is capped at WARNING because TMDb
   v3 puts the API key in the query string.
 
 ## Performance notes

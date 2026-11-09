@@ -17,7 +17,7 @@ import logging
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
 
 from app.api.deps import DbSession, get_settings_dep
 from app.api.schemas.titles import (
@@ -34,6 +34,7 @@ from app.application.onboarding_service import (
 )
 from app.application.recommendation_service import RecommendationService
 from app.application.taste_service import TasteService
+from app.core import timing
 from app.core.config import Settings
 from app.domain.exceptions import AppError
 from app.infrastructure.cache import get_store
@@ -88,8 +89,10 @@ async def guest_recommendations(
     body: GuestRecommendationsRequest,
     session: DbSession,
     settings: Annotated[Settings, Depends(get_settings_dep)],
+    response: Response,
 ) -> RecommendationSlateOut:
     """Rank a slate from card answers without storing anything."""
+    clock = timing.start()
     service = RecommendationService(session, settings)
     normalized = normalize_reactions(
         [{"title_id": str(r.title_id), "action": r.action} for r in body.reactions]
@@ -114,6 +117,8 @@ async def guest_recommendations(
         )
 
     ranked = await service.guest_slate(normalized, limit=body.limit)
+    response.headers["Server-Timing"] = clock.server_timing()
+    logger.info("slate_timing who=guest items=%d %s", len(ranked), clock.log_fields())
     return RecommendationSlateOut(
         items=[RecommendationItemOut.from_ranked(title, item) for title, item in ranked]
     )

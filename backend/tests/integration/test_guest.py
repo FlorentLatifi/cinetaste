@@ -156,3 +156,30 @@ async def test_guest_request_is_bounded(client: AsyncClient, api_prefix: str) ->
         json={"reactions": too_many[:3], "limit": 31},
     )
     assert big_slate.status_code == 422
+
+
+async def test_slate_responses_say_where_the_time_went(
+    client: AsyncClient, db_session: AsyncSession, api_prefix: str, caplog
+) -> None:
+    """Production slates took seconds while local CPU time was ~65 ms; the
+    Server-Timing header and log line separate database time from ranking."""
+    import logging
+
+    titles = await seed_catalog(db_session)
+    reactions = [
+        {"title_id": str(titles[0].id), "action": "rate_4"},
+        {"title_id": str(titles[1].id), "action": "rate_3"},
+        {"title_id": str(titles[2].id), "action": "rate_1"},
+    ]
+    with caplog.at_level(logging.INFO, logger="app.api.routes.guest"):
+        res = await client.post(
+            f"{api_prefix}/guest/recommendations", json={"reactions": reactions, "limit": 8}
+        )
+    assert res.status_code == 200, res.text
+    header = res.headers["server-timing"]
+    for name in ("profile", "candidates", "rank", "db", "app"):
+        assert f"{name};dur=" in header, header
+    queries = int(header.split('desc="')[1].split(" ")[0])
+    assert queries >= 3  # profile titles, nearest neighbours, popular slice
+    line = next(r.getMessage() for r in caplog.records if "slate_timing" in r.getMessage())
+    assert "who=guest" in line and "db_ms=" in line and "candidates_ms=" in line

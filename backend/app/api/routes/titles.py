@@ -1,7 +1,8 @@
+import logging
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import DbSession, VerifiedUser, get_settings_dep
@@ -18,8 +19,11 @@ from app.application.recommendation_service import RecommendationService
 from app.application.taste_recompute import recompute_profile_after_response
 from app.application.taste_service import TasteService
 from app.application.watch_providers import WatchProvidersService
+from app.core import timing
 from app.core.config import Settings
 from app.domain.exceptions import NotFoundError
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -33,14 +37,24 @@ async def for_you(
     user: VerifiedUser,
     session: DbSession,
     settings: Annotated[Settings, Depends(get_settings_dep)],
+    response: Response,
     limit: int = Query(default=20, ge=1, le=50),
 ) -> RecommendationSlateOut:
+    clock = timing.start()
     service = _rec_service(session, settings)
     slate = await service.for_you(user.id, limit=limit)
     # Log what was shown once per computed slate, not on every cache hit.
     if slate.fresh:
-        await service.log_impressions(user.id, slate.items, slate_id=slate.slate_id)
+        with timing.stage("impressions"):
+            await service.log_impressions(user.id, slate.items, slate_id=slate.slate_id)
     items = [RecommendationItemOut.from_ranked(title, item) for title, item in slate.items]
+    response.headers["Server-Timing"] = clock.server_timing()
+    logger.info(
+        "slate_timing who=user cache=%s items=%d %s",
+        "miss" if slate.fresh else "hit",
+        len(items),
+        clock.log_fields(),
+    )
     return RecommendationSlateOut(items=items, slate_id=slate.slate_id)
 
 
