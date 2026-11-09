@@ -23,7 +23,8 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.taste_summary import IMPORT_OVERLAY_KEY, merge_import_overlay
@@ -66,6 +67,21 @@ __all__ = [
     "weight_for",
     "affects_taste",
 ]
+
+
+# Namespace for the per-user advisory lock that serialises profile rebuilds,
+# so it cannot collide with any other advisory lock the app may take later.
+_RECOMPUTE_LOCK_NAMESPACE = 0x7A57E
+
+
+def _recompute_lock_key(user_id: UUID) -> int:
+    """A signed 64-bit advisory-lock key for one user's profile rebuilds.
+
+    Two users sharing a key (a 2^-64 event) would only make their rebuilds
+    wait for each other — never change a result.
+    """
+    raw = int.from_bytes(user_id.bytes[:8], "big", signed=True)
+    return raw ^ _RECOMPUTE_LOCK_NAMESPACE
 
 
 def _read_import_overlay(profile: TasteProfile | None) -> dict[str, float]:
@@ -179,19 +195,48 @@ class TasteService:
         the profile itself is the expensive half and can follow behind; see
         ``application.taste_recompute``.
 
-        Creates the row when it does not exist yet, so a user's very first
-        rating has something to version.
+        One atomic upsert (``version = version + 1`` in SQL): it creates the row
+        on a user's first rating, and two ratings landing at once both count. A
+        read-modify-write in Python let two requests read the same version and
+        write the same next one, so the second rating's slate could be served
+        from the first one's cache entry.
         """
-        profile = await self._session.get(TasteProfile, user_id)
-        if profile is None:
-            profile = TasteProfile(user_id=user_id, version=1, features={}, vector=None)
-            self._session.add(profile)
-        else:
-            profile.version = int(profile.version or 1) + 1
-        await self._session.flush()
-        return int(profile.version)
+        stmt = pg_insert(TasteProfile).values(
+            user_id=user_id, version=1, features={}, vector=None
+        )
+        stmt = stmt.on_conflict_do_update(
+            index_elements=[TasteProfile.user_id],
+            set_={"version": TasteProfile.version + 1, "updated_at": func.now()},
+        ).returning(TasteProfile.version)
+        version = int((await self._session.execute(stmt)).scalar_one())
+        self._forget_loaded_profile(user_id)
+        return version
+
+    async def _lock_profile_rebuilds(self, user_id: UUID) -> None:
+        """Serialise every profile rebuild for this user until the transaction ends.
+
+        Ratings are rebuilt after the response, so two quick ratings start two
+        rebuilds. Without this, the one that read the event log first could
+        commit last and overwrite the newer profile — the latest rating then
+        silently missing from recommendations until the next one. With it, the
+        second rebuild waits, then reads a log that includes both ratings.
+
+        A transaction-scoped advisory lock rather than ``SELECT … FOR UPDATE``
+        on the profile row: the row may not exist yet, and the request path's
+        version bump must never wait for a rebuild to finish.
+        """
+        await self._session.execute(
+            select(func.pg_advisory_xact_lock(_recompute_lock_key(user_id)))
+        )
+
+    def _forget_loaded_profile(self, user_id: UUID) -> None:
+        """Drop a stale in-session copy after the row changed in SQL."""
+        for obj in list(self._session.identity_map.values()):
+            if isinstance(obj, TasteProfile) and obj.user_id == user_id:
+                self._session.expire(obj)
 
     async def recompute_profile(self, user_id: UUID) -> TasteProfile:
+        await self._lock_profile_rebuilds(user_id)
         events = (
             await self._session.execute(
                 select(
@@ -211,7 +256,10 @@ class TasteService:
         titles = await load_profile_titles(self._session, list(signals))
 
         # The import overlay is durable: it survives recomputes until cleared.
-        profile = await self._session.get(TasteProfile, user_id)
+        # Read after taking the lock, and past any copy this session already
+        # holds, so an overlay written by a concurrent import is not lost.
+        await self._session.flush()
+        profile = await self._session.get(TasteProfile, user_id, populate_existing=True)
         import_overlay = _read_import_overlay(profile)
         built = build_profile(signals.values(), titles, import_overlay=import_overlay)
 
@@ -219,16 +267,24 @@ class TasteService:
         if import_overlay:
             features[IMPORT_OVERLAY_KEY] = {k: round(v, 4) for k, v in import_overlay.items()}
 
-        if profile is None:
-            profile = TasteProfile(user_id=user_id, version=1, features=features, vector=built.vector)
-            self._session.add(profile)
-        else:
-            profile.features = features
-            profile.vector = built.vector
-            profile.version = int(profile.version or 1) + 1
-
-        await self._session.flush()
-        return profile
+        # Upsert with the version incremented in SQL, so a bump that landed
+        # while this rebuild was running is kept rather than overwritten.
+        stmt = pg_insert(TasteProfile).values(
+            user_id=user_id, version=1, features=features, vector=built.vector
+        )
+        stmt = stmt.on_conflict_do_update(
+            index_elements=[TasteProfile.user_id],
+            set_={
+                "features": stmt.excluded.features,
+                "vector": stmt.excluded.vector,
+                "version": TasteProfile.version + 1,
+                "updated_at": func.now(),
+            },
+        ).returning(TasteProfile)
+        result = await self._session.execute(
+            stmt, execution_options={"populate_existing": True}
+        )
+        return result.scalar_one()
 
     async def merge_taste_snapshot(
         self,
@@ -238,7 +294,12 @@ class TasteService:
         dislikes: list[dict[str, Any]],
     ) -> TasteProfile:
         """Merge an exported snapshot into a durable import overlay, then recompute."""
-        profile = await self._session.get(TasteProfile, user_id)
+        # Taken before this transaction touches the profile row; recompute
+        # takes it again (advisory locks nest). The other order — row first,
+        # lock second — deadlocks against a background rebuild that holds the
+        # lock and is waiting for the row.
+        await self._lock_profile_rebuilds(user_id)
+        profile = await self._session.get(TasteProfile, user_id, populate_existing=True)
         existing_features: dict[str, Any] = {}
         if profile is not None and isinstance(profile.features, dict):
             existing_features = dict(profile.features)
@@ -275,7 +336,8 @@ class TasteService:
 
     async def clear_import_overlay(self, user_id: UUID) -> TasteProfile:
         """Remove durable snapshot overlay and recompute from live events only."""
-        profile = await self._session.get(TasteProfile, user_id)
+        await self._lock_profile_rebuilds(user_id)  # before the row; see merge_taste_snapshot
+        profile = await self._session.get(TasteProfile, user_id, populate_existing=True)
         if profile is None:
             profile = TasteProfile(user_id=user_id, version=1, features={}, vector=None)
             self._session.add(profile)

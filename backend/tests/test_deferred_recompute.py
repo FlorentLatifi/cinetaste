@@ -9,7 +9,7 @@ change. These tests pin the split: bump now, rebuild behind.
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 import pytest
@@ -30,51 +30,11 @@ def _settings(**overrides) -> Settings:
 
 
 # ------------------------------------------------------------- version bump
-
-
-@pytest.mark.asyncio
-async def test_first_rating_creates_a_profile_to_version() -> None:
-    """A user rating for the first time has no profile row yet."""
-    session = AsyncMock()
-    session.get = AsyncMock(return_value=None)
-    session.add = MagicMock()
-    session.flush = AsyncMock()
-
-    version = await TasteService(session).bump_profile_version(uuid4())
-
-    assert version == 1
-    created = session.add.call_args[0][0]
-    assert isinstance(created, TasteProfile)
-    assert created.features == {} and created.vector is None
-
-
-@pytest.mark.asyncio
-async def test_bump_increments_without_touching_the_model() -> None:
-    """The expensive part — features and vector — is left alone on purpose."""
-    profile = TasteProfile(
-        user_id=uuid4(), version=7, features={"genre:drama": 1.2}, vector=[0.1] * 384
-    )
-    session = AsyncMock()
-    session.get = AsyncMock(return_value=profile)
-    session.add = MagicMock()
-    session.flush = AsyncMock()
-
-    version = await TasteService(session).bump_profile_version(profile.user_id)
-
-    assert version == 8
-    assert profile.features == {"genre:drama": 1.2}
-    assert profile.vector is not None
-    session.add.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_a_null_version_is_treated_as_one() -> None:
-    profile = TasteProfile(user_id=uuid4(), version=None, features={}, vector=None)
-    session = AsyncMock()
-    session.get = AsyncMock(return_value=profile)
-    session.flush = AsyncMock()
-
-    assert await TasteService(session).bump_profile_version(profile.user_id) == 2
+#
+# The bump is a single SQL upsert now (version = version + 1), so what it does
+# is pinned against real Postgres in
+# tests/integration/test_profile_concurrency.py: first rating creates version 1,
+# features and vector are left alone, and two concurrent bumps both count.
 
 
 # ------------------------------------------------------- the background task
