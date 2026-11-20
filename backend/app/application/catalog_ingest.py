@@ -10,7 +10,13 @@ Design:
 * A dropped connection is *not* a bad payload and must not be treated as one.
   It is retried once on a fresh connection, and if that fails too the run stops
   with a single clear error. See ``_connection_is_lost``.
-* Re-running is safe: titles are upserted by TMDb id.
+* Re-running is safe: titles are upserted by TMDb id. Titles that only a
+  discovery pass (see ``catalog_discovery``) found are not fetched again once
+  they are in the catalog, so an interrupted run resumes cheaply; pass
+  ``refresh_existing=True`` to re-fetch everything.
+* ``titles.external_tmdb_id`` is unique across movies *and* TV, but TMDb numbers
+  the two separately. A TV id that equals a stored movie id is skipped, never
+  allowed to overwrite the movie.
 """
 
 from __future__ import annotations
@@ -30,6 +36,13 @@ from sqlalchemy.exc import (
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.application.catalog_discovery import (
+    DISCOVER_SORTS,  # noqa: F401 - re-exported for existing importers
+    DiscoveryPlan,
+    Throttle,
+    build_passes,
+    collect_targets,
+)
 from app.data.onboarding_seed import all_seed_tmdb_ids
 from app.infrastructure.db.models.catalog import (
     Credit,
@@ -47,7 +60,7 @@ logger = logging.getLogger(__name__)
 
 DETAIL_CONCURRENCY = 8
 BATCH_SIZE = 25
-DISCOVER_SORTS = ("popularity.desc", "vote_count.desc")
+EXISTING_LOOKUP_CHUNK = 1000
 MAX_KEYWORDS = 25
 MAX_CAST = 8
 CREW_JOBS = {"Director", "Writer", "Screenplay"}
@@ -61,6 +74,10 @@ class IngestConnectionLost(RuntimeError):
     the ingest is idempotent, so re-running continues from the catalog as it
     stands.
     """
+
+
+class IdCollision(RuntimeError):
+    """A TMDb id already stored under the other media type."""
 
 
 def _connection_is_lost(exc: BaseException) -> bool:
@@ -126,9 +143,11 @@ class CatalogIngestService:
         *,
         concurrency: int = DETAIL_CONCURRENCY,
         batch_size: int = BATCH_SIZE,
+        max_rps: float = 0.0,
     ) -> None:
         self._session = session
         self._tmdb = tmdb
+        self._throttle = Throttle(max_rps)
         self._concurrency = max(1, concurrency)
         self._batch_size = max(1, batch_size)
         self._genre_cache: dict[int, Genre] = {}
@@ -145,33 +164,77 @@ class CatalogIngestService:
         stats = await self._ingest_ids([("movie", tmdb_id) for tmdb_id in seed_ids])
         return {"seed_requested": len(seed_ids), **stats}
 
-    async def ingest_popular(self, *, pages: int = 10, include_tv: bool = True) -> dict[str, Any]:
-        """Seed deck + ``pages`` discover pages per sort order and media type."""
+    async def ingest_popular(
+        self,
+        *,
+        pages: int = 10,
+        include_tv: bool = True,
+        discovery: DiscoveryPlan | None = None,
+        refresh_existing: bool = False,
+    ) -> dict[str, Any]:
+        """Seed deck + mainstream discover pages + (optionally) discovery passes.
+
+        ``discovery=None`` keeps the original behaviour: ``pages`` pages of
+        popularity and vote-count discover per media type.
+        """
         await self._ensure_genres()
         seed_stats = await self.ingest_onboarding_seed()
 
-        targets: dict[tuple[str, int], None] = {}
-        for media_type in ("movie", "tv") if include_tv else ("movie",):
-            for sort_by in DISCOVER_SORTS:
-                for page in range(1, pages + 1):
-                    try:
-                        results = await self._tmdb.discover(media_type, page=page, sort_by=sort_by)
-                    except Exception:
-                        logger.exception(
-                            "tmdb_discover_failed media_type=%s sort=%s page=%s",
-                            media_type,
-                            sort_by,
-                            page,
-                        )
-                        break
-                    if not results:
-                        break
-                    for item in results:
-                        if item.get("id"):
-                            targets[(media_type, int(item["id"]))] = None
+        passes = build_passes(pages=pages, include_tv=include_tv, plan=discovery)
+        collected = await collect_targets(self._tmdb, passes, throttle=self._throttle)
 
-        stats = await self._ingest_ids(list(targets))
-        return {"onboarding_seed": seed_stats, "discovered": len(targets), **stats}
+        to_fetch, skipped, collisions = await self._plan_fetch(collected.items, refresh_existing)
+        stats = await self._ingest_ids(to_fetch)
+        return {
+            "onboarding_seed": seed_stats,
+            "discovered": len(collected.items),
+            "skipped_existing": skipped,
+            "id_collisions": collisions,
+            "discover_requests": collected.discover_requests,
+            "failed_passes": collected.failed_passes,
+            **stats,
+        }
+
+    async def _plan_fetch(
+        self, items: dict[tuple[str, int], bool], refresh_existing: bool
+    ) -> tuple[list[tuple[str, int]], int, int]:
+        """Drop discovery-only titles that are already stored.
+
+        Returns (targets to fetch, skipped as already present, skipped as id
+        collisions with the other media type).
+        """
+        candidates = [
+            ident for ident, refresh in items.items() if not refresh_existing and not refresh
+        ]
+        stored: dict[int, str] = {}
+        ids = [tmdb_id for _, tmdb_id in candidates]
+        for i in range(0, len(ids), EXISTING_LOOKUP_CHUNK):
+            rows = await self._session.execute(
+                select(Title.external_tmdb_id, Title.media_type).where(
+                    Title.external_tmdb_id.in_(ids[i : i + EXISTING_LOOKUP_CHUNK])
+                )
+            )
+            stored.update({tmdb_id: media for tmdb_id, media in rows.all()})
+
+        to_fetch: list[tuple[str, int]] = []
+        skipped = collisions = 0
+        candidate_set = set(candidates)
+        for ident in items:
+            media_type, tmdb_id = ident
+            if ident in candidate_set and tmdb_id in stored:
+                if stored[tmdb_id] == media_type:
+                    skipped += 1
+                else:
+                    collisions += 1
+                    logger.warning(
+                        "tmdb_id_collision tmdb_id=%s wanted=%s stored=%s",
+                        tmdb_id,
+                        media_type,
+                        stored[tmdb_id],
+                    )
+                continue
+            to_fetch.append(ident)
+        return to_fetch, skipped, collisions
 
     async def upsert_movie(self, tmdb_id: int) -> str:
         await self._ensure_genres()
@@ -189,6 +252,7 @@ class CatalogIngestService:
 
         async def fetch(media_type: str, tmdb_id: int) -> tuple[str, int, dict[str, Any] | None]:
             async with semaphore:
+                await self._throttle.wait()
                 try:
                     if media_type == "movie":
                         return media_type, tmdb_id, await self._tmdb.get_movie(tmdb_id)
@@ -260,6 +324,10 @@ class CatalogIngestService:
             try:
                 async with self._session.begin_nested():
                     status = await self._upsert_from_detail(media_type, payload)
+            except IdCollision as exc:
+                failed += 1
+                logger.warning("title_id_collision %s", exc)
+                continue
             except Exception as exc:
                 if _connection_is_lost(exc):
                     raise IngestConnectionLost(str(exc)) from exc
@@ -376,6 +444,10 @@ class CatalogIngestService:
             runtime = int(episode_run_times[0]) if episode_run_times else None
             keyword_items = (payload.get("keywords") or {}).get("results") or []
 
+        if existing is not None and existing.media_type != media_type:
+            raise IdCollision(
+                f"tmdb id {tmdb_id} is stored as {existing.media_type}, not {media_type}"
+            )
         status = "updated" if existing else "created"
         title = existing or Title(id=uuid4(), external_tmdb_id=tmdb_id, media_type=media_type)
         title.media_type = media_type

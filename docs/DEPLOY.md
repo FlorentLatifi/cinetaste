@@ -290,8 +290,66 @@ the external database URL is slow and dies when the machine sleeps.
    - `DATABASE_URL` = the same connection string the API uses (Neon → Connect)
    - `TMDB_API_KEY`
 2. Actions → **Catalog** → Run workflow. `seed-only` fills the onboarding deck in
-   a few minutes; `popular` with 10 pages adds about 800 titles.
+   a few minutes; `plan` counts what `popular` would fetch (TMDb discover only,
+   writes nothing); `popular` fills the catalog (see below).
 3. It then refreshes monthly on its own. Re-running is always safe (upserts).
+
+### Catalog size and discovery passes
+
+`popular` runs these discover passes in priority order, so a run cut short keeps
+the most valuable titles:
+
+| Pass | Default | Query |
+|------|---------|-------|
+| Mainstream (`pages`) | 10 pages × popularity, vote count × movie, TV | 100+ votes |
+| Top-rated movies (`rated_pages`) | 30 pages = 600 | `vote_average.desc`, 250+ votes |
+| Top-rated per language (`languages`, `language_pages`) | 12 languages × 6 pages | original language `ko ja fr es it de hi pt zh da sv fa`, 150+ votes |
+| Top-rated per decade (`decades`, `decade_pages`) | 1940s–2020s × 10 pages | release date within the decade, 200+ votes |
+| Top-rated TV (`tv_pages`) | 8 pages overall + 2 pages per language | 200+ / 100+ votes |
+
+Pages hold 20 titles. Every depth input takes `0` to switch that pass off;
+`languages` and `decades` take `none`. Leave an input empty to use the default.
+
+**Default run size (estimate, not measured against live TMDb: re-check with `plan`):**
+the ceiling is 4,240 movie and 1,040 TV slots; overlap between passes should leave
+roughly 3,000–3,800 movies and 700–900 TV shows, about 4,000–4,700 titles in all.
+TV stays under a quarter of the catalog.
+
+**TMDb requests, first run:** 264 discover pages + 2 genre lists + about one detail
+request per unique title (plus the 62-title onboarding deck fetched first), so
+roughly 4,600–5,300. A re-run costs roughly 950: the same 264 discover pages, the
+deck, and the mainstream titles, which are refreshed. Titles found only by a
+discovery pass are **not** fetched again once stored, so an interrupted run resumes
+where it stopped. Set `refresh_existing` to re-fetch everything. Requests are capped
+at 25 per second (TMDb allows about 50) and retried with backoff on 429/5xx.
+
+**Storage:** measured at about 15 KB per title in Postgres once its credits,
+keywords, join rows and indexes are counted: the embedding alone is about 1.5 KB,
+the JSONB `extra` about 0.6 KB, the HNSW index another 2 KB, and credits plus
+keyword rows the rest. At ~4,700 titles that is roughly 55–75 MB, plus a few MB for
+the schema. Neon's free plan (0.5 GB per project at the time of writing; check the
+Neon console) leaves room for about 30,000 titles at this density.
+
+**Recommended first run:** `mode = plan` (about 270 requests, no writes) to see the
+real counts, then `mode = popular` with all other inputs empty. It takes tens of
+minutes from a runner; the job times out at 150 minutes, and re-running continues
+from what was committed.
+
+| Want | Inputs |
+|------|--------|
+| Default fill (≈3.5–4.5k titles) | `mode: popular`, rest empty |
+| Smaller catalog | `rated_pages: 10`, `language_pages: 2`, `decade_pages: 3`, `tv_pages: 2` |
+| Only Korean and Japanese depth | `languages: ko,ja`, `language_pages: 15`, `decades: none`, `rated_pages: 0` |
+| Original ~800-title catalog | `rated_pages: 0`, `language_pages: 0`, `decade_pages: 0`, `tv_pages: 0` |
+
+The same options exist on the CLI (`python -m app.scripts.ingest_catalog --help`):
+`--rated-pages`, `--rated-min-votes`, `--languages`, `--language-pages`,
+`--language-min-votes`, `--decades`, `--decade-pages`, `--decade-min-votes`,
+`--tv-rated-pages`, `--tv-language-pages`, `--no-discovery`, `--refresh-existing`,
+`--max-rps`, `--dry-run`.
+
+A TMDb TV id that equals a stored movie id is skipped and logged
+(`tmdb_id_collision`), because titles are keyed by TMDb id alone.
 
 `/api/v1/ready` reports `"catalog":"empty"` or `"unembedded"` when this is missing.
 

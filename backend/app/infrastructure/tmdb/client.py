@@ -15,6 +15,9 @@ logger = logging.getLogger(__name__)
 # Transient statuses worth retrying (rate limit + upstream hiccups).
 _RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
 
+# TMDb rejects discover pages past 500 (HTTP 422).
+MAX_DISCOVER_PAGE = 500
+
 
 class TmdbClient:
     """Thin async TMDb v3 client with retries.
@@ -98,16 +101,35 @@ class TmdbClient:
         page: int = 1,
         sort_by: str = "popularity.desc",
         vote_count_gte: int = 100,
+        original_language: str | None = None,
+        released_from: str | None = None,
+        released_to: str | None = None,
     ) -> list[dict[str, Any]]:
-        data = await self._get(
-            f"/discover/{media_type}",
-            {
-                "page": page,
-                "sort_by": sort_by,
-                "vote_count.gte": vote_count_gte,
-                "include_adult": "false",
-            },
-        )
+        """One discover page.
+
+        ``original_language`` is an ISO 639-1 code; ``released_from`` /
+        ``released_to`` are inclusive ISO dates, applied to the release date for
+        movies and the first air date for TV. TMDb serves at most 500 pages per
+        query.
+        """
+        if media_type not in {"movie", "tv"}:
+            raise ValueError(f"Unsupported media_type for discover: {media_type}")
+        if not 1 <= page <= MAX_DISCOVER_PAGE:
+            raise ValueError(f"TMDb discover page must be 1..{MAX_DISCOVER_PAGE}, got {page}")
+        params: dict[str, Any] = {
+            "page": page,
+            "sort_by": sort_by,
+            "vote_count.gte": vote_count_gte,
+            "include_adult": "false",
+        }
+        if original_language:
+            params["with_original_language"] = original_language
+        date_field = "primary_release_date" if media_type == "movie" else "first_air_date"
+        if released_from:
+            params[f"{date_field}.gte"] = released_from
+        if released_to:
+            params[f"{date_field}.lte"] = released_to
+        data = await self._get(f"/discover/{media_type}", params)
         return data.get("results", [])
 
     async def get_movie(self, tmdb_id: int) -> dict[str, Any]:
