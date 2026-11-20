@@ -134,11 +134,18 @@ Cost of the instrumentation: one `ContextVar` read per SQL statement and a few
 - **The cap bounds cost, not request count.** A forged-`X-Forwarded-For` flood still gets
   through the per-IP limiter; it now meets the cap instead of the database. Cards are not
   capped.
-- **`GET /guest/cards` cold misses are slow under bursts** (2.3 s p50 for 40 simultaneous
-  uncached requests locally). Cached after the first; not addressed here. A single-flight
-  on the cache miss is the obvious follow-up.
+- **`GET /guest/cards` cold misses** were a stampede: 40 simultaneous requests for an
+  uncached deck ran the deck query 40 times (120 SQL statements, ~1.25 s median, locally).
+  Now single-flight (`app/core/singleflight.py`): one request builds it, the rest wait for
+  that result: 3 statements, ~70 ms median, identical bodies; over Locust's 40-user start-up
+  burst the cards p50 went 2.4 s -> 0.21 s (one `miss`, 39 `shared` in the timing log). Only
+  the unfiltered deck is coalesced; `exclude=` paging requests differ per caller and are not.
+  Failure is never shared: if the leader errors, is cancelled, or is still running after
+  10 s, each follower builds the deck itself, i.e. exactly the old behaviour. Per process,
+  not across workers. A cold-cache arrival in the instant the leader finishes can cause one
+  extra build (benign).
 - **No single-flight for slates.** Two identical requests arriving together both rank
-  (once, then it is cached). Rare in practice, cheap to add if it is not.
+  (once, then it is cached). Rare in practice; `SingleFlight` can be reused if it is not.
 - **Slate cache keys keep answer order.** Order is the event order the profile builder
   sees and was not proven irrelevant, so reordered answers are a different entry. Lower hit
   rate, never a wrong answer.
