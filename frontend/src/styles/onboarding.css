@@ -44,6 +44,11 @@
 .ob-grid-header { margin-bottom: 1.25rem; max-width: 40rem; }
 .ob-grid-header h1 { margin: 0 0 0.4rem; }
 
+/* The four answers spelled out once; emoji alone are ambiguous without hover. */
+.ob-legend { list-style: none; margin: 0 0 1rem; padding: 0; display: flex; flex-wrap: wrap; gap: 0.3rem 1.1rem; font-size: 0.82rem; color: var(--muted); }
+.ob-legend li { white-space: nowrap; }
+.ob-legend-emoji { display: inline-block; min-width: 1.3em; text-align: center; font-size: 1rem; }
+
 .ob-grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 1.15rem 0.9rem; }
 .ob-tile { min-width: 0; }
 .ob-tile-poster { position: relative; aspect-ratio: 2 / 3; border-radius: 14px; overflow: hidden; background: var(--bg-soft); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.22); transition: box-shadow 0.18s ease, transform 0.18s ease; }
@@ -80,8 +85,15 @@
   .ob-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem 0.75rem; }
   /* Above the app's bottom nav where there is one. */
   .main .ob-dock { bottom: calc(4.6rem + env(safe-area-inset-bottom, 0px)); }
-  .ob-dock-inner { flex-direction: column; align-items: stretch; gap: 0.6rem; }
-  .ob-dock-cta { width: 100%; }
+  /* One slim row, so the first poster row's buttons stay clear of it. The
+     "rate N more" hint repeats the count, so it stays for screen readers
+     only; warnings (errors, "add one you liked") remain visible. */
+  .ob-legend { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.25rem 0.75rem; }
+  .ob-dock { padding-top: 0.5rem; }
+  .ob-dock-inner { gap: 0.75rem; padding: 0.55rem 0.6rem 0.55rem 0.9rem; border-radius: 16px; }
+  .ob-dock-progress .ob-progress-count { margin-bottom: 0.3rem; }
+  .ob-dock-progress .ob-progress-hint:not(.ob-progress-hint-alert) { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .ob-dock-cta { padding-left: 1rem; padding-right: 1rem; white-space: nowrap; }
 }
 
 @media (min-width: 721px) and (max-width: 960px) {

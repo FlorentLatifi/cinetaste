@@ -118,6 +118,17 @@ export function OnboardingDeckView({ options }: { options: DeckOptions }) {
         )}
       </header>
 
+      {/* Emoji alone do not say what each button means on a phone (no hover),
+          so spell the four answers out once, above the grid. The buttons
+          carry full accessible names already, hence aria-hidden. */}
+      <ul className="ob-legend" aria-hidden="true">
+        {RATE_OPTIONS.map((opt) => (
+          <li key={opt.action}>
+            <span className="ob-legend-emoji">{opt.emoji}</span> {opt.label}
+          </li>
+        ))}
+      </ul>
+
       <ul className="ob-grid" aria-label="Films to rate">
         {cards.map((title) => (
           <RateTile
@@ -161,7 +172,11 @@ export function OnboardingDeckView({ options }: { options: DeckOptions }) {
             >
               <div className="ob-progress-fill" style={{ width: `${progressPct}%` }} />
             </div>
-            <p className="ob-progress-hint">{error ?? hint}</p>
+            <p
+              className={`ob-progress-hint${error || needsPositive ? " ob-progress-hint-alert" : ""}`}
+            >
+              {error ?? hint}
+            </p>
           </div>
           <button
             type="button"

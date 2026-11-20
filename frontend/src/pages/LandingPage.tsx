@@ -116,18 +116,9 @@ export function LandingPage() {
           <div className="landing-why landing-why-example">
             <p className="why-label">Every pick says why — for example</p>
             <ul className="reasons">
-              <li className="reason-primary">Because you loved Arrival: same director</li>
-              <li>Highly rated but not a chart-topper — a hidden gem</li>
+              <li className="reason-primary">Because you rated Arrival highly (same director — Denis Villeneuve)</li>
+              <li>A discovery pick to stretch your taste a little</li>
             </ul>
-          </div>
-
-          <div className="landing-cta">
-            <Link className="btn primary landing-cta-primary" to="/try">
-              Start free
-            </Link>
-            <Link className="btn ghost" to="/register">
-              Create an account
-            </Link>
           </div>
         </section>
 

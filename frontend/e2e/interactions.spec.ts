@@ -804,3 +804,34 @@ test("Deleting the account ends on a page that says it worked", async ({ page })
     "Your account and everything in it have been deleted.",
   );
 });
+
+test("Guest deck on a 390px phone: the progress bar never covers the first row's rating buttons", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 664 });
+  await installApiMock(page, { signedOut: true });
+  await page.goto("/try");
+  await page.getByRole("heading", { name: "Rate what you know" }).waitFor();
+
+  // The four answers are spelled out, not emoji-only.
+  const legend = page.locator(".ob-legend");
+  for (const label of ["Didn't like it", "It was ok", "Really liked it", "Loved it"]) {
+    await expect(legend).toContainText(label);
+  }
+
+  // The two posters in the first row: every rating button must be the topmost
+  // element at its centre, i.e. not under the docked progress panel.
+  for (const name of [mockTitle.name, "Mock Sequel"]) {
+    const buttons = page.getByRole("group", { name: `Rate ${name}` }).getByRole("button");
+    await expect(buttons).toHaveCount(4);
+    for (let i = 0; i < 4; i++) {
+      const handle = await buttons.nth(i).elementHandle();
+      const reachable = await handle!.evaluate((el) => {
+        const r = el.getBoundingClientRect();
+        const top = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+        return r.bottom <= window.innerHeight && !!top && el.contains(top);
+      });
+      expect(reachable, `${name} button ${i} is covered or off-screen`).toBe(true);
+    }
+  }
+});
