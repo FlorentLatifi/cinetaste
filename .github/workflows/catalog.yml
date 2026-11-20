@@ -20,14 +20,42 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "popular = onboarding deck + discover pages; seed-only = onboarding deck only (fast)"
+        description: "popular = deck + mainstream + discovery passes; plan = count what popular would fetch (TMDb only, writes nothing); seed-only = onboarding deck only"
         type: choice
-        options: [popular, seed-only]
+        options: [popular, plan, seed-only]
         default: popular
       pages:
-        description: "Discover pages per sort and media type (20 titles each)"
+        description: "Mainstream discover pages per sort and media type (20 titles each)"
         type: number
         default: 10
+      rated_pages:
+        description: "Top-rated movie pages (vote_average.desc, 250+ votes). Empty = 30, 0 = off"
+        type: string
+        default: ""
+      language_pages:
+        description: "Top-rated pages per language in `languages`. Empty = 6, 0 = off"
+        type: string
+        default: ""
+      languages:
+        description: "Comma-separated ISO 639-1 codes, or none. Empty = ko,ja,fr,es,it,de,hi,pt,zh,da,sv,fa"
+        type: string
+        default: ""
+      decade_pages:
+        description: "Top-rated pages per decade in `decades`. Empty = 10, 0 = off"
+        type: string
+        default: ""
+      decades:
+        description: "Comma-separated decade starts (1970,1980), or none. Empty = 1940..2020"
+        type: string
+        default: ""
+      tv_pages:
+        description: "Top-rated TV pages, overall and per language. Empty = 8 and 2, 0 = no extra TV"
+        type: string
+        default: ""
+      refresh_existing:
+        description: "Re-fetch titles already stored, even ones only discovery passes found"
+        type: boolean
+        default: false
   # Monthly, so new releases and shifting popularity reach recommendations.
   schedule:
     - cron: "17 3 1 * *"
@@ -45,7 +73,7 @@ jobs:
   ingest:
     name: Ingest TMDb catalog
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 150
     defaults:
       run:
         working-directory: backend
@@ -97,9 +125,30 @@ jobs:
         env:
           MODE: ${{ inputs.mode || 'popular' }}
           PAGES: ${{ inputs.pages || 10 }}
+          RATED_PAGES: ${{ inputs.rated_pages }}
+          LANGUAGE_PAGES: ${{ inputs.language_pages }}
+          LANGUAGES: ${{ inputs.languages }}
+          DECADE_PAGES: ${{ inputs.decade_pages }}
+          DECADES: ${{ inputs.decades }}
+          TV_PAGES: ${{ inputs.tv_pages }}
+          REFRESH: ${{ inputs.refresh_existing }}
         run: |
+          # Inputs reach the script only through env vars and quoted args, never
+          # interpolated into the shell. Empty means "use the script's default"
+          # (which is why these are strings: a number input can't say "unset").
           if [ "$MODE" = "seed-only" ]; then
             python -m app.scripts.ingest_catalog --seed-only
-          else
-            python -m app.scripts.ingest_catalog --pages "$PAGES"
+            exit 0
           fi
+          args=(--pages "$PAGES")
+          [ "$MODE" = "plan" ] && args+=(--dry-run)
+          [ -n "$RATED_PAGES" ] && args+=(--rated-pages "$RATED_PAGES")
+          [ -n "$LANGUAGE_PAGES" ] && args+=(--language-pages "$LANGUAGE_PAGES")
+          [ -n "$LANGUAGES" ] && args+=(--languages "$LANGUAGES")
+          [ -n "$DECADE_PAGES" ] && args+=(--decade-pages "$DECADE_PAGES")
+          [ -n "$DECADES" ] && args+=(--decades "$DECADES")
+          if [ -n "$TV_PAGES" ]; then
+            args+=(--tv-rated-pages "$TV_PAGES" --tv-language-pages "$TV_PAGES")
+          fi
+          [ "$REFRESH" = "true" ] && args+=(--refresh-existing)
+          python -m app.scripts.ingest_catalog "${args[@]}"
