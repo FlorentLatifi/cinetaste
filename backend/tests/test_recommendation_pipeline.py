@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from uuid import uuid4
 
+import pytest
+
 from app.domain.taste_signals import affects_taste, weight_for
 from app.recommendation.embeddings import (
     PersonSignal,
@@ -13,9 +15,19 @@ from app.recommendation.embeddings import (
 )
 from app.recommendation.explanations import Reason
 from app.recommendation.pipeline import (
+    CATALOG_PERCENTILES_KEY,
+    DEFAULT_WEIGHTS,
+    GEM_SOFT_BONUS,
+    GEM_STRONG_BONUS,
+    RankingWeights,
     annotate_discovery_reasons,
+    catalog_percentiles,
+    director_cap_for,
+    fame,
     gem_boost,
+    low_rating_penalty,
     mmr_select,
+    percent_rank,
     rank_titles,
 )
 from tests.conftest import FakeTitle, accumulate_features
@@ -305,11 +317,122 @@ def test_rank_mmr_reduces_same_director_cluster(thriller_catalog: list[FakeTitle
 # ---------------------------------------------------------------------------
 
 
-def test_gem_boost_thresholds() -> None:
-    assert gem_boost(7.5, 20) == 0.08
-    assert gem_boost(7.6, 50) == 0.04
-    assert gem_boost(6.5, 10) == 0.0
-    assert gem_boost(8.0, 200) == 0.0
+def test_gem_boost_uses_catalog_percentiles() -> None:
+    # Strong tier: well rated and less known than 40% of the catalog.
+    assert gem_boost(7.5, popularity_pct=0.20, vote_count_pct=0.30) == GEM_STRONG_BONUS
+    # Soft tier: very well rated, moderately known.
+    assert gem_boost(7.6, popularity_pct=0.50, vote_count_pct=0.30) == GEM_SOFT_BONUS
+    assert gem_boost(6.5, popularity_pct=0.05, vote_count_pct=0.30) == 0.0
+    # Famous: top of the catalog by popularity.
+    assert gem_boost(8.7, popularity_pct=0.95, vote_count_pct=0.30) == 0.0
+
+
+def test_gem_boost_scale_free_in_raw_popularity() -> None:
+    """The Godfather Part II at TMDb popularity ~40 is not hidden in our catalog."""
+    assert gem_boost(8.6, popularity_pct=0.97, vote_count_pct=0.99, vote_count=13_000) == 0.0
+
+
+def test_gem_needs_low_vote_count_too() -> None:
+    """A classic with a low trending score but a huge audience is not a hidden gem."""
+    # The Silence of the Lambs: TMDb popularity ~7.5 (low percentile), vote count top 1%.
+    assert gem_boost(8.3, popularity_pct=0.15, vote_count_pct=0.99, vote_count=16_000) == 0.0
+    assert fame(0.15, 0.99) == 0.99
+    assert fame(0.15, None) == 0.15
+
+
+def test_gem_needs_enough_votes_absolute_and_relative() -> None:
+    assert gem_boost(8.0, popularity_pct=0.1, vote_count_pct=0.3, vote_count=12) == 0.0
+    assert gem_boost(8.0, popularity_pct=0.1, vote_count_pct=0.05, vote_count=400) == 0.0
+    assert gem_boost(8.0, popularity_pct=0.1, vote_count_pct=0.3, vote_count=400) > 0
+
+
+def test_percent_rank_matches_sql_semantics() -> None:
+    assert list(percent_rank([10.0, 30.0, 20.0, 20.0])) == [0.0, 1.0, 1 / 3, 1 / 3]
+    assert list(percent_rank([5.0])) == [0.0]
+    assert len(percent_rank([])) == 0
+
+
+def test_catalog_percentiles_prefer_stored_values_over_pool() -> None:
+    """Stored catalog-wide values win; titles without them use the pool fallback."""
+    stored = FakeTitle(name="Stored", genres=["Drama"], popularity=1.0)
+    stored.extra[CATALOG_PERCENTILES_KEY] = {"popularity": 0.9, "vote_count": 0.8}
+    plain = [FakeTitle(name=f"P{i}", genres=["Drama"], popularity=10.0 + i) for i in range(3)]
+    pop, votes = catalog_percentiles([stored, *plain])
+    assert pop[0] == 0.9 and votes[0] == 0.8
+    # Pool fallback: lowest pool popularity → 0.0 (the stored title's raw 1.0 is lowest).
+    assert list(pop[1:]) == [1 / 3, 2 / 3, 1.0]
+    # FakeTitle has no vote_count: unknown, not zero.
+    assert all(v != v for v in votes[1:])
+
+
+def test_catalog_percentiles_ignore_malformed_stored_values() -> None:
+    title = FakeTitle(name="Odd", genres=["Drama"], popularity=5.0)
+    title.extra[CATALOG_PERCENTILES_KEY] = {"popularity": "n/a", "vote_count": 7.0}
+    other = FakeTitle(name="Other", genres=["Drama"], popularity=50.0)
+    pop, votes = catalog_percentiles([title, other])
+    assert pop[0] == 0.0  # fell back to the pool
+    assert votes[0] != votes[0]  # 7.0 is not a percentile; still unknown
+
+
+def test_director_cap_scales_with_slate_size() -> None:
+    assert director_cap_for(20) == 2
+    assert director_cap_for(30) == 3
+    assert director_cap_for(12) == 1
+    assert director_cap_for(3) == 1  # never zero
+
+
+def test_low_rating_penalty_needs_enough_votes() -> None:
+    assert low_rating_penalty(7.0, vote_count=5_000) == 0.0
+    assert low_rating_penalty(6.0, vote_count=5_000) == pytest.approx(0.5)
+    assert low_rating_penalty(3.0, vote_count=5_000) == 1.0
+    assert low_rating_penalty(4.0, vote_count=10) == 0.0  # a handful of votes is noise
+
+
+def test_low_rating_weight_is_off_by_default_and_demotes_when_on() -> None:
+    """Off by default (not shown to be harmless offline); when on, it demotes."""
+    assert DEFAULT_WEIGHTS.low_rating == 0.0
+    good = FakeTitle(name="Good", genres=["Drama"], keywords=["family"], vote_average=7.0)
+    poor = FakeTitle(name="Poor", genres=["Drama"], keywords=["family"], vote_average=5.6)
+    poor.embedding = list(good.embedding)
+
+    def top(weights: RankingWeights):
+        return rank_titles(
+            user_vector=list(good.embedding),
+            user_features={"genre:drama": 2.0},
+            titles=[poor, good],
+            exclude_ids=set(),
+            slate_size=1,
+            mmr_lambda=1.0,
+            exploration_slots=0,
+            weights=weights,
+        )[0].title_id
+
+    assert top(DEFAULT_WEIGHTS) == poor.id  # tie → input order
+    assert top(RankingWeights(low_rating=0.1)) == good.id
+
+
+def test_cold_prior_uses_percentiles_not_raw_popularity() -> None:
+    """One trending outlier (popularity 2,569) must not swamp the cold prior.
+
+    With raw popularity / 200 capped at 0.22, the outlier and a title at 44 got
+    the same prior; with percentiles the order follows the catalog rank.
+    """
+    outlier = FakeTitle(name="Outlier", genres=["Action"], popularity=2569.0, vote_average=6.0)
+    known = FakeTitle(name="Known", genres=["Drama"], popularity=47.9, vote_average=6.0)
+    obscure = FakeTitle(name="Obscure", genres=["Comedy"], popularity=2.0, vote_average=6.0)
+    ranked = rank_titles(
+        user_vector=None,
+        user_features={},
+        titles=[obscure, known, outlier],
+        exclude_ids=set(),
+        slate_size=3,
+        mmr_lambda=1.0,
+        exploration_slots=0,
+        with_reasons=False,
+    )
+    assert [r.title_id for r in ranked] == [outlier.id, known.id, obscure.id]
+    scores = [r.score for r in ranked]
+    assert scores[0] - scores[1] == pytest.approx(scores[1] - scores[2])
 
 
 def test_annotate_discovery_reasons_adds_gem_and_exploration() -> None:

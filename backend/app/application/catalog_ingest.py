@@ -14,6 +14,9 @@ Design:
   discovery pass (see ``catalog_discovery``) found are not fetched again once
   they are in the catalog, so an interrupted run resumes cheaply; pass
   ``refresh_existing=True`` to re-fetch everything.
+* Every run ends by refreshing catalog-wide popularity / vote-count
+  percentiles in ``Title.extra`` (``catalog_percentiles``), which ranking uses
+  for "hidden gem" and the cold-start prior.
 * ``titles.external_tmdb_id`` is unique across movies *and* TV, but TMDb numbers
   the two separately. A TV id that equals a stored movie id is skipped, never
   allowed to overwrite the movie.
@@ -43,6 +46,7 @@ from app.application.catalog_discovery import (
     build_passes,
     collect_targets,
 )
+from app.application.catalog_percentiles import refresh_catalog_percentiles
 from app.data.onboarding_seed import all_seed_tmdb_ids
 from app.infrastructure.db.models.catalog import (
     Credit,
@@ -55,6 +59,7 @@ from app.infrastructure.db.models.catalog import (
 )
 from app.infrastructure.tmdb.client import TmdbClient
 from app.recommendation.embeddings import PersonSignal, build_title_signals
+from app.recommendation.pipeline import CATALOG_PERCENTILES_KEY
 
 logger = logging.getLogger(__name__)
 
@@ -162,6 +167,7 @@ class CatalogIngestService:
         await self._ensure_genres()
         seed_ids = all_seed_tmdb_ids()
         stats = await self._ingest_ids([("movie", tmdb_id) for tmdb_id in seed_ids])
+        await self._refresh_percentiles()
         return {"seed_requested": len(seed_ids), **stats}
 
     async def ingest_popular(
@@ -185,6 +191,7 @@ class CatalogIngestService:
 
         to_fetch, skipped, collisions = await self._plan_fetch(collected.items, refresh_existing)
         stats = await self._ingest_ids(to_fetch)
+        await self._refresh_percentiles()
         return {
             "onboarding_seed": seed_stats,
             "discovered": len(collected.items),
@@ -194,6 +201,23 @@ class CatalogIngestService:
             "failed_passes": collected.failed_passes,
             **stats,
         }
+
+    async def _refresh_percentiles(self) -> None:
+        """Recompute catalog percentiles after a run; never fails the ingest.
+
+        Ranking falls back to candidate-pool percentiles for titles without
+        them, so a failure here costs accuracy, not availability.
+        """
+        try:
+            await refresh_catalog_percentiles(self._session)
+            await self._session.commit()
+        except Exception:  # noqa: BLE001 - titles are already committed
+            logger.warning(
+                "catalog_percentiles_refresh_failed - run: "
+                "python -m app.scripts.reembed_catalog --percentiles-only",
+                exc_info=True,
+            )
+            await self._reset_session()
 
     async def _plan_fetch(
         self, items: dict[tuple[str, int], bool], refresh_existing: bool
@@ -501,6 +525,11 @@ class CatalogIngestService:
             countries=countries,
         )
         title.embedding = embedding
+        # Keep the stored catalog percentiles: they are recomputed for the whole
+        # catalog at the end of the run, and until then a stale value beats none.
+        previous = (existing.extra or {}) if existing is not None else {}
+        if CATALOG_PERCENTILES_KEY in previous:
+            meta = {**meta, CATALOG_PERCENTILES_KEY: previous[CATALOG_PERCENTILES_KEY]}
         title.extra = meta
         await self._session.flush()
         logger.debug("%s title tmdb_id=%s", status, tmdb_id)

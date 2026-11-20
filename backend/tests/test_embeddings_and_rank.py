@@ -271,3 +271,25 @@ def test_rank_titles_returns_slate() -> None:
     )
     assert len(ranked) == 2
     assert ranked[0].reasons
+
+
+def test_mmr_order_skips_candidates_a_quota_rejects() -> None:
+    """Quota checks (genre / director caps) are applied inside the MMR loop."""
+    import numpy as np
+
+    from app.recommendation.pipeline import _mmr_order
+
+    relevance = np.asarray([1.0, 0.9, 0.8, 0.7])
+    unit = np.eye(4)
+    owner = ["a", "a", "a", "b"]  # e.g. the director of each candidate
+    taken: dict[str, int] = {}
+
+    def allow(i: int) -> bool:
+        return taken.get(owner[i], 0) < 2
+
+    def on_pick(i: int) -> None:
+        taken[owner[i]] = taken.get(owner[i], 0) + 1
+
+    order = _mmr_order(relevance, unit, k=4, lambda_mult=1.0, allow=allow, on_pick=on_pick)
+    assert order == [0, 1, 3]  # the third "a" is over the cap; the slate stays short
+    assert _mmr_order(relevance, unit, k=4, lambda_mult=1.0) == [0, 1, 2, 3]

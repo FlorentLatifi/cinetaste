@@ -27,10 +27,18 @@ from uuid import UUID
 
 from app.domain.taste_signals import EffectiveSignal, effective_title_signals
 from app.recommendation import metrics as M
-from app.recommendation.pipeline import DEFAULT_WEIGHTS, RankingWeights, primary_genre, rank_titles
+from app.recommendation.pipeline import (
+    DEFAULT_WEIGHTS,
+    RankingWeights,
+    directors_of,
+    primary_genre,
+    rank_titles,
+)
 from app.recommendation.profile import ProfileTitle, build_profile
 
 DEFAULT_K = 10
+# "Too many from one director": more than this many titles in one slate.
+DIRECTOR_OVERFLOW_LIMIT = 2
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,6 +95,18 @@ class Dataset:
         return {t.id: t for t in self.titles}
 
 
+class RankedIds(list[UUID]):
+    """A slate of ids that also records which ones carried the hidden-gem label.
+
+    Baselines return plain lists; the production ranker returns this, so label
+    quality can be measured without building every explanation.
+    """
+
+    def __init__(self, ids: Sequence[UUID], gem_labelled: set[UUID] | None = None) -> None:
+        super().__init__(ids)
+        self.gem_labelled: set[UUID] = gem_labelled or set()
+
+
 Strategy = Callable[[EvalUser, Dataset, int], list[UUID]]
 
 
@@ -109,6 +129,7 @@ def make_ranking_strategy(
     mmr_lambda: float = 0.7,
     exploration_slots: int = 0,
     max_per_genre: int | None = None,
+    max_per_director: int | None = None,
 ) -> Strategy:
     """The production ranker with a given configuration."""
 
@@ -123,10 +144,14 @@ def make_ranking_strategy(
             mmr_lambda=mmr_lambda,
             exploration_slots=exploration_slots,
             max_per_genre=max_per_genre,
+            max_per_director=max_per_director,
             weights=weights,
             with_reasons=False,
         )
-        return [item.title_id for item in ranked]
+        return RankedIds(
+            [item.title_id for item in ranked],
+            {item.title_id for item in ranked if item.hidden_gem},
+        )
 
     return strategy
 
@@ -154,18 +179,26 @@ DEFAULT_STRATEGIES: dict[str, Strategy] = {
         weights=RankingWeights(similarity=1.0, sparse_positive=0.0, sparse_negative=0.0),
         mmr_lambda=1.0,
         max_per_genre=999,
+        max_per_director=999,
     ),
     "sparse_only": make_ranking_strategy(
         weights=RankingWeights(similarity=0.0, sparse_positive=1.0, sparse_negative=0.3),
         mmr_lambda=1.0,
         max_per_genre=999,
+        max_per_director=999,
     ),
-    "hybrid_no_diversity": make_ranking_strategy(mmr_lambda=1.0, max_per_genre=999),
+    "hybrid_no_diversity": make_ranking_strategy(
+        mmr_lambda=1.0, max_per_genre=999, max_per_director=999
+    ),
     "hybrid": make_ranking_strategy(mmr_lambda=0.8),
     "hybrid_with_exploration": make_ranking_strategy(mmr_lambda=0.8, exploration_slots=3),
     # Not the default: shows what an accuracy-first popularity prior costs in novelty.
     "hybrid_plus_popularity": make_ranking_strategy(
         weights=RankingWeights(warm_popularity=0.2), mmr_lambda=0.8
+    ),
+    # Not the default: demote titles many people rated below ★6.5.
+    "hybrid_low_rating_penalty": make_ranking_strategy(
+        weights=RankingWeights(low_rating=0.05), mmr_lambda=0.8
     ),
 }
 
@@ -185,6 +218,8 @@ def evaluate(
     for name, strategy in strategies.items():
         per_user: list[dict[str, float]] = []
         slates: list[Sequence[UUID]] = []
+        # Popularity percentile (1.0 = most popular) of every gem-labelled title.
+        gem_percentiles: list[float] = []
         for user in dataset.users:
             if not user.test_positive_ids:
                 continue
@@ -197,6 +232,11 @@ def evaluate(
                 if tid in catalog and catalog[tid].embedding is not None
             ]
             genres = [primary_genre(catalog[tid]) for tid in recommended if tid in catalog]
+            directors = [directors_of(catalog[tid]) for tid in recommended if tid in catalog]
+            labelled: set[UUID] = getattr(recommended, "gem_labelled", set())
+            gem_percentiles.extend(
+                1.0 - popularity_rank[tid] for tid in labelled if tid in popularity_rank
+            )
             per_user.append(
                 {
                     f"recall@{k}": M.recall_at_k(recommended, user.test_positive_ids, k=k),
@@ -207,12 +247,19 @@ def evaluate(
                     "diversity": M.intra_list_diversity(vectors),
                     "genre_variety": M.distinct_ratio(genres),
                     "novelty": M.novelty(recommended, popularity_rank),
+                    "director_max_share": M.max_group_share(directors),
+                    "director_overflow": M.exceeds_group_limit(
+                        directors, limit=DIRECTOR_OVERFLOW_LIMIT
+                    ),
+                    "gems_per_slate": float(len(labelled)),
                 }
             )
         if not per_user:
             continue
         summary = {metric: mean(row[metric] for row in per_user) for metric in per_user[0]}
         summary["coverage"] = M.catalog_coverage(slates, len(dataset.titles))
+        summary["gem_pop_pct"] = mean(gem_percentiles) if gem_percentiles else float("nan")
+        summary["gem_pop_pct_max"] = max(gem_percentiles) if gem_percentiles else float("nan")
         summary["users"] = float(len(per_user))
         results[name] = summary
     return results
@@ -240,6 +287,11 @@ def format_report(results: Mapping[str, Mapping[str, float]], *, k: int = DEFAUL
         "genre_variety",
         "novelty",
         "coverage",
+        "director_max_share",
+        "director_overflow",
+        "gems_per_slate",
+        "gem_pop_pct",
+        "gem_pop_pct_max",
     ]
     lines = [
         "| strategy | " + " | ".join(columns) + " |",

@@ -219,3 +219,68 @@ async def test_tv_id_colliding_with_a_stored_movie_never_overwrites_it(
     assert stats["failed"] >= 1
     await db_session.refresh(movie)
     assert movie.media_type == "movie" and movie.name == f"Movie {RATED_ID}"
+
+
+async def test_catalog_percentiles_are_written_and_refresh_is_incremental(
+    db_session: AsyncSession,
+) -> None:
+    """Ranking reads catalog-wide percentiles from Title.extra (no schema change)."""
+    from uuid import uuid4
+
+    from app.application.catalog_percentiles import refresh_catalog_percentiles
+    from app.recommendation.pipeline import CATALOG_PERCENTILES_KEY
+
+    rows = [  # (popularity, vote_count): one huge trending outlier, as in production
+        (2569.0, 30_000),
+        (47.9, 20_000),
+        (7.5, 16_000),  # a classic with a low trending score
+        (3.0, 120),
+        (1.0, 10),
+    ]
+    titles = [
+        Title(
+            id=uuid4(),
+            external_tmdb_id=9_500_000 + i,
+            media_type="movie",
+            name=f"P{i}",
+            popularity=popularity,
+            vote_count=votes,
+            extra={"demo": True} if i == 0 else None,
+        )
+        for i, (popularity, votes) in enumerate(rows)
+    ]
+    db_session.add_all(titles)
+    await db_session.commit()
+
+    assert await refresh_catalog_percentiles(db_session) == len(rows)
+    await db_session.commit()
+    for title in titles:
+        await db_session.refresh(title)
+    stored = [t.extra[CATALOG_PERCENTILES_KEY] for t in titles]
+    assert [s["popularity"] for s in stored] == [1.0, 0.75, 0.5, 0.25, 0.0]
+    assert [s["vote_count"] for s in stored] == [1.0, 0.75, 0.5, 0.25, 0.0]
+    assert titles[0].extra["demo"] is True  # other keys survive the merge
+
+    # Nothing changed, nothing rewritten.
+    assert await refresh_catalog_percentiles(db_session) == 0
+
+
+async def test_ingest_ends_with_catalog_percentiles_for_every_title(
+    db_session: AsyncSession,
+) -> None:
+    from app.recommendation.pipeline import CATALOG_PERCENTILES_KEY
+
+    service = CatalogIngestService(db_session, FakeTmdb(), batch_size=10)  # type: ignore[arg-type]
+    await service.ingest_popular(pages=1, include_tv=True)
+    extras = (await db_session.scalars(select(Title.extra))).all()
+    assert extras and all(CATALOG_PERCENTILES_KEY in (extra or {}) for extra in extras)
+
+    # A single re-ingested title keeps its stored value until the next refresh.
+    movie = await db_session.scalar(select(Title).where(Title.external_tmdb_id == 9_000_010))
+    assert movie is not None
+    before = movie.extra[CATALOG_PERCENTILES_KEY]
+    await service.upsert_movie(9_000_010)
+    await db_session.commit()
+    await db_session.refresh(movie)
+    assert movie.extra[CATALOG_PERCENTILES_KEY] == before
+    assert "feature_snapshot" in movie.extra

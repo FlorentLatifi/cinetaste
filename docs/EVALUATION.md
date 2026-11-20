@@ -32,8 +32,10 @@ Every strategy runs through the same protocol, so the comparison is fair.
 | `dense_only` | Content-vector similarity only (no sparse features). |
 | `sparse_only` | Interpretable feature overlap only (no vector). |
 | `hybrid_no_diversity` | Production scoring, diversity controls off. |
-| `hybrid` | **What production serves** (MMR λ=0.8, per-genre cap). |
+| `hybrid` | **What production serves** (MMR λ=0.8, per-genre and per-director caps). |
 | `hybrid_with_exploration` | Production plus 3 exploration slots. |
+| `hybrid_plus_popularity` | Production plus a warm popularity prior (`warm_popularity=0.2`); not the default. |
+| `hybrid_low_rating_penalty` | Production plus a soft penalty for ★ < 6.5 with enough votes (`low_rating=0.05`); not the default. |
 
 ## Metrics
 
@@ -49,7 +51,23 @@ scores acceptably on accuracy and is useless as a product:
 * `novelty` — mean popularity percentile (0 = blockbusters only, 1 = obscure).
 * `coverage` — share of the catalog that ever gets recommended.
 
+**Trust** — two failures users notice immediately:
+
+* `director_max_share` — largest share of one slate held by a single director
+  (co-directed films count for each director). 0.10 = 2 of 20.
+* `director_overflow` — share of slates with more than two titles by one director.
+* `gems_per_slate` — titles labelled "hidden gem" per slate (capped at 3).
+* `gem_pop_pct` / `gem_pop_pct_max` — mean / worst catalog popularity
+  percentile of the labelled titles (1.0 = most popular). A hidden gem should
+  sit low. Measured against the whole catalog; the ranker decides on the pool
+  (catalog minus what the user rated), so values a hair above 0.40 are
+  rounding between the two, not mislabels.
+
 ## Results: real ratings (MovieLens)
+
+> These numbers predate the per-director cap and percentile-based hidden gems
+> (November 2026) and have not been re-run since: the dataset was not available
+> where that change was made. Re-run before relying on them.
 
 193 users from [MovieLens ml-latest-small](https://grouplens.org/datasets/movielens/)
 (100k ratings from real people), temporal split: each user's most recent 20% of
@@ -102,28 +120,82 @@ above is), not across runs.
 800 titles, 200 users, seed 7, 3 held-out positives each, slate of 20.
 Generated with `build_synthetic_dataset`.
 
-| strategy | recall@20 | ndcg@20 | hit_rate@20 | mrr | diversity | genre_variety | novelty | coverage |
-|---|---|---|---|---|---|---|---|---|
-| random | 0.027 | 0.011 | 0.080 | 0.009 | 0.859 | 0.377 | 0.499 | 0.995 |
-| popular | 0.022 | 0.010 | 0.065 | 0.010 | 0.872 | 0.399 | 0.012 | 0.028 |
-| dense_only | 0.163 | 0.080 | 0.435 | 0.081 | 0.444 | 0.052 | 0.533 | 0.665 |
-| sparse_only | 0.125 | 0.062 | 0.350 | 0.066 | 0.569 | 0.087 | 0.538 | 0.598 |
-| hybrid_no_diversity | 0.143 | 0.071 | 0.395 | 0.072 | 0.529 | 0.077 | 0.538 | 0.542 |
-| **hybrid (production)** | **0.095** | **0.047** | **0.265** | **0.048** | **0.750** | **0.186** | **0.551** | **0.425** |
-| hybrid_with_exploration | 0.095 | 0.047 | 0.265 | 0.048 | 0.751 | 0.186 | 0.551 | 0.420 |
-| hybrid_plus_popularity | 0.098 | 0.057 | 0.260 | 0.071 | 0.762 | 0.195 | 0.193 | 0.357 |
+| strategy | recall@20 | ndcg@20 | hit_rate@20 | mrr | diversity | genre_variety | novelty | coverage | director_max_share | director_overflow | gems_per_slate | gem_pop_pct | gem_pop_pct_max |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| random | 0.027 | 0.011 | 0.080 | 0.009 | 0.859 | 0.377 | 0.499 | 0.995 | 0.098 | 0.090 | 0.000 | – | – |
+| popular | 0.022 | 0.010 | 0.065 | 0.010 | 0.872 | 0.399 | 0.012 | 0.028 | 0.100 | 0.000 | 0.000 | – | – |
+| dense_only | 0.152 | 0.077 | 0.405 | 0.081 | 0.427 | 0.052 | 0.559 | 0.882 | 0.298 | 1.000 | 2.825 | 0.180 | 0.404 |
+| sparse_only | 0.112 | 0.055 | 0.300 | 0.055 | 0.524 | 0.085 | 0.555 | 0.760 | 0.282 | 1.000 | 2.610 | 0.186 | 0.404 |
+| hybrid_no_diversity | 0.135 | 0.066 | 0.360 | 0.066 | 0.490 | 0.077 | 0.569 | 0.806 | 0.296 | 1.000 | 2.790 | 0.181 | 0.404 |
+| **hybrid (production)** | **0.090** | **0.047** | **0.245** | **0.051** | **0.759** | **0.192** | **0.680** | **0.659** | **0.100** | **0.000** | **3.000** | **0.158** | **0.390** |
+| hybrid_with_exploration | 0.090 | 0.047 | 0.245 | 0.052 | 0.759 | 0.192 | 0.680 | 0.656 | 0.100 | 0.000 | 3.000 | 0.159 | 0.390 |
+| hybrid_plus_popularity | 0.110 | 0.067 | 0.285 | 0.084 | 0.755 | 0.190 | 0.120 | 0.394 | 0.100 | 0.000 | 0.365 | 0.316 | 0.404 |
+| hybrid_low_rating_penalty | 0.082 | 0.044 | 0.210 | 0.048 | 0.761 | 0.192 | 0.679 | 0.534 | 0.100 | 0.000 | 3.000 | 0.157 | 0.390 |
 
 ### What these numbers say
 
-* **The taste model learns taste.** Ranking by taste finds 3.5–6× more held-out
+* **The taste model learns taste.** Ranking by taste finds 3–6× more held-out
   favourites than random or popular.
-* **Diversity has a measured price here.** MMR plus the genre cap cost about a
-  third of recall (0.143 → 0.095) and buy 2.4× the genre variety. Without the cap
-  a 20-card slate holds barely more than one distinct primary genre. A fixed cap
-  of 4 per slate cost ~60% of recall, which is why the cap is now proportional to
-  slate size (40%) and MMR λ is 0.8.
-* **Popularity is noise in this dataset**, so the popularity prior only costs
-  novelty (0.551 → 0.193) without a meaningful accuracy gain.
+* **Diversity has a measured price here.** MMR plus the genre and director caps
+  cost about a third of recall (0.135 → 0.090) and buy 2.5× the genre variety.
+  Without the caps a 20-card slate holds barely more than one distinct primary
+  genre and every slate has more than two films by one director. A fixed genre
+  cap of 4 per slate cost ~60% of recall, which is why the genre cap is
+  proportional to slate size (40%) and MMR λ is 0.8.
+* **Popularity is noise in this dataset** (popularity and rating are drawn at
+  random), so anything that reads them only reshuffles. The popularity prior
+  costs novelty (0.680 → 0.120); it scores higher recall here mainly because it
+  outweighs the hidden-gem bonus, which on this data is noise as well
+  (production without the gem bonus: recall 0.112). Whether the gem bonus pays
+  for itself can only be decided on real ratings.
+
+### Per-director cap and percentile hidden gems (November 2026)
+
+Production slates showed 6 of 20 cards by one director, and "hidden gem" on The
+Godfather Part II, Memento, Alien and The Prestige: the gem rule used absolute
+TMDb popularity (< 40), but most of our catalog sits below 40. Two changes:
+
+* **Hidden gems and the cold-start prior use catalog percentiles.** A title is
+  a gem when it is well rated (★ ≥ 7.2), has enough votes (≥ 50 and above the
+  catalog's 10th percentile), and is less known than 60% of the catalog on
+  *both* popularity and vote count. Vote count matters: The Silence of the
+  Lambs has a low trending score but a huge audience. The cold-start prior is
+  `0.22 × max(popularity pct, vote-count pct)` instead of `min(popularity/200, 0.22)`,
+  so one trending outlier no longer flattens the rest of the scale. Percentiles
+  are stored per title in `Title.extra["catalog_percentiles"]` by ingest and
+  re-embed; titles without them fall back to percentiles within the candidate pool.
+* **At most two titles per director in a 20-card slate** (10% of the slate,
+  at least 1), enforced in MMR, exploration and backfill. The cap is relaxed
+  only when nothing else can fill the slate.
+
+Same data before and after (synthetic, slate of 20, production `hybrid`):
+
+| seed | recall@20 | ndcg@20 | hit_rate@20 | novelty | director_max_share | director_overflow | gem_pop_pct | gem_pop_pct_max |
+|---|---|---|---|---|---|---|---|---|
+| 7 before | 0.095 | 0.047 | 0.265 | 0.551 | 0.147 | 0.710 | 0.476 | 0.894 |
+| 7 after | 0.090 | 0.047 | 0.245 | 0.680 | 0.100 | 0.000 | 0.158 | 0.390 |
+| 11 before | 0.078 | 0.045 | 0.205 | 0.538 | 0.163 | 0.795 | 0.465 | 0.900 |
+| 11 after | 0.072 | 0.041 | 0.205 | 0.668 | 0.100 | 0.000 | 0.164 | 0.399 |
+| 23 before | 0.107 | 0.060 | 0.275 | 0.569 | 0.158 | 0.790 | 0.428 | 0.874 |
+| 23 after | 0.095 | 0.055 | 0.275 | 0.696 | 0.100 | 0.000 | 0.173 | 0.404 |
+| 42 before | 0.095 | 0.058 | 0.265 | 0.551 | 0.161 | 0.780 | 0.440 | 0.854 |
+| 42 after | 0.085 | 0.057 | 0.245 | 0.664 | 0.100 | 0.000 | 0.192 | 0.358 |
+
+* **Director concentration is gone:** slates with more than two films by one
+  director fell from 71–80% to 0%.
+* **Gem labels land on obscure titles:** mean popularity percentile of labelled
+  titles fell from ~0.45 to ~0.17, the worst case from ~0.89 to ~0.40.
+* **The price is recall: −8.8% on average over four seeds** (0.094 → 0.086),
+  NDCG −5%, hit rate −4%. The director cap accounts for it (seed 7: 0.097 with
+  the cap off, 0.090 on); the percentile gem rule alone is neutral (0.095 →
+  0.097). This benchmark rewards repetition by construction: synthetic users
+  like a cluster where ~12 directors make all the films, so held-out favourites
+  usually share a director with the training titles. At a slate of 10 (one per
+  director) recall did not drop (0.033 → 0.035).
+* **The low-rating penalty is off.** On this benchmark it cost 9% recall and
+  14% hit rate (`hybrid_low_rating_penalty`), and the benchmark cannot show a
+  benefit (ratings are random). It stays a documented knob
+  (`RankingWeights.low_rating`) until real ratings say otherwise.
 
 ### What this benchmark does *not* prove
 
@@ -143,6 +215,9 @@ cd backend
 python -m app.scripts.evaluate_recommender -k 20 --users 200            # synthetic
 python -m app.scripts.evaluate_recommender -k 20 --users 200     --dataset movielens --path ../data/ml-latest-small                   # real ratings
 ```
+
+The evaluator imports the app's settings, so it needs `JWT_SECRET` and
+`DATABASE_URL` set (any value; no database is contacted), as in CI.
 
 MovieLens is not committed (GroupLens forbids redistribution): download
 ml-latest-small and unzip it to `data/`. The MovieLens run takes ~15 minutes

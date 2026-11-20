@@ -108,3 +108,30 @@ def catalog_coverage(slates: Iterable[Sequence[Id]], catalog_size: int) -> float
     for slate in slates:
         shown.update(slate)
     return len(shown) / float(catalog_size)
+
+
+def max_group_share(groups_per_item: Sequence[Iterable[str]]) -> float:
+    """Largest share of one slate held by a single group (e.g. one director).
+
+    ``groups_per_item`` has one entry per recommended title: the groups it
+    belongs to (a co-directed film counts for each director). Titles with no
+    group (most TV, unknown credits) count toward the slate size only.
+    """
+    if not groups_per_item:
+        return 0.0
+    counts: dict[str, int] = {}
+    for groups in groups_per_item:
+        for group in set(groups):
+            counts[group] = counts.get(group, 0) + 1
+    return max(counts.values(), default=0) / float(len(groups_per_item))
+
+
+def exceeds_group_limit(groups_per_item: Sequence[Iterable[str]], *, limit: int) -> float:
+    """1.0 when any single group holds more than ``limit`` titles of the slate."""
+    counts: dict[str, int] = {}
+    for groups in groups_per_item:
+        for group in set(groups):
+            counts[group] = counts.get(group, 0) + 1
+            if counts[group] > limit:
+                return 1.0
+    return 0.0
