@@ -74,7 +74,12 @@ an overlay is present.
 | `state` | Optional filter to one history state |
 | `cursor` | Opaque keyset cursor from previous `next_cursor` |
 
-Response: `{ items, next_cursor, has_more }`. SPA appends pages via **infinite
+Response: `{ items, next_cursor, has_more }`. Each item has `state`, `label`
+(state label) and `rating` — the effective rating event (`rate_1`…`rate_4`,
+`mid`) or `null`, resolved from the event log with `resolve_title_state`
+exactly like the detail page's `my_rating` (one batched query per page). The
+badge shows the rating in the rating button's words ("Loved it") when present,
+else the state label. SPA appends pages via **infinite
 scroll** (IntersectionObserver) with a **Load more** fallback; filter chips
 reset the cursor. **Clear** on a row sends `clear` so the title can return to
 For You and prior events for that title are superseded on recompute.

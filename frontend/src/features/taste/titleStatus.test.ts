@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { FeedbackAction } from "../../components/ActionToast";
 import {
   canClearFromToggle,
+  historyBadgeLabel,
   NO_STATUS,
   offersNotForMe,
   offersSkipRating,
@@ -115,5 +116,20 @@ describe("undoRequests", () => {
     for (const event of all) {
       expect(undoRequests(LOVED, statusAfter(LOVED, event))).not.toContain("clear");
     }
+  });
+});
+
+describe("historyBadgeLabel", () => {
+  it("names the rating with the words of the rating button", () => {
+    expect(historyBadgeLabel({ label: "Liked", rating: "rate_4" })).toBe("Loved it");
+    expect(historyBadgeLabel({ label: "Liked", rating: "rate_3" })).toBe("Really liked it");
+    expect(historyBadgeLabel({ label: "Rated", rating: "mid" })).toBe("It was ok");
+    expect(historyBadgeLabel({ label: "Passed", rating: "rate_1" })).toBe("Didn't like it");
+  });
+
+  it("falls back to the state label without a rating", () => {
+    expect(historyBadgeLabel({ label: "Watchlist", rating: null })).toBe("Watchlist");
+    expect(historyBadgeLabel({ label: "Liked" })).toBe("Liked");
+    expect(historyBadgeLabel({ label: "Liked", rating: "unknown_event" })).toBe("Liked");
   });
 });

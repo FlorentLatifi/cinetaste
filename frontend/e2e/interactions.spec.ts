@@ -235,6 +235,19 @@ test("History: Clear removes row after mock interaction", async ({ page }) => {
   ).toHaveCount(0);
 });
 
+test("History: a rated title shows its rating, an unrated one its state", async ({ page }) => {
+  await installApiMock(page, { onboardingComplete: true });
+  await page.goto("/history");
+  await page.getByRole("heading", { name: "History" }).waitFor();
+
+  const grid = page.getByRole("list", { name: "Title history" });
+  await expect(grid.locator(".history-badge").first()).toHaveText("Loved it");
+  // Page 2 (no rating) arrives via infinite scroll / Load more.
+  const more = page.getByRole("button", { name: /load more/i });
+  if (await more.isVisible()) await more.click();
+  await expect(grid.locator(".history-badge")).toHaveText(["Loved it", "Liked"]);
+});
+
 test("History: filter chips update URL and list", async ({ page }) => {
   await installApiMock(page, { onboardingComplete: true });
   await page.goto("/history");

@@ -14,6 +14,7 @@
  * (titleStatus.test.ts) and the page only decides what to render.
  */
 import type { FeedbackAction } from "../../components/ActionToast";
+import { ratingLabel } from "./ratingScale";
 
 export type ViewerStatus = { state: string | null; rating: string | null };
 export const NO_STATUS: ViewerStatus = { state: null, rating: null };
@@ -147,4 +148,12 @@ export function offersSkipRating(status: ViewerStatus): boolean {
  */
 export function canClearFromToggle(status: ViewerStatus): boolean {
   return !hasRating(status);
+}
+
+/**
+ * History badge text: the rating in the words of the button that gave it
+ * ("Loved it"), else the server's state label ("Watchlist", "Liked").
+ */
+export function historyBadgeLabel(item: { label: string; rating?: string | null }): string {
+  return (item.rating && ratingLabel(item.rating as FeedbackAction)) || item.label;
 }

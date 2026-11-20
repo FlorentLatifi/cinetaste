@@ -237,11 +237,13 @@ async def my_history(
     rows, next_cursor = await service.history(
         user.id, limit=limit, state=state, cursor=cursor
     )
+    ratings = await service.effective_ratings(user.id, [title.id for title, _ in rows])
     items = [
         HistoryItemOut(
             title=TitleSummaryOut.from_title(title),
             state=state_row.state,
             label=label_for_state(state_row.state),
+            rating=ratings.get(title.id),
             updated_at=state_row.updated_at,
         )
         for title, state_row in rows

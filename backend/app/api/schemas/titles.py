@@ -225,6 +225,10 @@ class HistoryItemOut(BaseModel):
     title: TitleSummaryOut
     state: str
     label: str
+    # Effective rating event (rate_1…rate_4, mid) when the title is rated —
+    # same value as the detail page's my_rating. None for unrated states and
+    # for opinions given without the scale (like/dislike shortcuts).
+    rating: str | None = None
     updated_at: datetime
 
 

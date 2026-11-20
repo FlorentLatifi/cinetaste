@@ -537,6 +537,7 @@ export async function installApiMock(
         title: mockTitle,
         state: "like",
         label: "Liked",
+        rating: "rate_4",
         updated_at: "2026-01-15T12:00:00.000Z",
       };
       const page2Title = {
@@ -548,6 +549,7 @@ export async function installApiMock(
         title: page2Title,
         state: "like",
         label: "Liked",
+        rating: null,
         updated_at: "2026-01-10T12:00:00.000Z",
       };
       const all = !stateFilter || stateFilter === "like" ? [page1, page2] : [];
