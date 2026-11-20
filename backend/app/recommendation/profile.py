@@ -11,7 +11,7 @@ collapsed to the user's current opinion and time-decayed.
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 from uuid import UUID
 
@@ -38,6 +38,8 @@ class ProfileTitle:
     year: int | None
     feature_snapshot: Mapping[str, Any]
     embedding: Sequence[float] | None
+    # person feature key -> original casing (from Title.extra["display_names"])
+    display_names: Mapping[str, str] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -100,6 +102,7 @@ def build_profile(
                     weight=signal.raw_weight,
                     feature_snapshot=dict(title.feature_snapshot),
                     year=title.year,
+                    display_names=title.display_names,
                 )
             )
 

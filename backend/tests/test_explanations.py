@@ -155,3 +155,236 @@ def test_explain_wrapper_reads_memory_from_features() -> None:
     assert all(r.message for r in reasons)
     # Should not dump mechanical "Matches genres you like" as only line when director exists
     assert reasons[0].code in {"because_you_liked", "same_director", "taste_blend", "similar_style"}
+
+
+# --- Copy regressions (live bugs) -------------------------------------------------
+
+import re  # noqa: E402
+
+from app.recommendation.embeddings import build_title_signals  # noqa: E402
+from app.recommendation.explanations import _genre_phrase, _pretty_person  # noqa: E402
+
+# Strings seen live that must never be produced again.
+BANNED = [
+    "mysterys", "science fictions", "crimes", "Dicaprio", "Gordon-levitt", "Mcconaughey",
+    "US cinema", "(en)", "language lane", "1950s threads", "action heavy action",
+]
+
+
+def _reasons(user, cand, *, anchors=None, genres=("Drama",), extra=None, name="Candidate"):
+    title_extra = {"feature_snapshot": cand, **(extra or {})}
+    return build_reasons(
+        user_features=user,
+        explain_memory={"anchors": anchors or []},
+        title_name=name,
+        title_extra=title_extra,
+        title_genres=list(genres),
+        similarity=0.3,
+        max_reasons=6,
+    )
+
+
+def _all_text(reasons) -> str:
+    return " | ".join(r.message for r in reasons)
+
+
+def test_person_names_fallback_casing() -> None:
+    assert _pretty_person("leonardo dicaprio") == "Leonardo DiCaprio"
+    assert _pretty_person("joseph gordon-levitt") == "Joseph Gordon-Levitt"
+    assert _pretty_person("matthew mcconaughey") == "Matthew McConaughey"
+    assert _pretty_person("conan o'brien") == "Conan O'Brien"
+    assert _pretty_person("ludwig van beethoven") == "Ludwig van Beethoven"
+    # A stored display name always wins over guessing.
+    assert _pretty_person("jj abrams", "J.J. Abrams") == "J.J. Abrams"
+
+
+def test_title_signals_carry_display_names() -> None:
+    _emb, features, meta = build_title_signals(
+        name="Inception",
+        overview=None,
+        genres=["Science Fiction"],
+        keywords=[],
+        people=[PersonSignal("Leonardo DiCaprio", "cast", 0), PersonSignal("Christopher Nolan", "director")],
+        media_type="movie",
+        release_year=2010,
+        runtime=148,
+    )
+    assert meta["display_names"]["person:cast:leonardo dicaprio"] == "Leonardo DiCaprio"
+    assert set(meta["display_names"]) <= set(features)
+
+
+def test_display_names_from_title_and_anchor_are_used() -> None:
+    cand = {"person:cast:jj abrams": 1.5, "person:director:jj abrams": 2.2, "genre:drama": 1.0}
+    anchor = build_anchor_from_title(
+        title_id=uuid4(),
+        name="Super 8",
+        event_type="rate_4",
+        weight=1.55,
+        feature_snapshot={"person:director:jj abrams": 2.2},
+        display_names={"person:director:jj abrams": "J.J. Abrams", "person:cast:unused": "X"},
+    )
+    assert anchor["display_names"] == {"person:director:jj abrams": "J.J. Abrams"}
+    text = _all_text(
+        _reasons({"person:director:jj abrams": 2.0}, cand, anchors=[anchor])
+    )
+    assert "J.J. Abrams" in text
+    # Title-level names cover people the anchors do not mention.
+    text = _all_text(
+        _reasons(
+            {"person:cast:jj abrams": 2.0},
+            cand,
+            extra={"display_names": {"person:cast:jj abrams": "J.J. Abrams"}},
+        )
+    )
+    assert "J.J. Abrams" in text
+
+
+def test_genre_phrases_use_proper_labels() -> None:
+    assert _genre_phrase(["mystery"]) == "mysteries"
+    assert _genre_phrase(["science fiction"]) == "sci-fi"
+    assert _genre_phrase(["crime"]) == "crime films"
+    assert _genre_phrase(["documentary"]) == "documentaries"
+    assert _genre_phrase(["mystery", "thriller"]) == "mysteries and thrillers"
+    assert _genre_phrase(["unknown genre"]) == "unknown genre films"
+    assert _genre_phrase([]) == "films"
+
+
+def test_taste_blend_has_no_malformed_plurals_or_echoed_tones() -> None:
+    for genre, tone, expect in (
+        ("mystery", "tense", "tense mysteries"),
+        ("science fiction", "bleak", "bleak sci-fi"),
+        ("crime", "tense", "tense crime films"),
+    ):
+        cand = {f"genre:{genre}": 1.0, f"tone:{tone}": 1.0}
+        reasons = _reasons({f"genre:{genre}": 1.5, f"tone:{tone}": 1.5}, cand)
+        blend = next(r for r in reasons if r.code == "taste_blend")
+        assert expect in blend.message
+    # "action_heavy" on an action film only restates the genre: no blend at all.
+    cand = {"genre:action": 1.0, "genre:drama": 0.7, "tone:action_heavy": 0.85}
+    reasons = _reasons({"genre:action": 1.5, "genre:drama": 1.0, "tone:action_heavy": 1.5}, cand)
+    assert not any(r.code == "taste_blend" for r in reasons)
+    assert "action heavy" not in _all_text(reasons)
+
+
+def test_origin_and_language_use_names_not_codes() -> None:
+    cand = {"country:US": 0.8, "country:KR": 0.8, "lang:ko": 0.85, "lang:en": 0.85}
+    user = {"country:KR": 1.5, "country:US": 1.0, "lang:ko": 1.5, "lang:en": 1.0}
+    text = _all_text(_reasons(user, cand))
+    assert "South Korean" in text or "American" in text
+    assert "Korean-language" in text
+    assert "US cinema" not in text and "(ko)" not in text and "(en)" not in text
+    # English is nearly every title, and an unmapped code has no name: neither is cited.
+    text = _all_text(_reasons({"lang:en": 1.5, "country:ZZ": 1.5}, {"lang:en": 0.85, "country:ZZ": 0.8}))
+    assert "English" not in text and "ZZ" not in text
+
+
+def test_year_and_decade_keywords_are_not_themes() -> None:
+    for kw in ("1950s", "1990s", "21st century", "2015", "'80s"):
+        cand = {f"kw:{kw}": 0.9, "genre:drama": 1.0}
+        anchor = build_anchor_from_title(
+            title_id=uuid4(),
+            name="Old Film",
+            event_type="rate_4",
+            weight=1.55,
+            feature_snapshot={"person:director:ann lee": 2.2, f"kw:{kw}": 0.9},
+        )
+        assert kw not in anchor["keywords"]
+        cand["person:director:ann lee"] = 2.2
+        text = _all_text(
+            _reasons({"person:director:ann lee": 2.0, f"kw:{kw}": 1.0}, cand, anchors=[anchor])
+        )
+        assert kw not in text and "threads" not in text
+        assert "same director" in text.lower() or "Ann Lee" in text
+
+
+def test_keyword_with_words_and_digits_is_still_a_theme() -> None:
+    reasons = _reasons({"kw:1984 dystopia": 1.0}, {"kw:1984 dystopia": 0.9})
+    assert "1984 dystopia" in _all_text(reasons)
+
+
+def test_anchor_requires_non_genre_overlap() -> None:
+    anchor = build_anchor_from_title(
+        title_id=uuid4(),
+        name="Same Genre Only",
+        event_type="rate_5",
+        weight=2.0,
+        feature_snapshot={"genre:thriller": 1.0, "person:director:someone else": 2.2},
+    )
+    cand = {"genre:thriller": 1.0, "person:director:another person": 2.2}
+    reasons = _reasons({"genre:thriller": 1.5}, cand, anchors=[anchor], genres=("Thriller",))
+    assert reasons
+    # A shared genre can still be named by the genre reason, never as a "because" lead.
+    assert not any(r.code == "because_you_liked" for r in reasons)
+    # Add a shared keyword and the favorite may be cited again.
+    anchor["keywords"] = ["heist"]
+    cand["kw:heist"] = 0.9
+    reasons = _reasons({"genre:thriller": 1.5, "kw:heist": 1.0}, cand, anchors=[anchor])
+    assert reasons[0].code == "because_you_liked"
+    assert "Same Genre Only" in reasons[0].message
+    assert reasons[0].evidence["overlap"]["keywords"] == ["heist"]
+
+
+def test_lead_wording_varies_but_keeps_the_evidence() -> None:
+    anchor = build_anchor_from_title(
+        title_id=uuid4(),
+        name="Inception",
+        event_type="rate_4",
+        weight=1.55,
+        feature_snapshot={"person:director:christopher nolan": 2.2, "tone:cerebral": 1.0},
+        display_names={"person:director:christopher nolan": "Christopher Nolan"},
+    )
+    leads = set()
+    for i in range(30):
+        cand = {"person:director:christopher nolan": 2.2, "tone:cerebral": 1.0}
+        msg = _reasons(
+            {"person:director:christopher nolan": 2.0}, cand, anchors=[anchor], name=f"Film {i}"
+        )[0].message
+        assert "you rated inception highly" in msg.lower() and "Christopher Nolan" in msg
+        leads.add(re.split(r"[ ,:(]", msg, maxsplit=1)[0])
+    assert len(leads) >= 2, f"every card opens the same way: {leads}"
+    # Same card, same wording on every call.
+    assert _reasons({"person:director:christopher nolan": 2.0}, cand, anchors=[anchor], name="Film 3")[
+        0
+    ].message == _reasons(
+        {"person:director:christopher nolan": 2.0}, cand, anchors=[anchor], name="Film 3"
+    )[0].message
+
+
+def test_discovery_copy_keeps_its_facts() -> None:
+    from app.recommendation.pipeline import annotate_discovery_reasons
+
+    out = annotate_discovery_reasons(
+        [], is_hidden_gem=True, is_exploration=True, vote_average=7.84, popularity=9.0
+    )
+    gem = next(r for r in out if r.code == "hidden_gem")
+    assert "★7.8" in gem.message and "hidden gem" in gem.message.lower()
+    assert any(r.code == "discovery" for r in out)
+
+
+def test_no_banned_string_across_a_wide_sweep() -> None:
+    """Sweep genres x tones x countries x languages x keywords and scan every message."""
+    genres = ["mystery", "science fiction", "crime", "documentary", "action", "tv movie", "kids"]
+    tones = ["tense", "bleak", "action_heavy", "coming_of_age", "horror", "war", "cerebral"]
+    people = [
+        ("leonardo dicaprio", "cast"),
+        ("joseph gordon-levitt", "cast"),
+        ("matthew mcconaughey", "cast"),
+        ("christopher nolan", "director"),
+    ]
+    for g in genres:
+        for t in tones:
+            for ccode, lcode in (("US", "en"), ("KR", "ko"), ("GB", "en")):
+                cand = {
+                    f"genre:{g}": 1.0, f"tone:{t}": 1.0, f"country:{ccode}": 0.8,
+                    f"lang:{lcode}": 0.85, "decade:1950": 0.9, "kw:1950s": 0.9, "kw:heist": 0.9,
+                }
+                for role_name, role in people:
+                    cand[f"person:{role}:{role_name}"] = 1.5
+                user = {k: 1.5 for k in cand}
+                anchor = build_anchor_from_title(
+                    title_id=uuid4(), name="Fav", event_type="rate_4", weight=1.55,
+                    feature_snapshot=cand,
+                )
+                for r in _reasons(user, cand, anchors=[anchor], genres=(g,)):
+                    for bad in BANNED:
+                        assert bad not in r.message, (bad, r.message)

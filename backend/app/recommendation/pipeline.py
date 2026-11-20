@@ -118,8 +118,8 @@ def annotate_discovery_reasons(
             Reason(
                 code="hidden_gem",
                 message=(
-                    f"Highly rated (★{vote_average:.1f}) but not a chart-topper "
-                    "— a hidden gem"
+                    f"A hidden gem: rated ★{vote_average:.1f}, "
+                    "yet still under the radar"
                 ),
                 evidence={
                     "vote_average": round(float(vote_average), 2),
@@ -132,7 +132,7 @@ def annotate_discovery_reasons(
         extra.append(
             Reason(
                 code="discovery",
-                message="An exploration pick to stretch beyond your usual favorites",
+                message="A deliberate stretch beyond your usual picks",
                 evidence={"candidate": title_name, "slot": "exploration"},
             )
         )

@@ -8,6 +8,9 @@ Goals:
 
 from __future__ import annotations
 
+import re
+import zlib
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 from uuid import UUID
@@ -48,12 +51,144 @@ def strip_explain_memory(features: dict[str, Any] | None) -> tuple[dict[str, flo
     return clean, memory
 
 
-def _pretty_person(raw: str) -> str:
-    return " ".join(part.capitalize() for part in raw.replace("_", " ").split())
+# Lowercase connectors that stay lowercase inside a name ("Ludwig van Beethoven").
+_NAME_PARTICLES = frozenset(
+    {"de", "del", "della", "di", "da", "van", "von", "der", "den", "la", "le", "bin", "al", "el", "du", "dos"}
+)
+# Surnames whose capitals cannot be derived from a rule. Only a fallback: real
+# casing comes from ``display_names`` stored at ingest.
+_NAME_EXCEPTIONS = {"dicaprio": "DiCaprio", "dicamillo": "DiCamillo", "desouza": "DeSouza"}
+_ROMAN_SUFFIXES = frozenset({"ii", "iii", "iv", "vi"})
+
+
+def _cap_name_token(token: str, *, first: bool) -> str:
+    low = token.lower()
+    if low in _NAME_EXCEPTIONS:
+        return _NAME_EXCEPTIONS[low]
+    if not first and low in _NAME_PARTICLES:
+        return low
+    if low in _ROMAN_SUFFIXES:
+        return low.upper()
+    if "-" in low:
+        return "-".join(_cap_name_token(p, first=True) for p in low.split("-"))
+    if "'" in low:
+        return "'".join(_cap_name_token(p, first=True) for p in low.split("'"))
+    if low.startswith("mc") and len(low) > 3:
+        return "Mc" + low[2:].capitalize()
+    return low.capitalize()
+
+
+def _pretty_person(raw: str, display: str | None = None) -> str:
+    """Display a person: stored display name if known, else best-effort casing."""
+    if display and display.strip():
+        return display.strip()
+    parts = raw.replace("_", " ").split()
+    return " ".join(_cap_name_token(p, first=i == 0) for i, p in enumerate(parts))
+
+
+def _display_book(
+    title_extra: dict[str, Any] | None, anchors: list[dict[str, Any]]
+) -> dict[str, str]:
+    """Lowercased person name -> original casing, from the title and the anchors."""
+    book: dict[str, str] = {}
+    sources = [(title_extra or {}).get("display_names")] + [a.get("display_names") for a in anchors]
+    for source in sources:
+        if not isinstance(source, dict):
+            continue
+        for key, shown in source.items():
+            parts = str(key).split(":", 2)
+            if len(parts) == 3 and isinstance(shown, str) and shown.strip():
+                book.setdefault(parts[2].lower(), shown.strip())
+    return book
 
 
 def _pretty_label(raw: str) -> str:
     return raw.replace("_", " ").strip()
+
+
+# Keywords that are only a decade/year/number carry no theme ("1950s", "21st century").
+_NUMERIC_KEYWORD_RE = re.compile(
+    r"^(?:the\s+|year\s+)?(?:'?\d{2,4}'?s?|\d+(?:st|nd|rd|th)\s+century|[\d\W]+)$", re.IGNORECASE
+)
+
+
+def _is_thread_keyword(keyword: str) -> bool:
+    k = keyword.strip()
+    return bool(k) and not _NUMERIC_KEYWORD_RE.match(k)
+
+
+# TMDb genre (lowercased) -> (plural noun phrase, adjective/label).
+_GENRE_LABELS: dict[str, tuple[str, str]] = {
+    "action": ("action films", "action"),
+    "adventure": ("adventures", "adventure"),
+    "animation": ("animated films", "animated"),
+    "comedy": ("comedies", "comedy"),
+    "crime": ("crime films", "crime"),
+    "documentary": ("documentaries", "documentary"),
+    "drama": ("dramas", "drama"),
+    "family": ("family films", "family"),
+    "fantasy": ("fantasy films", "fantasy"),
+    "history": ("historical films", "historical"),
+    "horror": ("horror films", "horror"),
+    "music": ("music films", "music"),
+    "mystery": ("mysteries", "mystery"),
+    "romance": ("romances", "romance"),
+    "science fiction": ("sci-fi", "sci-fi"),
+    "tv movie": ("TV movies", "TV-movie"),
+    "thriller": ("thrillers", "thriller"),
+    "war": ("war films", "war"),
+    "western": ("westerns", "western"),
+    # TMDb TV genres
+    "action & adventure": ("action-adventure", "action-adventure"),
+    "sci-fi & fantasy": ("sci-fi and fantasy", "sci-fi and fantasy"),
+    "war & politics": ("war and political dramas", "war and political"),
+    "kids": ("kids' shows", "kids'"),
+    "news": ("news programs", "news"),
+    "reality": ("reality TV", "reality"),
+    "soap": ("soap operas", "soap-opera"),
+    "talk": ("talk shows", "talk-show"),
+}
+
+_TONE_LABELS = {
+    "coming_of_age": "coming-of-age",
+    "melancholy": "melancholic",
+    "horror": "horror-tinged",
+    "war": "war-themed",
+    "anime": "anime-style",
+    "action_heavy": "action-packed",
+}
+# Tones that merely restate a genre ("action-packed action films").
+_TONE_ECHOES_GENRE = {
+    "action_heavy": "action",
+    "horror": "horror",
+    "war": "war",
+    "romantic": "romance",
+    "comedic": "comedy",
+    "anime": "animation",
+}
+
+_COUNTRY_ADJECTIVES = {
+    "US": "American", "GB": "British", "UK": "British", "CA": "Canadian", "AU": "Australian",
+    "NZ": "New Zealand", "IE": "Irish", "FR": "French", "DE": "German", "IT": "Italian",
+    "ES": "Spanish", "PT": "Portuguese", "NL": "Dutch", "BE": "Belgian", "SE": "Swedish",
+    "NO": "Norwegian", "DK": "Danish", "FI": "Finnish", "IS": "Icelandic", "PL": "Polish",
+    "CZ": "Czech", "AT": "Austrian", "CH": "Swiss", "GR": "Greek", "TR": "Turkish",
+    "RU": "Russian", "UA": "Ukrainian", "HU": "Hungarian", "RO": "Romanian",
+    "JP": "Japanese", "KR": "South Korean", "CN": "Chinese", "HK": "Hong Kong", "TW": "Taiwanese",
+    "TH": "Thai", "IN": "Indian", "ID": "Indonesian", "PH": "Filipino", "VN": "Vietnamese",
+    "IR": "Iranian", "IL": "Israeli", "EG": "Egyptian", "ZA": "South African", "NG": "Nigerian",
+    "MX": "Mexican", "BR": "Brazilian", "AR": "Argentine", "CL": "Chilean", "CO": "Colombian",
+}
+
+_LANGUAGE_NAMES = {
+    "en": "English", "fr": "French", "de": "German", "it": "Italian", "es": "Spanish",
+    "pt": "Portuguese", "nl": "Dutch", "sv": "Swedish", "no": "Norwegian", "nb": "Norwegian",
+    "da": "Danish", "fi": "Finnish", "pl": "Polish", "cs": "Czech", "hu": "Hungarian",
+    "ro": "Romanian", "el": "Greek", "tr": "Turkish", "ru": "Russian", "uk": "Ukrainian",
+    "ja": "Japanese", "ko": "Korean", "zh": "Chinese", "cn": "Cantonese", "th": "Thai",
+    "hi": "Hindi", "ta": "Tamil", "te": "Telugu", "ml": "Malayalam", "bn": "Bengali",
+    "id": "Indonesian", "vi": "Vietnamese", "fa": "Persian", "he": "Hebrew", "ar": "Arabic",
+}
 
 
 def _join_names(names: list[str], *, limit: int = 2) -> str:
@@ -78,7 +213,10 @@ def _keys_with_prefix(snapshot: dict[str, Any], prefix: str, *, limit: int = 8) 
             continue
         if w <= 0:
             continue
-        scored.append((str(key)[len(prefix) :], w))
+        name = str(key)[len(prefix) :]
+        if prefix == "kw:" and not _is_thread_keyword(name):
+            continue
+        scored.append((name, w))
     scored.sort(key=lambda x: x[1], reverse=True)
     return [name for name, _ in scored[:limit]]
 
@@ -91,18 +229,33 @@ def build_anchor_from_title(
     weight: float,
     feature_snapshot: dict[str, Any] | None,
     year: int | None = None,
+    display_names: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
-    """Compact metadata stored when the user positively rates a title."""
+    """Compact metadata stored when the user positively rates a title.
+
+    ``display_names`` maps person feature keys to original casing; only the
+    people kept on the anchor are retained.
+    """
     snap = {str(k): v for k, v in (feature_snapshot or {}).items()}
+    directors = _keys_with_prefix(snap, "person:director:", limit=3)
+    cast = _keys_with_prefix(snap, "person:cast:", limit=4)
+    writers = _keys_with_prefix(snap, "person:writer:", limit=2)
+    kept = {
+        **{f"person:director:{n}": n for n in directors},
+        **{f"person:cast:{n}": n for n in cast},
+        **{f"person:writer:{n}": n for n in writers},
+    }
+    names = {k: str(display_names[k]) for k in kept if display_names and display_names.get(k)}
     return {
         "title_id": str(title_id),
         "name": name,
         "event_type": event_type,
         "weight": round(float(weight), 4),
         "year": year,
-        "directors": _keys_with_prefix(snap, "person:director:", limit=3),
-        "cast": _keys_with_prefix(snap, "person:cast:", limit=4),
-        "writers": _keys_with_prefix(snap, "person:writer:", limit=2),
+        "display_names": names,
+        "directors": directors,
+        "cast": cast,
+        "writers": writers,
         "tones": _keys_with_prefix(snap, "tone:", limit=4),
         "keywords": _keys_with_prefix(snap, "kw:", limit=8),
         "genres": _keys_with_prefix(snap, "genre:", limit=4),
@@ -178,32 +331,53 @@ def _overlap_score(overlap: dict[str, list[str]]) -> float:
 
 
 def _tone_phrase(tones: list[str]) -> str:
-    labels = [_pretty_label(t) for t in tones[:3]]
-    if not labels:
-        return ""
-    if len(labels) == 1:
-        return labels[0]
-    if len(labels) == 2:
-        return f"{labels[0]} and {labels[1]}"
-    return f"{labels[0]}, {labels[1]}, and {labels[2]}"
+    labels = [_TONE_LABELS.get(t, _pretty_label(t)) for t in tones[:3]]
+    return _join_names(labels, limit=3)
+
+
+def _genre_label(genre: str) -> tuple[str, str]:
+    key = genre.replace("_", " ").strip().lower()
+    known = _GENRE_LABELS.get(key)
+    if known:
+        return known
+    return (f"{key} films", key)
 
 
 def _genre_phrase(genres: list[str]) -> str:
-    labels = [g.replace("_", " ").title() for g in genres[:3]]
-    if not labels:
-        return "films"
-    if len(labels) == 1:
-        return f"{labels[0].lower()}s" if not labels[0].endswith("s") else labels[0].lower()
-    return " / ".join(g.lower() for g in labels)
+    """Plural noun phrase: 'mysteries', 'sci-fi', 'crime films and dramas'."""
+    nouns = list(dict.fromkeys(_genre_label(g)[0] for g in genres[:3] if g.strip()))
+    return _join_names(nouns, limit=3) if nouns else "films"
+
+
+def _genre_adjective(genres: list[str]) -> str:
+    """Modifier form for 'the {x} side of your taste': 'mystery', 'sci-fi and crime'."""
+    adjs = list(dict.fromkeys(_genre_label(g)[1] for g in genres[:3] if g.strip()))
+    return _join_names(adjs, limit=3) if adjs else "film"
+
+
+def _with_article(phrase: str) -> str:
+    return f"{'an' if phrase[:1].lower() in 'aeiou' else 'a'} {phrase}"
+
+
+def _rating_verb(anchors: list[dict[str, Any]], names: list[str]) -> str:
+    """'rated' only when every cited title was explicitly rated, else 'liked'."""
+    cited = [a for a in anchors if str(a.get("name")) in set(names)]
+    if cited and all(str(a.get("event_type") or "").startswith("rate_") for a in cited):
+        return "rated"
+    return "liked"
 
 
 def _cite(anchors: list[dict[str, Any]], names: list[str]) -> str:
     """'rated X highly' only when every cited title was explicitly rated."""
     joined = _join_names(names)
-    cited = [a for a in anchors if str(a.get("name")) in set(names)]
-    if cited and all(str(a.get("event_type") or "").startswith("rate_") for a in cited):
+    if _rating_verb(anchors, names) == "rated":
         return f"you rated {joined} highly"
     return f"you liked {joined}"
+
+
+def _variant(seed: str, count: int) -> int:
+    """Stable (cross-process) pick so one card always reads the same."""
+    return zlib.crc32(seed.encode("utf-8")) % count
 
 
 def build_reasons(
@@ -229,6 +403,10 @@ def build_reasons(
 
     title_features = _feature_snapshot(title_extra)
     anchors: list[dict[str, Any]] = list((explain_memory or {}).get("anchors") or [])
+    book = _display_book(title_extra, anchors)
+
+    def _who(raw: str) -> str:
+        return _pretty_person(raw, book.get(raw.lower()))
 
     cand_directors = set(_keys_with_prefix(title_features, "person:director:"))
     cand_cast = set(_keys_with_prefix(title_features, "person:cast:"))
@@ -253,6 +431,9 @@ def build_reasons(
             keywords=cand_keywords,
             genres=cand_genres,
         )
+        # A shared genre alone is not a reason to name a specific favorite.
+        if not any(overlap[k] for k in ("directors", "cast", "writers", "tones", "keywords")):
+            continue
         score = _overlap_score(overlap) * (0.6 + 0.4 * min(float(anchor.get("weight") or 0) / 1.55, 1.0))
         if score > 0:
             ranked_anchors.append((score, anchor, overlap))
@@ -292,19 +473,29 @@ def build_reasons(
             shared_kw = list(dict.fromkeys(shared_kw))[:2]
             shared_tones = list(dict.fromkeys(shared_tones))[:2]
 
-            bits: list[str] = ["same director"]
             if shared_tones:
-                bits.append(_tone_phrase(shared_tones) + " storytelling")
+                echo = f"{_tone_phrase(shared_tones)} storytelling"
             elif shared_kw:
-                bits.append(_pretty_label(shared_kw[0]) + " threads")
-            detail = " + ".join(bits)
+                echo = f"a shared {_pretty_label(shared_kw[0])} theme"
+            else:
+                echo = ""
+            cite = _cite(top_anchors, liked_unique)
+            who = _who(director)
+            # Vary the construction (stable per card) so a slate does not read as a template.
+            style = _variant(f"{title_name}|{director}", 3)
+            if style == 0:
+                detail = f"same director + {echo}" if echo else "same director"
+                lead = f"Because {cite} ({detail} — {who})"
+            elif style == 1:
+                tail = f", with {echo}" if echo else ""
+                lead = f"{cite[0].upper()}{cite[1:]}, and this is from the same director, {who}{tail}"
+            else:
+                tail = f" ({echo})" if echo else ""
+                lead = f"{who} again: {cite}{tail}"
             _add(
                 Reason(
                     code="because_you_liked",
-                    message=(
-                        f"Because {_cite(top_anchors, liked_unique)} "
-                        f"({detail} — {_pretty_person(director)})"
-                    ),
+                    message=lead,
                     evidence={
                         "liked_titles": liked_unique,
                         "directors": [director],
@@ -325,22 +516,27 @@ def build_reasons(
             liked = list(dict.fromkeys(liked))[:2]
             link_bits: list[str] = []
             if best_overlap["tones"]:
-                link_bits.append(_tone_phrase(best_overlap["tones"]))
+                link_bits.append(_with_article(_tone_phrase(best_overlap["tones"][:2])) + " tone")
             if best_overlap["keywords"]:
                 link_bits.append(
                     "themes like " + ", ".join(_pretty_label(k) for k in best_overlap["keywords"][:2])
                 )
             if best_overlap["cast"]:
-                link_bits.append(f"shared cast ({_pretty_person(best_overlap['cast'][0])})")
+                link_bits.append(f"cast in common ({_who(best_overlap['cast'][0])})")
+            if best_overlap["writers"]:
+                link_bits.append(f"a writer in common ({_who(best_overlap['writers'][0])})")
             if best_overlap["genres"] and len(link_bits) < 2:
-                link_bits.append(_genre_phrase(best_overlap["genres"]))
-            if not link_bits:
-                link_bits.append("a similar vibe")
-            bridge = " and ".join(link_bits[:2])
+                link_bits.append(f"a shared {_genre_adjective(best_overlap['genres'][:1])} streak")
+            bridge = ", plus ".join(link_bits[:2])
+            cite = _cite(top_anchors, liked)
+            if _variant(f"{title_name}|{liked[0]}", 2) == 0:
+                lead = f"Because {cite} — {bridge}"
+            else:
+                lead = f"{cite[0].upper()}{cite[1:]}, and this one shares {bridge}"
             _add(
                 Reason(
                     code="because_you_liked",
-                    message=f"Because {_cite(top_anchors, liked)} — {bridge}",
+                    message=lead,
                     evidence={
                         "liked_titles": liked,
                         "overlap": {k: v for k, v in best_overlap.items() if v},
@@ -352,11 +548,19 @@ def build_reasons(
     overlap_feats = top_feature_overlap(scoring_features, title_features, limit=20)
     tone_hits = [k.split(":", 1)[1] for k, s in overlap_feats if s > 0 and k.startswith("tone:")]
     genre_hits = [k.split(":", 1)[1] for k, s in overlap_feats if s > 0 and k.startswith("genre:")]
-    kw_hits = [k.split(":", 1)[1] for k, s in overlap_feats if s > 0 and k.startswith("kw:")]
+    kw_hits = [
+        k.split(":", 1)[1]
+        for k, s in overlap_feats
+        if s > 0 and k.startswith("kw:") and _is_thread_keyword(k.split(":", 1)[1])
+    ]
 
-    if tone_hits and genre_hits and len(reasons) < max_reasons:
+    if tone_hits and genre_hits and len(reasons) < max_reasons and any(
+        _TONE_ECHOES_GENRE.get(t) not in set(genre_hits) for t in tone_hits
+    ):
         # Craft "Strong match on tense psychological thrillers..."
-        tone_bit = _tone_phrase(tone_hits[:2])
+        # Drop tones that only restate the genre ("action-packed action films").
+        blend_tones = [t for t in tone_hits if _TONE_ECHOES_GENRE.get(t) not in set(genre_hits)]
+        tone_bit = _tone_phrase(blend_tones[:2])
         genre_bit = _genre_phrase(genre_hits[:2])
         extra = ""
         complex_kw = [
@@ -384,7 +588,7 @@ def build_reasons(
             Reason(
                 code="taste_blend",
                 message=msg,
-                evidence={"tones": tone_hits[:3], "genres": genre_hits[:3], "keywords": kw_hits[:3]},
+                evidence={"tones": blend_tones[:3], "genres": genre_hits[:3], "keywords": kw_hits[:3]},
             )
         )
 
@@ -415,30 +619,27 @@ def build_reasons(
             )
 
     # --- 4) Director / cast without repeating because_you_liked director beat ---
-    if "because_you_liked" not in used_codes or not any(
-        "same director" in (r.message or "") for r in reasons
-    ):
+    if not any(r.code == "because_you_liked" and r.evidence.get("directors") for r in reasons):
         dir_overlap = [
             k.split(":", 2)[-1]
             for k, s in overlap_feats
             if s > 0 and k.startswith("person:director:")
         ]
         if dir_overlap and len(reasons) < max_reasons:
-            name = _pretty_person(dir_overlap[0])
-            liked = [
-                str(a.get("name"))
+            name = _who(dir_overlap[0])
+            liked_anchors = [
+                a
                 for a in anchors
                 if dir_overlap[0] in (a.get("directors") or [])
                 and float(a.get("weight") or 0) >= _ANCHOR_MIN_WEIGHT
             ][:2]
+            liked = [str(a.get("name")) for a in liked_anchors]
             if liked:
+                tail = "you rated highly" if _rating_verb(liked_anchors, liked) == "rated" else "you liked"
                 _add(
                     Reason(
                         code="same_director",
-                        message=(
-                            f"From {_pretty_person(dir_overlap[0])}, whose work you rated highly "
-                            f"({_join_names(liked)})"
-                        ),
+                        message=f"From {name}, whose {_join_names(liked)} {tail}",
                         evidence={"directors": dir_overlap[:2], "liked_titles": liked},
                     )
                 )
@@ -457,11 +658,11 @@ def build_reasons(
         if s > 0 and k.startswith("person:cast:")
     ]
     if cast_overlap and len(reasons) < max_reasons:
-        name = _pretty_person(cast_overlap[0])
+        name = _who(cast_overlap[0])
         _add(
             Reason(
                 code="similar_cast",
-                message=f"Features {name}, talent you've responded well to before",
+                message=f"Features {name}, an actor you've responded well to before",
                 evidence={"cast": cast_overlap[:3]},
             )
         )
@@ -476,41 +677,59 @@ def build_reasons(
         ][:2]
         themes = ", ".join(_pretty_label(k) for k in kw_hits[:3])
         if theme_titles:
+            shared_themes = [
+                k
+                for k in kw_hits[:4]
+                if any(k in (a.get("keywords") or []) for a in anchors if str(a.get("name")) in theme_titles)
+            ][:3]
             _add(
                 Reason(
                     code="similar_themes",
-                    message=f"Shares themes with {_join_names(theme_titles)}: {themes}",
-                    evidence={"keywords": kw_hits[:3], "liked_titles": theme_titles},
+                    message=(
+                        f"Shares themes with {_join_names(theme_titles)}: "
+                        + ", ".join(_pretty_label(k) for k in shared_themes)
+                    ),
+                    evidence={"keywords": shared_themes, "liked_titles": theme_titles},
                 )
             )
         else:
             _add(
                 Reason(
                     code="similar_themes",
-                    message=f"Picks up threads you care about: {themes}",
+                    message=f"Picks up themes you gravitate toward: {themes}",
                     evidence={"keywords": kw_hits[:3]},
                 )
             )
 
     # --- 6) Origin / era / language (only if still need slots) ---
-    for prefix, code, template in (
-        ("country:", "similar_origin", "Leans into {x} cinema you've been rewarding"),
-        ("lang:", "similar_language", "In a language lane you already enjoy ({x})"),
-        ("decade:", "similar_era", "Sits in the {x}s — an era that scores well for you"),
+    # Each entry renders a hit into a phrase, or None when the code has no
+    # human name (then we say nothing rather than print a raw code).
+    def _origin(code: str) -> str | None:
+        adj = _COUNTRY_ADJECTIVES.get(code.upper())
+        return f"Part of the {adj} cinema you've been rewarding" if adj else None
+
+    def _language(code: str) -> str | None:
+        name = _LANGUAGE_NAMES.get(code.lower())
+        # "English-language" is true of nearly the whole catalog: not a reason.
+        if not name or code.lower() == "en":
+            return None
+        return f"A {name}-language pick, in a lane you already enjoy"
+
+    def _era(decade: str) -> str | None:
+        return f"From the {decade}s — an era that scores well for you" if decade.isdigit() else None
+
+    for prefix, code, render in (
+        ("country:", "similar_origin", _origin),
+        ("lang:", "similar_language", _language),
+        ("decade:", "similar_era", _era),
     ):
         if len(reasons) >= max_reasons:
             break
         hits = [k.split(":", 1)[1] for k, s in overlap_feats if s > 0 and k.startswith(prefix)]
-        if not hits:
+        message = next((m for m in (render(h) for h in hits) if m), None)
+        if not message:
             continue
-        label = hits[0]
-        _add(
-            Reason(
-                code=code,
-                message=template.format(x=label),
-                evidence={code: hits[:2]},
-            )
-        )
+        _add(Reason(code=code, message=message, evidence={code: hits[:2]}))
 
     # --- 7) Genre only as last structural resort, still humanized ---
     if len(reasons) < max_reasons and genre_hits:
@@ -520,12 +739,12 @@ def build_reasons(
             if set(a.get("genres") or []) & set(genre_hits[:2])
             and float(a.get("weight") or 0) >= _ANCHOR_MIN_WEIGHT
         ][:2]
-        gphrase = _genre_phrase(genre_hits[:2])
+        gphrase = _genre_adjective(genre_hits[:2])
         if liked_genre_titles:
             _add(
                 Reason(
                     code="shared_genre",
-                    message=f"In the same {gphrase} pocket as {_join_names(liked_genre_titles)}",
+                    message=f"In the same {gphrase} vein as {_join_names(liked_genre_titles)}",
                     evidence={"genres": genre_hits[:3], "liked_titles": liked_genre_titles},
                 )
             )
@@ -552,7 +771,7 @@ def build_reasons(
             _add(
                 Reason(
                     code="genre_fit",
-                    message=f"A thoughtful {title_genres[0].lower()} pick while we learn more about you",
+                    message=f"A thoughtful {_genre_adjective(title_genres[:1])} pick while we learn more about you",
                     evidence={"genres": title_genres[:2]},
                 )
             )
