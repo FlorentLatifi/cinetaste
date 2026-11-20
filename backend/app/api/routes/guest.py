@@ -40,6 +40,7 @@ from app.application.recommendation_service import RecommendationService
 from app.application.taste_service import TasteService
 from app.core.concurrency import ServiceBusyError, get_guest_rank_gate
 from app.core.config import Settings
+from app.core.singleflight import SingleFlight
 from app.core.timing import PhaseTimer, phase, start_timer, stop_timer
 from app.domain.exceptions import AppError
 from app.infrastructure.cache import get_store
@@ -59,6 +60,12 @@ GUEST_MIN_POSITIVE = 1
 # The unfiltered deck is the same for every guest, so one cached copy serves
 # them all. Short enough that a fresh ingest shows up within minutes.
 _CARDS_CACHE_TTL_SECONDS = 600
+
+# Followers wait at most this long for the request computing the deck before doing the
+# work themselves. A cold deck takes seconds on a slow database, and the connection pool
+# gives up after 5 s, so a leader that is not done by then is not coming back soon.
+_CARDS_FLIGHT_WAIT_SECONDS = 10.0
+_cards_flight: SingleFlight[OnboardingCardsOut] = SingleFlight()
 
 
 @router.get("/cards", response_model=OnboardingCardsOut)
@@ -86,28 +93,49 @@ async def guest_cards(
 async def _cards(
     session: DbSession, settings: Settings, limit: int, exclude: list[UUID] | None
 ) -> tuple[OnboardingCardsOut, str]:
-    cache_key = f"guest:cards:{limit}" if not exclude else None
+    async def build() -> OnboardingCardsOut:
+        rec = RecommendationService(session, settings)
+        with phase("cards"):
+            cards = await OnboardingService(session, TasteService(session), rec).cards(
+                limit=limit, exclude_ids=exclude
+            )
+        return OnboardingCardsOut(items=[TitleSummaryOut.from_title(t) for t in cards])
+
+    if exclude:
+        # A page of "everything but these": different for every caller, so there is
+        # nothing to share or store.
+        return await build(), "uncached"
+
+    cache_key = f"guest:cards:{limit}"
     store = get_store()
-    if cache_key:
+
+    async def lookup() -> OnboardingCardsOut | None:
         with phase("cache"):
             cached = await store.get(cache_key)
-        if cached:
-            try:
-                return OnboardingCardsOut.model_validate_json(cached), "hit"
-            except Exception:  # noqa: BLE001
-                logger.warning("guest_cards_cache_invalid key=%s", cache_key, exc_info=True)
+        if not cached:
+            return None
+        try:
+            return OnboardingCardsOut.model_validate_json(cached)
+        except Exception:  # noqa: BLE001
+            logger.warning("guest_cards_cache_invalid key=%s", cache_key, exc_info=True)
+            return None
 
-    rec = RecommendationService(session, settings)
-    with phase("cards"):
-        cards = await OnboardingService(session, TasteService(session), rec).cards(
-            limit=limit, exclude_ids=exclude
-        )
-    out = OnboardingCardsOut(items=[TitleSummaryOut.from_title(t) for t in cards])
-    if cache_key:
+    async def compute() -> OnboardingCardsOut:
+        out = await build()
         await store.set(
             cache_key, json.dumps(out.model_dump(mode="json")), ttl_seconds=_CARDS_CACHE_TTL_SECONDS
         )
-    return out, "miss" if cache_key else "uncached"
+        return out
+
+    # Many visitors landing on a cold or just-expired deck at once would each run the
+    # same query and hold a pooled connection for it. One computes; the rest wait for
+    # that result (see app.core.singleflight for how failures are handled).
+    with phase("flight"):
+        out, how = await _cards_flight.do(
+            cache_key, lookup=lookup, compute=compute, wait_seconds=_CARDS_FLIGHT_WAIT_SECONDS
+        )
+    # "computed" is this request doing the work; "shared" is waiting for someone else's.
+    return out, {"hit": "hit", "computed": "miss", "shared": "shared", "fallback": "miss"}[how]
 
 
 @router.post("/recommendations", response_model=RecommendationSlateOut)

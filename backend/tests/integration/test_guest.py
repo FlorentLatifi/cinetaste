@@ -501,3 +501,95 @@ async def test_a_refused_request_still_logs_its_wait(
     assert len(busy) == 1
     assert float(busy[0]["gate_wait_ms"]) >= 90, "the time spent queueing is what the log is for"
     assert "rank_ms" not in busy[0]
+
+
+# ------------------------------------------------------------ cards single-flight
+
+
+def _slow_cards(calls: list[dict], *, fail_first: bool = False):  # noqa: ANN202
+    """Wrap OnboardingService.cards: record calls, take long enough to overlap."""
+    from app.application.onboarding_service import OnboardingService
+    from app.domain.exceptions import AppError
+
+    real = OnboardingService.cards
+
+    async def wrapped(self, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003, ANN202
+        calls.append(kwargs)
+        await asyncio.sleep(0.2)
+        if fail_first and len(calls) == 1:
+            raise AppError("deck unavailable", status_code=503, code="deck_down")
+        return await real(self, *args, **kwargs)
+
+    return patch.object(OnboardingService, "cards", wrapped)
+
+
+async def test_a_cold_burst_of_identical_cards_requests_builds_the_deck_once(
+    client: AsyncClient, db_session: AsyncSession, api_prefix: str, caplog
+) -> None:  # noqa: ANN001
+    await seed_catalog(db_session)
+    calls: list[dict] = []
+    with _slow_cards(calls), caplog.at_level(logging.INFO, logger="cinetaste.guest.timing"):
+        responses = await asyncio.gather(
+            *(client.get(f"{api_prefix}/guest/cards", params={"limit": 12}) for _ in range(15))
+        )
+        later = await client.get(f"{api_prefix}/guest/cards", params={"limit": 12})
+
+    assert all(r.status_code == 200 for r in responses)
+    assert len(calls) == 1, "one request builds the deck; the rest wait for it"
+    assert len({r.text for r in responses}) == 1, "everyone gets the same deck"
+    assert later.text == responses[0].text
+    assert len(calls) == 1, "and the cache serves it afterwards"
+
+    outcomes = sorted(
+        line["outcome"] for line in _timing_lines(caplog) if line["event"] == "guest_cards_timing"
+    )
+    assert outcomes == ["hit"] + ["miss"] + ["shared"] * 14
+
+
+async def test_different_limits_are_different_flights(
+    client: AsyncClient, db_session: AsyncSession, api_prefix: str
+) -> None:
+    await seed_catalog(db_session)
+    calls: list[dict] = []
+    with _slow_cards(calls):
+        await asyncio.gather(
+            client.get(f"{api_prefix}/guest/cards", params={"limit": 8}),
+            client.get(f"{api_prefix}/guest/cards", params={"limit": 8}),
+            client.get(f"{api_prefix}/guest/cards", params={"limit": 12}),
+        )
+    assert sorted(c["limit"] for c in calls) == [8, 12]
+
+
+async def test_paging_requests_are_not_coalesced(
+    client: AsyncClient, db_session: AsyncSession, api_prefix: str
+) -> None:
+    """`exclude` pages are different for every caller; sharing one would be wrong."""
+    titles = await seed_catalog(db_session)
+    calls: list[dict] = []
+
+    def page(ids):  # noqa: ANN001, ANN202
+        return client.get(
+            f"{api_prefix}/guest/cards",
+            params=[("limit", "8"), *(("exclude", str(t.id)) for t in ids)],
+        )
+
+    with _slow_cards(calls):
+        first, second = await asyncio.gather(page(titles[:4]), page(titles[4:8]))
+    assert len(calls) == 2
+    shown = lambda r: {i["id"] for i in r.json()["items"]}  # noqa: E731
+    assert not shown(first) & {str(t.id) for t in titles[:4]}
+    assert not shown(second) & {str(t.id) for t in titles[4:8]}
+
+
+async def test_a_failing_deck_build_fails_only_the_leader(
+    client: AsyncClient, db_session: AsyncSession, api_prefix: str
+) -> None:
+    await seed_catalog(db_session)
+    calls: list[dict] = []
+    with _slow_cards(calls, fail_first=True):
+        responses = await asyncio.gather(
+            *(client.get(f"{api_prefix}/guest/cards", params={"limit": 12}) for _ in range(6))
+        )
+    statuses = sorted(r.status_code for r in responses)
+    assert statuses == [200] * 5 + [503], "followers do not inherit the leader's error"
+    assert len(calls) == 6, "each follower then built the deck itself, as it did before single-flight"
