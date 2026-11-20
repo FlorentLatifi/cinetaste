@@ -12,7 +12,7 @@ Do not hard-code weights in random call sites — import from that module.
 ```
 User action
     → InteractionEvent (append-only log, stores event_type + weight)
-    → optional UserTitleState update (current relationship)
+    → UserTitleState = resolve_title_state(this title's events)  (current relationship)
     → TasteService.recompute_profile()
          • sparse: feature_snapshot[key] × weight  (genres, people, tone, …)
          • dense:  blend title embeddings by weight
@@ -84,7 +84,13 @@ For You and prior events for that title are superseded on recompute.
 1. User taps **Watched** → rate panel (Bad / It's ok / Good / Favorite).  
 2. Choosing a rating records `rate_1`…`rate_4` (full learning + feed exclusion).  
 3. **Watched — skip rating** records `watched` only (weak positive, still excluded from For You).  
-4. Undo uses `clear` like other feed actions.
+4. Once a title has a rating the page shows it ("Seen it · Loved it") and no
+   longer offers **Want to watch**, **Not for me** or **skip rating** — none of
+   them would change the title's state (see *Durable title state*), and their
+   un-toggle would have sent `clear`.
+5. Undo re-sends the previous event when that is enough (rating → other
+   rating); it sends `clear` + the previous event only to step back from a
+   rating to an unrated state, so it never erases a rating.
 
 ---
 
@@ -113,6 +119,40 @@ Onboarding requires **≥ 6** real ratings (`rate_1`, `mid`, `rate_2`–`rate_4`
 `haven't_seen` does **not** count toward either gate, and repeating the same
 title counts once.
 
+### Durable title state (`user_title_state`)
+
+`UserTitleState.state` is **derived from the title's whole event log**, not
+from the newest event alone: `resolve_title_state()` in `taste_signals.py`,
+called by `TasteService.record_interaction` (reads only that user + title's
+events) and by the detail endpoint's `my_state` / `my_rating`.
+
+Same collapsing rule as the profile:
+
+1. Events at or before the latest `clear` are ignored; `clear` alone → `none`.
+2. Strongest tier wins — opinion > intent > none (`haven't_seen`); within a
+   tier the latest wins. `view` / `skip` set no state.
+
+| Sequence | State | `my_rating` | Why |
+|----------|-------|-------------|-----|
+| `rate_4` → `watchlist` | `like` | `rate_4` | Intent never replaces an opinion |
+| `rate_4` → `watched` | `like` | `rate_4` | "Seen it, skip rating" keeps the rating |
+| `rate_3` → `haven't_seen` | `like` | `rate_3` | `haven't_seen` never replaces anything — stays out of For You |
+| `watchlist` → `rate_3` | `like` | `rate_3` | An opinion replaces an intent |
+| `watchlist` → `watched` | `watched` | — | Latest intent wins |
+| `rate_4` → `rate_1` / `not_interested` | `dislike` / `not_interested` | `rate_1` / — | Latest opinion wins |
+| `rate_4` → `clear` → `rate_1` | `dislike` | `rate_1` | Only events after the clear count |
+
+**Watchlist and a rating do not coexist.** Once a title is rated, the state
+is the rating: a rated title is a seen title, the watchlist is for things to
+watch next, and keeping one state per title keeps feed exclusion, History and
+the detail page in agreement. The SPA therefore shows the rating instead of
+"Want to watch" on a rated title. A `watchlist` event on a rated title is still
+logged (and still ignored by the profile, which keeps the rating).
+
+Rows written before this rule can be recomputed with
+`python -m app.scripts.repair_title_states` (dry run by default; `--apply` to
+write). It is idempotent and preserves `updated_at`.
+
 ### Undo / clear (feed toast)
 
 | | |
@@ -120,7 +160,12 @@ title counts once.
 | Taste features | Prior events for that **title** are ignored after `clear` (append-only undo) |
 | Taste vector | Same — recompute skips superseded events |
 | UserTitleState | Set to **`none`** (not excluded from For You) |
-| When to use | SPA “Undo” after Pass / Not interested / Like / Save |
+| When to use | SPA “Undo” after Pass / Not interested / Like / Save; History **Clear**; un-toggling “In your watchlist” / “Not for you” on an **unrated** title |
+| Never | To remove an intent from a rated title — `clear` would erase the rating too |
+
+For You's Undo waits for the action's own request to finish before sending
+`clear`; a `clear` that arrived first would be applied first and the action
+would stick.
 
 A later rating after `clear` applies normally (only events *after* the latest clear count).
 

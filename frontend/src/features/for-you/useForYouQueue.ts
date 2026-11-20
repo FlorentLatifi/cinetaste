@@ -44,6 +44,10 @@ export function useForYouQueue() {
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Synchronous guard: two clicks in one frame both see stale React state.
   const inFlight = useRef<Set<string>>(new Set());
+  // The interaction request still out for each title, resolving to whether it
+  // was recorded. Undo waits on it: a `clear` that overtakes the action it
+  // undoes is applied first, and the action then sticks.
+  const pending = useRef<Map<string, Promise<boolean>>>(new Map());
 
   const needsOnboarding = !user?.onboarding_completed_at;
 
@@ -134,6 +138,17 @@ export function useForYouQueue() {
         next.delete(titleId);
         return next;
       });
+      // Start the request before the toast exists, so Undo always finds it.
+      const request = interact(accessToken, titleId, event).then(
+        () => true,
+        (err: unknown) => {
+          restore(item, index);
+          dismissToast();
+          setError(err instanceof ApiError ? err.message : "Action failed");
+          return false;
+        },
+      );
+      pending.current.set(titleId, request);
       showUndoToast({
         item,
         action: event,
@@ -142,13 +157,10 @@ export function useForYouQueue() {
       });
 
       try {
-        await interact(accessToken, titleId, event);
-      } catch (err) {
-        restore(item, index);
-        dismissToast();
-        setError(err instanceof ApiError ? err.message : "Action failed");
+        await request;
       } finally {
         inFlight.current.delete(titleId);
+        if (pending.current.get(titleId) === request) pending.current.delete(titleId);
       }
     },
     [accessToken, items, showUndoToast, dismissToast, restore],
@@ -157,10 +169,15 @@ export function useForYouQueue() {
   const undoLast = useCallback(async () => {
     if (!accessToken || !toast || undoBusy) return;
     const { item, index } = toast;
+    const titleId = item.title.id;
     setUndoBusy(true);
     setError(null);
     try {
-      await interact(accessToken, item.title.id, "clear");
+      // Undo must land after the action it undoes.
+      const recorded = await (pending.current.get(titleId) ?? Promise.resolve(true));
+      // The action failed: act() already put the card back and said so.
+      if (!recorded) return;
+      await interact(accessToken, titleId, "clear");
       restore(item, index);
       dismissToast();
     } catch (err) {

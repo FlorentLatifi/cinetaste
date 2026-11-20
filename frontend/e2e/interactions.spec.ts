@@ -104,6 +104,25 @@ test("For You: several picks in a row, and a pass can be undone", async ({ page 
   await expect(page.getByRole("heading", { name: mockTitle.name })).toBeVisible();
 });
 
+test("For You: Undo clicked at once waits for the action, then clears", async ({ page }) => {
+  // The action's request is still out when Undo is pressed. If `clear` overtook
+  // it, the server would apply clear first and the pass would stick.
+  const mock = await installApiMock(page, { onboardingComplete: true, interactionDelayMs: 600 });
+  await page.goto("/");
+  await page.getByRole("heading", { name: mockTitle.name }).waitFor();
+
+  await page.getByRole("button", { name: `Not for me — ${mockTitle.name}` }).click();
+  await page.getByRole("button", { name: "Undo" }).click();
+  await expect(page.getByRole("heading", { name: mockTitle.name })).toBeVisible();
+  await expect.poll(() => mock.interactionLog().length).toBe(2);
+
+  const [action, undo] = mock.interactionLog();
+  expect(action.event).toBe("not_interested");
+  expect(undo.event).toBe("clear");
+  expect(action.fulfilledAt).not.toBeNull();
+  expect(undo.receivedAt).toBeGreaterThanOrEqual(action.fulfilledAt!);
+});
+
 test("For You: arrow keys browse and W saves the pick in view", async ({ page }) => {
   await installApiMock(page, { onboardingComplete: true });
   await page.goto("/");
@@ -376,14 +395,16 @@ test("For You: malformed item with null poster does not crash", async ({
 });
 
 test("Title detail: shows what you did and lets you change or undo it", async ({ page }) => {
-  await installApiMock(page, { onboardingComplete: true });
+  const mock = await installApiMock(page, { onboardingComplete: true });
   await page.goto(`/titles/${mockTitle.id}`);
   await page.getByRole("heading", { name: mockTitle.name }).waitFor();
 
   // Same words as For You.
   const want = page.getByRole("button", { name: `Want to watch — ${mockTitle.name}` });
-  await expect(want).toBeVisible();
-  await expect(page.getByRole("button", { name: `Not for me — ${mockTitle.name}` })).toBeVisible();
+  await want.click();
+  await expect(
+    page.getByRole("button", { name: `In your watchlist — remove ${mockTitle.name}` }),
+  ).toHaveAttribute("aria-pressed", "true");
 
   await page.getByRole("button", { name: `Seen it — rate ${mockTitle.name}` }).click();
   await expect(page.getByText("How was it?")).toBeVisible();
@@ -392,19 +413,72 @@ test("Title detail: shows what you did and lets you change or undo it", async ({
   await expect(
     page.getByRole("button", { name: `Seen it — rate ${mockTitle.name}` }),
   ).toHaveText(/Seen it · Really liked it/);
+  // A rated title shows its rating; saving it or rejecting it is no longer offered.
+  await expect(page.getByRole("button", { name: /Want to watch —|In your watchlist —/ })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: `Not for me — ${mockTitle.name}` })).toHaveCount(0);
 
-  await want.click();
-  const inList = page.getByRole("button", { name: `In your watchlist — remove ${mockTitle.name}` });
-  await expect(inList).toHaveAttribute("aria-pressed", "true");
-
-  // Undo puts back the rating, not a blank slate.
+  // Undo steps back to the watchlist: clear the rating, re-save.
   await page.locator(".detail-action-status").getByRole("button", { name: "Undo" }).click();
   await expect(
-    page.getByRole("button", { name: `Want to watch — ${mockTitle.name}` }),
-  ).toBeVisible();
+    page.getByRole("button", { name: `In your watchlist — remove ${mockTitle.name}` }),
+  ).toHaveAttribute("aria-pressed", "true");
   await expect(
     page.getByRole("button", { name: `Seen it — rate ${mockTitle.name}` }),
-  ).toHaveText(/Seen it · Really liked it/);
+  ).toHaveText("Seen it");
+  expect(mock.interactionLog().map((e) => e.event)).toEqual([
+    "watchlist",
+    "rate_3",
+    "clear",
+    "watchlist",
+  ]);
+});
+
+test("Title detail: changing a rating and undoing it never sends clear", async ({ page }) => {
+  const mock = await installApiMock(page, {
+    onboardingComplete: true,
+    detailState: "like",
+    detailRating: "rate_4",
+  });
+  await page.goto(`/titles/${mockTitle.id}`);
+  const seen = page.getByRole("button", { name: `Seen it — rate ${mockTitle.name}` });
+  await expect(seen).toHaveText(/Seen it · Loved it/);
+
+  await seen.click();
+  await expect(page.getByRole("button", { name: "Seen it — skip rating" })).toHaveCount(0);
+  await page.getByRole("button", { name: `Rate ${mockTitle.name}: Didn't like it` }).click();
+  await expect(seen).toHaveText(/Seen it · Didn't like it/);
+
+  await page.locator(".detail-action-status").getByRole("button", { name: "Undo" }).click();
+  await expect(seen).toHaveText(/Seen it · Loved it/);
+  expect(mock.interactionLog().map((e) => e.event)).toEqual(["rate_1", "rate_4"]);
+});
+
+test("Title detail: a rated title arriving from the API offers no watchlist toggle", async ({
+  page,
+}) => {
+  await installApiMock(page, {
+    onboardingComplete: true,
+    detailState: "like",
+    detailRating: "rate_4",
+  });
+  await page.goto(`/titles/${mockTitle.id}`);
+  await expect(
+    page.getByRole("button", { name: `Seen it — rate ${mockTitle.name}` }),
+  ).toHaveText(/Seen it · Loved it/);
+  await expect(page.getByRole("button", { name: /Want to watch —|In your watchlist —/ })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /Not for me —|Marked not for you —/ })).toHaveCount(0);
+});
+
+test("Title detail: removing an unrated title from the watchlist clears it", async ({ page }) => {
+  const mock = await installApiMock(page, { onboardingComplete: true, detailState: "watchlist" });
+  await page.goto(`/titles/${mockTitle.id}`);
+  await page
+    .getByRole("button", { name: `In your watchlist — remove ${mockTitle.name}` })
+    .click();
+  await expect(
+    page.getByRole("button", { name: `Want to watch — ${mockTitle.name}` }),
+  ).toHaveAttribute("aria-pressed", "false");
+  expect(mock.interactionLog().map((e) => e.event)).toEqual(["clear"]);
 });
 
 test("Title detail: a title already in the watchlist says so on arrival", async ({ page }) => {

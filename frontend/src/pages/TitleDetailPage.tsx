@@ -13,6 +13,16 @@ import { DetailSkeleton } from "../components/CatalogSkeleton";
 import { LoadFailed } from "../components/LoadFailed";
 import { useAuth } from "../features/auth/AuthContext";
 import { POST_WATCH_RATINGS, ratingLabel } from "../features/taste/ratingScale";
+import {
+  canClearFromToggle,
+  NO_STATUS,
+  offersNotForMe,
+  offersSkipRating,
+  offersWatchlist,
+  statusAfter,
+  undoRequests,
+  type ViewerStatus,
+} from "../features/taste/titleStatus";
 import { heroPosterUrl, posterSrcSet } from "../lib/poster";
 
 const WATCH_REGIONS = [
@@ -84,49 +94,13 @@ function splitCredits(credits: Credit[]) {
   return { cast, directors, writers };
 }
 
-type ViewerStatus = { state: string | null; rating: string | null };
-const NO_STATUS: ViewerStatus = { state: null, rating: null };
-
-/** What the API will report after this action (mirrors taste_signals). */
-function statusAfter(event: FeedbackAction | "clear"): ViewerStatus {
-  switch (event) {
-    case "clear":
-      return NO_STATUS;
-    case "rate_1":
-      return { state: "dislike", rating: event };
-    case "rate_3":
-    case "rate_4":
-      return { state: "like", rating: event };
-    case "rate_2":
-    case "mid":
-      return { state: "rated", rating: event };
-    case "watchlist":
-    case "not_interested":
-    case "watched":
-      return { state: event, rating: null };
-    default:
-      return { state: event, rating: null };
-  }
-}
-
-/** The single event that recreates a status, for Undo. */
-function eventFor(status: ViewerStatus): FeedbackAction | null {
-  if (status.rating) return status.rating as FeedbackAction;
-  switch (status.state) {
-    case "watchlist":
-    case "not_interested":
-    case "watched":
-    case "like":
-    case "dislike":
-      return status.state;
-    default:
-      return null;
-  }
-}
-
 /** "Loved it", "It was ok"… for a rated title, or null. */
 function ratedLabel(status: ViewerStatus): string | null {
   if (status.rating) return ratingLabel(status.rating as FeedbackAction) ?? null;
+  // Opinions recorded without the rating scale (feed shortcuts, older events).
+  if (status.state === "like") return "Liked";
+  if (status.state === "dislike") return "Didn't like it";
+  if (status.state === "rated") return "Rated";
   if (status.state === "watched") return "no rating";
   return null;
 }
@@ -260,12 +234,16 @@ export function TitleDetailPage() {
 
   async function act(event: FeedbackAction | "clear") {
     if (!accessToken || !title || busy) return;
+    // `clear` drops every earlier event for the title, rating included. The
+    // toggles that send it are only rendered without a rating; this is the
+    // backstop so no button can ever erase one.
+    if (event === "clear" && !canClearFromToggle(status)) return;
     setBusy(true);
     setError(null);
     const before = status;
     try {
       await titlesApi.interact(accessToken, title.id, event);
-      setStatus(statusAfter(event));
+      setStatus(statusAfter(before, event));
       setRateOpen(false);
       if (event === "clear") {
         setUndoTo(null);
@@ -292,15 +270,21 @@ export function TitleDetailPage() {
     if (!accessToken || !title || !undoTo || undoBusy) return;
     setUndoBusy(true);
     setError(null);
+    // What the server holds so far, so a half-finished undo is shown as it is.
+    let reached = status;
     try {
-      await titlesApi.interact(accessToken, title.id, "clear");
-      const restore = eventFor(undoTo);
-      if (restore) await titlesApi.interact(accessToken, title.id, restore);
+      // Usually one request (re-send what was there). `clear` is only used to
+      // step back from a rating to an unrated state, never to erase a rating.
+      for (const event of undoRequests(undoTo, status)) {
+        await titlesApi.interact(accessToken, title.id, event);
+        reached = statusAfter(reached, event);
+      }
       setStatus(undoTo);
       setUndoTo(null);
       setRateOpen(false);
       dismissToast();
     } catch (err) {
+      setStatus(reached);
       setError(err instanceof ApiError ? err.message : "Could not undo");
     } finally {
       setUndoBusy(false);
@@ -420,20 +404,22 @@ export function TitleDetailPage() {
             role="group"
             aria-label={`Actions for ${title.name}`}
           >
-            <button
-              type="button"
-              className={`btn ${status.state === "watchlist" ? "primary" : "ghost"}`}
-              disabled={busy}
-              aria-pressed={status.state === "watchlist"}
-              aria-label={
-                status.state === "watchlist"
-                  ? `In your watchlist — remove ${title.name}`
-                  : `Want to watch — ${title.name}`
-              }
-              onClick={() => void act(status.state === "watchlist" ? "clear" : "watchlist")}
-            >
-              {status.state === "watchlist" ? "✓ In your watchlist" : "＋ Want to watch"}
-            </button>
+            {offersWatchlist(status) && (
+              <button
+                type="button"
+                className={`btn ${status.state === "watchlist" ? "primary" : "ghost"}`}
+                disabled={busy}
+                aria-pressed={status.state === "watchlist"}
+                aria-label={
+                  status.state === "watchlist"
+                    ? `In your watchlist — remove ${title.name}`
+                    : `Want to watch — ${title.name}`
+                }
+                onClick={() => void act(status.state === "watchlist" ? "clear" : "watchlist")}
+              >
+                {status.state === "watchlist" ? "✓ In your watchlist" : "＋ Want to watch"}
+              </button>
+            )}
             <button
               type="button"
               className={`btn ${ratedLabel(status) ? "primary" : "ghost"}`}
@@ -445,22 +431,24 @@ export function TitleDetailPage() {
             >
               {ratedLabel(status) ? `Seen it · ${ratedLabel(status)}` : "Seen it"}
             </button>
-            <button
-              type="button"
-              className={`btn ${status.state === "not_interested" ? "primary" : "ghost"}`}
-              disabled={busy}
-              aria-pressed={status.state === "not_interested"}
-              aria-label={
-                status.state === "not_interested"
-                  ? `Marked not for you — undo for ${title.name}`
-                  : `Not for me — ${title.name}`
-              }
-              onClick={() =>
-                void act(status.state === "not_interested" ? "clear" : "not_interested")
-              }
-            >
-              {status.state === "not_interested" ? "✓ Not for you" : "Not for me"}
-            </button>
+            {offersNotForMe(status) && (
+              <button
+                type="button"
+                className={`btn ${status.state === "not_interested" ? "primary" : "ghost"}`}
+                disabled={busy}
+                aria-pressed={status.state === "not_interested"}
+                aria-label={
+                  status.state === "not_interested"
+                    ? `Marked not for you — undo for ${title.name}`
+                    : `Not for me — ${title.name}`
+                }
+                onClick={() =>
+                  void act(status.state === "not_interested" ? "clear" : "not_interested")
+                }
+              >
+                {status.state === "not_interested" ? "✓ Not for you" : "Not for me"}
+              </button>
+            )}
           </div>
 
           {rateOpen && (
@@ -487,14 +475,16 @@ export function TitleDetailPage() {
                   </button>
                 ))}
               </div>
-              <button
-                type="button"
-                className="text-btn detail-rate-skip"
-                disabled={busy}
-                onClick={() => void act("watched")}
-              >
-                Seen it — skip rating
-              </button>
+              {offersSkipRating(status) && (
+                <button
+                  type="button"
+                  className="text-btn detail-rate-skip"
+                  disabled={busy}
+                  onClick={() => void act("watched")}
+                >
+                  Seen it — skip rating
+                </button>
+              )}
             </div>
           )}
 

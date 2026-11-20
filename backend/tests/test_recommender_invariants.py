@@ -14,7 +14,13 @@ from uuid import uuid4
 import pytest
 
 from app.application.taste_summary import merge_import_overlay, rank_features
-from app.domain.taste_signals import decay_factor, effective_title_signals, weight_for
+from app.domain.taste_signals import (
+    FEED_EXCLUDE_STATES,
+    decay_factor,
+    effective_title_signals,
+    resolve_title_state,
+    weight_for,
+)
 from app.recommendation.embeddings import (
     PersonSignal,
     cosine,
@@ -67,6 +73,54 @@ def test_clear_removes_everything_before_it() -> None:
         [_event(t, "rate_4", 0), _event(t, "clear", 1), _event(t, "rate_1", 2)]
     )
     assert signals[t].event_type == "rate_1"
+
+
+def test_rating_survives_watchlist_in_profile_and_state() -> None:
+    t = uuid4()
+    seq = ["rate_4", "watchlist"]
+    signals = effective_title_signals([_event(t, e, i) for i, e in enumerate(seq)])
+    assert signals[t].event_type == "rate_4"
+    assert resolve_title_state(seq).rating == "rate_4"
+
+
+def test_detail_page_watchlist_removal_cannot_erase_a_rating() -> None:
+    """rate_4 → watchlist → (UI removes the watchlist entry).
+
+    The page no longer offers the watchlist toggle on a rated title, so the
+    only events the UI path produces are the rating and the save; the rating
+    is what both the profile and the stored state keep. ``clear`` is still an
+    explicit reset (History "Clear"), and that is the only way it goes.
+    """
+    t = uuid4()
+    ui_path = ["rate_4", "watchlist"]
+    assert resolve_title_state(ui_path).state == "like"
+    assert effective_title_signals([_event(t, e, i) for i, e in enumerate(ui_path)])[
+        t
+    ].event_type == "rate_4"
+    explicit_reset = [*ui_path, "clear"]
+    assert resolve_title_state(explicit_reset).state == "none"
+    assert t not in effective_title_signals(
+        [_event(t, e, i) for i, e in enumerate(explicit_reset)]
+    )
+
+
+def test_rated_title_marked_watched_keeps_its_rating() -> None:
+    assert resolve_title_state(["rate_4", "watched"]).rating == "rate_4"
+
+
+def test_rated_title_stays_out_of_for_you_after_havent_seen() -> None:
+    t = uuid4()
+    seq = ["rate_3", "haven't_seen"]
+    assert resolve_title_state(seq).state in FEED_EXCLUDE_STATES
+    # Still an explain anchor, so it must not be recommended back.
+    assert effective_title_signals([_event(t, e, i) for i, e in enumerate(seq)])[
+        t
+    ].event_type == "rate_3"
+
+
+def test_rating_after_watchlist_or_clear_takes_over() -> None:
+    assert resolve_title_state(["watchlist", "rate_3"]).state == "like"
+    assert resolve_title_state(["clear", "rate_1"]) == resolve_title_state(["rate_1"])
 
 
 def test_havent_seen_carries_no_signal() -> None:

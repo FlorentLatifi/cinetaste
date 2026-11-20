@@ -543,6 +543,63 @@ def effective_title_signals(
     return out
 
 
+@dataclass(frozen=True, slots=True)
+class ResolvedTitleState:
+    """What one user's event log for one title currently means.
+
+    ``state`` is the durable ``UserTitleState.state`` value (``"none"`` when the
+    log is empty or reset). ``rating`` is the rating event (``rate_1``…``rate_4``
+    or ``mid``) when the winning event is an explicit rating, else ``None``.
+    """
+
+    state: str
+    rating: str | None
+
+
+def resolve_title_state(event_types: Iterable[str]) -> ResolvedTitleState:
+    """Derive the durable state of one title from its events, oldest first.
+
+    Same collapsing rules as :func:`effective_title_signals`, applied to the
+    events that set a durable state:
+
+    1. A ``clear`` resets everything before it (state ``"none"``).
+    2. The strongest tier wins — opinion > intent > none (``haven't_seen``);
+       within a tier the latest event wins. Implicit events (view, skip) set no
+       state and are ignored.
+
+    Consequences the product relies on:
+
+    * an intent (watchlist, watched) never replaces a rating or other opinion —
+      a rated title stays rated, which keeps it out of For You and keeps the
+      rating on the detail page and in History;
+    * ``haven't_seen`` never replaces an opinion or an intent;
+    * a later opinion (re-rating, not interested) does replace an earlier one.
+
+    The input is ordered rather than timestamped on purpose: events written in
+    one transaction share ``created_at`` (Postgres ``now()``), so callers decide
+    the order — ``record_interaction`` appends the event it is writing last.
+    """
+    best_rank = -1
+    best_event: str | None = None
+    for event_type in event_types:
+        if event_type == "clear":
+            best_rank, best_event = -1, None
+            continue
+        policy = SIGNAL_POLICIES.get(event_type)
+        if policy is None or policy.user_title_state is None:
+            continue
+        rank = _TIER_RANK[policy.tier]
+        # ">=" keeps the latest event within the strongest tier.
+        if rank >= best_rank:
+            best_rank, best_event = rank, event_type
+
+    if best_event is None:
+        return ResolvedTitleState(state="none", rating=None)
+    state = SIGNAL_POLICIES[best_event].user_title_state or "none"
+    rating = best_event if best_event in RATING_EVENT_TYPES else None
+    return ResolvedTitleState(state=state, rating=rating)
+
+
 def policy_table_markdown() -> str:
     """Render the policy table (used by docs / debugging)."""
     lines = [
