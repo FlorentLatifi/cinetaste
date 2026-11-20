@@ -503,11 +503,19 @@ def build_title_signals(
         countries=country_list,
     )
     tone_tags = sorted(tones_from_keywords(kw_list).keys())
+    # Feature keys are lowercased, so keep the original casing of people for
+    # explanations ("Leonardo DiCaprio"). Lives in Title.extra (JSON): no schema change.
+    display_names = {
+        p.feature_key(): p.name.strip()
+        for p in person_list
+        if p.name.strip() and p.feature_key() in features
+    }
     meta = {
         "feature_schema_version": FEATURE_SCHEMA_VERSION,
         "origin_countries": country_list,
         "tone_tags": tone_tags,
         "feature_snapshot": features,
+        "display_names": display_names,
     }
     return embedding, features, meta
 

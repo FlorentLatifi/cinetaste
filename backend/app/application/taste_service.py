@@ -112,6 +112,7 @@ async def load_profile_titles(
             year=row.release_date.year if row.release_date else None,
             feature_snapshot=(row.extra or {}).get("feature_snapshot") or {},
             embedding=row.embedding,
+            display_names=(row.extra or {}).get("display_names") or {},
         )
         for row in rows
     }

@@ -63,6 +63,7 @@ class EvalTitle:
             year=self.year,
             feature_snapshot=(self.extra or {}).get("feature_snapshot") or {},
             embedding=self.embedding,
+            display_names=(self.extra or {}).get("display_names") or {},
         )
 
 
