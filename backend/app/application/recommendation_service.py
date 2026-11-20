@@ -21,6 +21,7 @@ from app.application.history_cursor import (
 from app.application.popular_pool import PopularPool, candidate_query
 from app.application.taste_service import load_profile_titles
 from app.core.config import Settings
+from app.core.timing import phase
 from app.data.onboarding_seed import (
     load_onboarding_seed_deck,
     order_titles_by_seed,
@@ -236,7 +237,8 @@ class RecommendationService:
         """Candidates + ranking for one taste profile, stored or not."""
         user_features, explain_memory = strip_explain_memory(raw_features)
 
-        titles = await self._load_candidates(user_vector=user_vector, exclude_ids=exclude_ids)
+        with phase("candidates"):
+            titles = await self._load_candidates(user_vector=user_vector, exclude_ids=exclude_ids)
         if titles and not any(t.embedding is not None for t in titles):
             # Ranking drops every title whose embedding is NULL, so this returns
             # an empty slate with a 200 and no other sign that anything is
@@ -249,19 +251,20 @@ class RecommendationService:
             )
 
         # Ranking is CPU work (numpy + Python); keep it off the event loop.
-        ranked = await to_thread.run_sync(
-            partial(
-                rank_titles,
-                user_vector=user_vector,
-                user_features=user_features,
-                titles=titles,
-                exclude_ids=exclude_ids,
-                slate_size=slate_size,
-                mmr_lambda=self._settings.rec_mmr_lambda,
-                exploration_slots=self._settings.rec_exploration_slots,
-                explain_memory=explain_memory,
+        with phase("rank"):
+            ranked = await to_thread.run_sync(
+                partial(
+                    rank_titles,
+                    user_vector=user_vector,
+                    user_features=user_features,
+                    titles=titles,
+                    exclude_ids=exclude_ids,
+                    slate_size=slate_size,
+                    mmr_lambda=self._settings.rec_mmr_lambda,
+                    exploration_slots=self._settings.rec_exploration_slots,
+                    explain_memory=explain_memory,
+                )
             )
-        )
         return titles, ranked
 
     async def guest_slate(
@@ -285,9 +288,9 @@ class RecommendationService:
             ),
             now=start,
         )
-        built = build_profile(
-            signals.values(), await load_profile_titles(self._session, list(signals))
-        )
+        with phase("profile"):
+            profile_titles = await load_profile_titles(self._session, list(signals))
+            built = build_profile(signals.values(), profile_titles)
         titles, ranked = await self._rank_for_profile(
             user_vector=built.vector,
             raw_features=built.features_with_memory(),

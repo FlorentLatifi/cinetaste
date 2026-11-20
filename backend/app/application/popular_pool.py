@@ -28,6 +28,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.timing import note, phase
 from app.infrastructure.db.models.catalog import Title
 
 SessionFactory = Callable[[], AbstractAsyncContextManager[AsyncSession]]
@@ -61,13 +62,16 @@ class PopularPool:
     async def get(self, limit: int) -> tuple[Title, ...]:
         now = self._clock()
         if self._titles and self._limit == limit and now < self._expires_at:
+            note("pool", "memory")
             return self._titles
+        note("pool", "loaded")
         async with self._session_factory() as session:
-            rows = (
-                await session.scalars(
-                    candidate_query().order_by(Title.popularity.desc()).limit(limit)
-                )
-            ).all()
+            with phase("pool_load"):
+                rows = (
+                    await session.scalars(
+                        candidate_query().order_by(Title.popularity.desc()).limit(limit)
+                    )
+                ).all()
         self.loads += 1
         titles = tuple(rows)
         if titles and self._ttl > 0:

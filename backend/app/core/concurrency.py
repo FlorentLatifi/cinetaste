@@ -13,10 +13,12 @@ requirement for no gain at that size.
 from __future__ import annotations
 
 import asyncio
+import time
 import weakref
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+from app.core.timing import add_phase_seconds
 from app.domain.exceptions import AppError
 
 
@@ -75,6 +77,18 @@ class ConcurrencyGate:
 
     @asynccontextmanager
     async def slot(self) -> AsyncIterator[None]:
+        waited_from = time.perf_counter()
+        try:
+            await self._acquire()
+        finally:
+            # Time spent queueing for a slot, refused or not, for the timing log.
+            add_phase_seconds("gate_wait", time.perf_counter() - waited_from)
+        try:
+            yield
+        finally:
+            self._semaphore().release()
+
+    async def _acquire(self) -> None:
         sem = self._semaphore()
         if sem.locked():
             if self._waiting >= self.max_waiters or self.max_wait_seconds <= 0:
@@ -88,10 +102,6 @@ class ConcurrencyGate:
                 self._waiting -= 1
         else:
             await sem.acquire()
-        try:
-            yield
-        finally:
-            sem.release()
 
 
 _guest_gate: ConcurrencyGate | None = None
