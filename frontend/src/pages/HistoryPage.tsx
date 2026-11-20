@@ -8,6 +8,7 @@ import { LoadFailed } from "../components/LoadFailed";
 import { PosterCard } from "../components/PosterCard";
 import { useAuth } from "../features/auth/AuthContext";
 import { prefersReducedMotion } from "../features/taste/snapshot";
+import { historyBadgeLabel } from "../features/taste/titleStatus";
 
 const PAGE_SIZE = 20;
 
@@ -217,7 +218,7 @@ export function HistoryPage() {
                     headingLevel="h2"
                     badge={
                       <span className={`history-badge state-${item.state}`}>
-                        {item.label}
+                        {historyBadgeLabel(item)}
                       </span>
                     }
                   >

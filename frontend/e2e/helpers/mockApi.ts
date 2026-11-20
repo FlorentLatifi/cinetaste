@@ -67,9 +67,19 @@ function json(data: unknown, status = 200) {
  * Intercept SPA API calls so authenticated routes render without a backend.
  * Matches Vite preview / production base path `/api/v1`.
  */
+/** One POST …/interactions as the mock server saw it. */
+export type InteractionLogEntry = {
+  event: string;
+  /** ms since the mock was installed, when the request arrived / was answered. */
+  receivedAt: number;
+  fulfilledAt: number | null;
+};
+
 export type ApiMockHandle = {
   /** Number of POST …/interactions calls fulfilled (or attempted). */
   interactionPosts: () => number;
+  /** Every interaction in arrival order, with timing (for ordering races). */
+  interactionLog: () => InteractionLogEntry[];
 };
 
 export async function installApiMock(
@@ -103,12 +113,16 @@ export async function installApiMock(
     verifyFirst?: boolean;
     /** The viewer's state on the title detail page (my_state). */
     detailState?: string;
+    /** The viewer's rating on the title detail page (my_rating). */
+    detailRating?: string;
   } = {},
 ): Promise<ApiMockHandle> {
   const onboardingComplete = opts.onboardingComplete !== false;
   const base = onboardingComplete ? mockUserComplete : mockUserNeedsOnboarding;
   const user = opts.emailUnverified ? { ...base, email_verified_at: null } : base;
   let interactionPosts = 0;
+  const interactionLog: InteractionLogEntry[] = [];
+  const startedAt = Date.now();
   const failedOnce = new Set<string>();
   let refreshCalls = 0;
 
@@ -523,6 +537,7 @@ export async function installApiMock(
         title: mockTitle,
         state: "like",
         label: "Liked",
+        rating: "rate_4",
         updated_at: "2026-01-15T12:00:00.000Z",
       };
       const page2Title = {
@@ -534,6 +549,7 @@ export async function installApiMock(
         title: page2Title,
         state: "like",
         label: "Liked",
+        rating: null,
         updated_at: "2026-01-10T12:00:00.000Z",
       };
       const all = !stateFilter || stateFilter === "like" ? [page1, page2] : [];
@@ -610,7 +626,7 @@ export async function installApiMock(
       await route.fulfill(
         json({
           my_state: opts.detailState ?? null,
-          my_rating: null,
+          my_rating: opts.detailRating ?? null,
           ...mockTitle,
           credits: [
             {
@@ -638,6 +654,18 @@ export async function installApiMock(
 
     if (method === "POST" && path.includes("/interactions")) {
       interactionPosts += 1;
+      let event = "";
+      try {
+        event = String((req.postDataJSON() as { event_type?: string })?.event_type ?? "");
+      } catch {
+        // not JSON
+      }
+      const entry: InteractionLogEntry = {
+        event,
+        receivedAt: Date.now() - startedAt,
+        fulfilledAt: null,
+      };
+      interactionLog.push(entry);
       if (opts.interactionDelayMs && opts.interactionDelayMs > 0) {
         await new Promise((r) => setTimeout(r, opts.interactionDelayMs));
       }
@@ -645,9 +673,11 @@ export async function installApiMock(
         await route.fulfill(
           json({ message: "Unauthorized", code: "unauthorized" }, 401),
         );
+        entry.fulfilledAt = Date.now() - startedAt;
         return;
       }
       await route.fulfill({ status: 204, body: "" });
+      entry.fulfilledAt = Date.now() - startedAt;
       return;
     }
 
@@ -668,5 +698,6 @@ export async function installApiMock(
 
   return {
     interactionPosts: () => interactionPosts,
+    interactionLog: () => interactionLog.map((e) => ({ ...e })),
   };
 }

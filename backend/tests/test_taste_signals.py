@@ -23,11 +23,13 @@ from app.domain.taste_signals import (
     STATE_FROM_EVENT,
     ZERO_SIGNAL_EPS,
     affects_taste,
+    effective_title_signals,
     get_policy,
     is_superseded_by_clear,
     label_for_state,
     last_clear_timestamps,
     policy_table_markdown,
+    resolve_title_state,
     weight_for,
 )
 from app.recommendation.embeddings import blend_vectors
@@ -219,3 +221,98 @@ def test_signal_weights_match_policies() -> None:
         assert SIGNAL_WEIGHTS[name] == policy.weight
         if policy.user_title_state:
             assert STATE_FROM_EVENT[name] == policy.user_title_state
+
+
+# ---------------------------------------------------------------------------
+# Durable user_title_state: resolve_title_state
+# ---------------------------------------------------------------------------
+
+
+def _state(*events: str) -> tuple[str, str | None]:
+    r = resolve_title_state(events)
+    return r.state, r.rating
+
+
+def test_state_watchlist_after_rating_keeps_the_rating() -> None:
+    assert _state("rate_4", "watchlist") == ("like", "rate_4")
+
+
+def test_state_watched_after_rating_keeps_the_rating() -> None:
+    assert _state("rate_4", "watched") == ("like", "rate_4")
+
+
+def test_state_havent_seen_never_replaces_an_opinion_or_intent() -> None:
+    assert _state("rate_3", "haven't_seen") == ("like", "rate_3")
+    assert _state("watchlist", "haven't_seen") == ("watchlist", None)
+    assert _state("not_interested", "haven't_seen") == ("not_interested", None)
+    # A rated title must stay out of For You.
+    assert _state("rate_3", "haven't_seen")[0] in FEED_EXCLUDE_STATES
+
+
+def test_state_rating_replaces_watchlist() -> None:
+    assert _state("watchlist", "rate_3") == ("like", "rate_3")
+
+
+def test_state_rating_after_clear_applies() -> None:
+    assert _state("rate_4", "clear", "rate_1") == ("dislike", "rate_1")
+
+
+def test_state_clear_resets_everything_before_it() -> None:
+    # The SPA no longer sends this for a rated title; History "Clear" still does.
+    assert _state("rate_4", "watchlist", "clear") == ("none", None)
+    assert _state("clear") == ("none", None)
+    assert _state() == ("none", None)
+
+
+def test_state_later_opinion_replaces_earlier_opinion() -> None:
+    assert _state("rate_4", "rate_1") == ("dislike", "rate_1")
+    assert _state("rate_4", "not_interested") == ("not_interested", None)
+    assert _state("not_interested", "rate_3") == ("like", "rate_3")
+    assert _state("rate_2", "mid") == ("rated", "mid")
+
+
+def test_state_latest_intent_wins_among_intents() -> None:
+    assert _state("watchlist", "watched") == ("watched", None)
+    assert _state("watched", "watchlist") == ("watchlist", None)
+
+
+def test_state_implicit_events_set_no_state() -> None:
+    assert _state("view", "skip") == ("none", None)
+    assert _state("watchlist", "view", "skip") == ("watchlist", None)
+    assert _state("haven't_seen", "view") == ("haven't_seen", None)
+
+
+def test_state_shortcuts_are_opinions_without_a_rating() -> None:
+    assert _state("rate_4", "dislike") == ("dislike", None)
+    assert _state("watched_liked", "watchlist") == ("like", None)
+
+
+def test_state_ignores_unknown_legacy_events() -> None:
+    assert _state("rate_3", "some_retired_event") == ("like", "rate_3")
+
+
+def test_state_matches_policy_for_every_single_event() -> None:
+    for name, policy in SIGNAL_POLICIES.items():
+        expected = policy.user_title_state or "none"
+        assert resolve_title_state([name]).state == expected, name
+
+
+def test_state_agrees_with_effective_signal() -> None:
+    """The stored state reflects the same event the profile learns from."""
+    t = uuid4()
+    t0 = datetime(2026, 1, 1, tzinfo=UTC)
+    sequences = [
+        ["rate_4", "watchlist"],
+        ["rate_4", "watched"],
+        ["rate_3", "haven't_seen"],
+        ["watchlist", "rate_3"],
+        ["rate_4", "clear", "rate_1"],
+        ["like", "dislike"],
+        ["watchlist", "watched"],
+    ]
+    for seq in sequences:
+        events = [
+            (t, e, SIGNAL_WEIGHTS[e], t0 + timedelta(minutes=i)) for i, e in enumerate(seq)
+        ]
+        effective = effective_title_signals(events)[t].event_type
+        assert resolve_title_state(seq).state == STATE_FROM_EVENT[effective], seq

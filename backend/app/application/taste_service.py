@@ -5,7 +5,9 @@ once in ``app.domain.taste_signals`` (see also ``docs/TASTE_SIGNALS.md``).
 
 This service:
 1. Records append-only InteractionEvents with policy weights
-2. Updates UserTitleState for feed/watchlist filters
+2. Updates UserTitleState for feed/watchlist filters, derived from the title's
+   whole event log (``resolve_title_state``) so a weaker action never
+   overwrites a rating
 3. Recomputes the profile: events → one effective signal per title (latest
    opinion wins, time-decayed) → sparse features + dense vector + anchors
 
@@ -42,6 +44,7 @@ from app.domain.taste_signals import (
     effective_title_signals,
     get_policy,
     is_supported_event,
+    resolve_title_state,
     weight_for,
 )
 from app.infrastructure.db.models.catalog import Title
@@ -140,6 +143,24 @@ class TasteService:
 
         policy = get_policy(event_type)
         event_weight = policy.weight if weight is None else weight
+
+        # Lock the row (when it exists) so two writes for the same title are
+        # serialised: the second one then reads the first one's event below.
+        state = await self._session.scalar(
+            select(UserTitleState)
+            .where(
+                UserTitleState.user_id == user_id,
+                UserTitleState.title_id == title_id,
+            )
+            .with_for_update()
+        )
+        # The durable state is derived from this title's whole event log, not
+        # from the new event alone: "rate_4 → watchlist" must stay a rating.
+        # O(events for this user and title); read before adding the new event
+        # so it is ordered last even when timestamps tie within a transaction.
+        prior = await self.title_event_types(user_id, title_id)
+        resolved = resolve_title_state([*prior, event_type])
+
         self._session.add(
             InteractionEvent(
                 user_id=user_id,
@@ -148,28 +169,28 @@ class TasteService:
                 weight=event_weight,
             )
         )
-
-        state = await self._session.scalar(
-            select(UserTitleState).where(
-                UserTitleState.user_id == user_id,
-                UserTitleState.title_id == title_id,
-            )
-        )
-        new_state = policy.user_title_state
-        if new_state:
-            if state is None:
-                state = UserTitleState(user_id=user_id, title_id=title_id, state=new_state)
-                self._session.add(state)
-            else:
-                state.state = new_state
-        elif state is None:
-            state = UserTitleState(user_id=user_id, title_id=title_id, state="none")
+        if state is None:
+            state = UserTitleState(user_id=user_id, title_id=title_id, state=resolved.state)
             self._session.add(state)
+        elif state.state != resolved.state:
+            state.state = resolved.state
 
         await self._session.flush()
         if recompute:
             await self.recompute_profile(user_id)
         return state
+
+    async def title_event_types(self, user_id: UUID, title_id: UUID) -> list[str]:
+        """This user's event types for one title, oldest first."""
+        rows = await self._session.scalars(
+            select(InteractionEvent.event_type)
+            .where(
+                InteractionEvent.user_id == user_id,
+                InteractionEvent.title_id == title_id,
+            )
+            .order_by(InteractionEvent.created_at)
+        )
+        return list(rows.all())
 
     async def bump_profile_version(self, user_id: UUID) -> int:
         """Mark the profile as changed without rebuilding it.

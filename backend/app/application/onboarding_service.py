@@ -137,8 +137,9 @@ class OnboardingService:
 
         if positive < MIN_ONBOARDING_POSITIVE:
             raise AppError(
-                f"Mark at least {MIN_ONBOARDING_POSITIVE} titles as OK, Good, or Favorite "
-                "so we can recommend things you might like.",
+                f"Mark at least {MIN_ONBOARDING_POSITIVE} titles you've seen as "
+                "“Really liked it” or “Loved it” so we can recommend things you might like. "
+                "“It was ok” counts as a rating, not as a positive one.",
                 status_code=400,
                 code="onboarding_insufficient_positive",
             )

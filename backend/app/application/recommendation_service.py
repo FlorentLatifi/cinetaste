@@ -29,8 +29,8 @@ from app.domain.exceptions import AppError
 from app.domain.taste_signals import (
     FEED_EXCLUDE_STATES,
     HISTORY_VISIBLE_STATES,
-    RATING_EVENT_TYPES,
     effective_title_signals,
+    resolve_title_state,
     weight_for,
 )
 from app.infrastructure.cache import get_store
@@ -465,38 +465,54 @@ class RecommendationService:
             ).all()
         )
 
+    async def _event_types_by_title(
+        self, user_id: UUID, title_ids: list[UUID]
+    ) -> dict[UUID, list[str]]:
+        """This user's event types for each title, oldest first. One query."""
+        if not title_ids:
+            return {}
+        rows = await self._session.execute(
+            select(InteractionEvent.title_id, InteractionEvent.event_type)
+            .where(
+                InteractionEvent.user_id == user_id,
+                InteractionEvent.title_id.in_(title_ids),
+            )
+            .order_by(InteractionEvent.title_id, InteractionEvent.created_at)
+        )
+        out: dict[UUID, list[str]] = {}
+        for title_id, event_type in rows:
+            out.setdefault(title_id, []).append(event_type)
+        return out
+
     async def user_title_status(self, user_id: UUID, title_id: UUID) -> tuple[str | None, str | None]:
         """(state, rating) for one title, for the detail page.
 
-        ``state`` is the stored relationship (watchlist, like, dislike, rated,
-        not_interested, watched) or None. The stored state collapses ratings
-        ("like" covers both Really liked and Loved), so the exact rating comes
-        from the newest rating event since the last undo.
+        Both come from the title's event log via ``resolve_title_state`` — the
+        same rule ``record_interaction`` uses to write ``user_title_state`` — so
+        the exact rating ("like" covers both Really liked and Loved) is shown
+        whatever the stored row says, including rows written before that rule
+        (e.g. a rating followed by "watchlist"). One indexed query over this
+        user's events for this title.
         """
-        state = await self._session.scalar(
-            select(UserTitleState.state).where(
-                UserTitleState.user_id == user_id, UserTitleState.title_id == title_id
-            )
-        )
-        if state in (None, "none", "haven't_seen"):
+        events = await self._event_types_by_title(user_id, [title_id])
+        resolved = resolve_title_state(events.get(title_id, []))
+        if resolved.state in ("none", "haven't_seen"):
             return None, None
-        if state not in {"like", "dislike", "rated"}:
-            return state, None
+        return resolved.state, resolved.rating
 
-        events = (
-            await self._session.execute(
-                select(InteractionEvent.event_type)
-                .where(
-                    InteractionEvent.user_id == user_id,
-                    InteractionEvent.title_id == title_id,
-                    InteractionEvent.event_type.in_([*RATING_EVENT_TYPES, "clear"]),
-                )
-                .order_by(InteractionEvent.created_at.desc())
-                .limit(1)
-            )
-        ).scalars().all()
-        rating = events[0] if events and events[0] != "clear" else None
-        return state, rating
+    async def effective_ratings(
+        self, user_id: UUID, title_ids: list[UUID]
+    ) -> dict[UUID, str | None]:
+        """The effective rating event (``rate_1``…``rate_4``, ``mid``) per title.
+
+        For a page of History: one query for the whole page, same rule as the
+        detail page, so both always show the same rating.
+        """
+        events = await self._event_types_by_title(user_id, title_ids)
+        return {
+            title_id: resolve_title_state(events.get(title_id, [])).rating
+            for title_id in title_ids
+        }
 
     async def existing_title_ids(self, title_ids: list[UUID]) -> set[UUID]:
         if not title_ids:

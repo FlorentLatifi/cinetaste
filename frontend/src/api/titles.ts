@@ -198,6 +198,8 @@ export type HistoryItem = {
   title: Title;
   state: string;
   label: string;
+  /** Effective rating event (rate_1…rate_4, mid), same as the detail page's my_rating. */
+  rating?: string | null;
   updated_at: string;
 };
 
