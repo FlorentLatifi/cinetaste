@@ -26,7 +26,7 @@ rating, ranks a catalog against it, keeps the slate varied, and says why.
 | **Low-friction onboarding** | Rate a curated deck of recognisable titles. "Haven't seen it" costs nothing and pulls in a fresh card. |
 | **A taste profile, not a genre checkbox** | Every rating moves weights over genres, keywords, directors, writers, cast, tone, decade, language and country. |
 | **Explained recommendations** | Every card carries reasons built from real evidence — a shared director, shared themes, a tone you keep rating highly. |
-| **Discovery on purpose** | Diversity control, per-genre and per-director caps, exploration slots and hidden gems (well-rated titles less known than most of the catalog). |
+| **Discovery on purpose** | Diversity control, per-genre, per-director and per-franchise caps, exploration slots and hidden gems (well-rated titles less known than most of the catalog). |
 | **You can inspect and undo it** | A profile page shows the signals learned, History lists every action, Undo reverses one, and the taste snapshot exports as JSON. |
 | **Where to watch** | Streaming, rent and buy options per region (TMDb/JustWatch). |
 

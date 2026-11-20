@@ -82,9 +82,17 @@ any scoring change. That is why Undo is a `clear` event rather than a delete.
    popularity slice; cold start is popularity-ordered.
 5. **Ranking** (`recommendation/pipeline.py`) —
    `0.2·cosine + 0.6·overlap − 0.12·penalty + gem + cold prior`, then MMR
-   (λ=0.8), a per-genre cap of 40% of the slate and a per-director cap of 10%
-   (2 in 20), exploration slots interleaved, and score-ordered backfill under
-   the same caps. Hidden gems and the cold prior use catalog-wide popularity /
+   (λ=0.8), a per-genre cap of 40% of the slate, a per-director cap of 10%
+   (2 in 20) and a per-collection (franchise) cap of 5% (1 in 20, 2 in 40),
+   exploration slots interleaved, and score-ordered backfill under the same
+   caps. All three caps live in one `_SlateQuotas` shared by MMR, exploration
+   and backfill. When the catalog can't fill a slate under them, backfill
+   relaxes the genre cap first, then the director cap, and the collection cap
+   last: one more drama is mild repetition, another sequel the most repetitive
+   card there is. The collection is TMDb's `belongs_to_collection`, stored by
+   ingest as `Title.extra["collection"] = {"id", "name"}` (no schema change;
+   it comes with the movie detail call). Titles without it (standalone films,
+   TV, rows ingested before it existed) are never held back. Hidden gems and the cold prior use catalog-wide popularity /
    vote-count percentiles stored in `Title.extra["catalog_percentiles"]` by
    ingest and re-embed (`application/catalog_percentiles.py`), not raw TMDb
    popularity. Vectorised with numpy and run in a worker thread.

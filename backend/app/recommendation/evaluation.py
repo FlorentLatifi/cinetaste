@@ -130,6 +130,7 @@ def make_ranking_strategy(
     exploration_slots: int = 0,
     max_per_genre: int | None = None,
     max_per_director: int | None = None,
+    max_per_collection: int | None = None,
 ) -> Strategy:
     """The production ranker with a given configuration."""
 
@@ -145,6 +146,7 @@ def make_ranking_strategy(
             exploration_slots=exploration_slots,
             max_per_genre=max_per_genre,
             max_per_director=max_per_director,
+            max_per_collection=max_per_collection,
             weights=weights,
             with_reasons=False,
         )
@@ -180,15 +182,17 @@ DEFAULT_STRATEGIES: dict[str, Strategy] = {
         mmr_lambda=1.0,
         max_per_genre=999,
         max_per_director=999,
+        max_per_collection=999,
     ),
     "sparse_only": make_ranking_strategy(
         weights=RankingWeights(similarity=0.0, sparse_positive=1.0, sparse_negative=0.3),
         mmr_lambda=1.0,
         max_per_genre=999,
         max_per_director=999,
+        max_per_collection=999,
     ),
     "hybrid_no_diversity": make_ranking_strategy(
-        mmr_lambda=1.0, max_per_genre=999, max_per_director=999
+        mmr_lambda=1.0, max_per_genre=999, max_per_director=999, max_per_collection=999
     ),
     "hybrid": make_ranking_strategy(mmr_lambda=0.8),
     "hybrid_with_exploration": make_ranking_strategy(mmr_lambda=0.8, exploration_slots=3),

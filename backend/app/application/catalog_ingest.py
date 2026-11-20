@@ -17,6 +17,10 @@ Design:
 * Every run ends by refreshing catalog-wide popularity / vote-count
   percentiles in ``Title.extra`` (``catalog_percentiles``), which ranking uses
   for "hidden gem" and the cold-start prior.
+* A movie's TMDb ``belongs_to_collection`` (its franchise) is kept in
+  ``Title.extra["collection"]`` as ``{"id", "name"}`` for the per-collection
+  slate cap. It comes with the movie detail call, so it costs no request.
+  Titles stored before this existed gain it on ``refresh_existing=True``.
 * ``titles.external_tmdb_id`` is unique across movies *and* TV, but TMDb numbers
   the two separately. A TV id that equals a stored movie id is skipped, never
   allowed to overwrite the movie.
@@ -59,7 +63,7 @@ from app.infrastructure.db.models.catalog import (
 )
 from app.infrastructure.tmdb.client import TmdbClient
 from app.recommendation.embeddings import PersonSignal, build_title_signals
-from app.recommendation.pipeline import CATALOG_PERCENTILES_KEY
+from app.recommendation.pipeline import CATALOG_PERCENTILES_KEY, COLLECTION_KEY
 
 logger = logging.getLogger(__name__)
 
@@ -530,6 +534,15 @@ class CatalogIngestService:
         previous = (existing.extra or {}) if existing is not None else {}
         if CATALOG_PERCENTILES_KEY in previous:
             meta = {**meta, CATALOG_PERCENTILES_KEY: previous[CATALOG_PERCENTILES_KEY]}
+        # A movie payload always carries the field (null when the film stands
+        # alone), so it is authoritative; TV payloads have no such field, and a
+        # payload without it keeps whatever was stored.
+        if "belongs_to_collection" in payload:
+            collection = self._collection(payload["belongs_to_collection"])
+        else:
+            collection = previous.get(COLLECTION_KEY)
+        if collection:
+            meta = {**meta, COLLECTION_KEY: collection}
         title.extra = meta
         await self._session.flush()
         logger.debug("%s title tmdb_id=%s", status, tmdb_id)
@@ -588,6 +601,20 @@ class CatalogIngestService:
             if add_credit(person, "crew", "Creator"):
                 signals.append(PersonSignal(name=person.name, role="writer"))
         return signals
+
+    @staticmethod
+    def _collection(raw: Any) -> dict[str, Any] | None:
+        """``{"id", "name"}`` from TMDb ``belongs_to_collection``; None if absent or malformed."""
+        if not isinstance(raw, dict):
+            return None
+        try:
+            collection_id = int(raw["id"])
+        except (KeyError, TypeError, ValueError):
+            return None
+        if collection_id <= 0:
+            return None
+        name = str(raw.get("name") or "").strip()
+        return {"id": collection_id, "name": name or None}
 
     @staticmethod
     def _countries(payload: dict[str, Any]) -> list[str]:

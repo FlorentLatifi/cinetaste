@@ -28,7 +28,13 @@ from app.recommendation.embeddings import (
     tones_from_keywords,
 )
 from app.recommendation.explanations import build_anchor_from_title, build_reasons
-from app.recommendation.pipeline import directors_of, primary_genre, rank_titles
+from app.recommendation.pipeline import (
+    collection_cap_for,
+    collection_of,
+    directors_of,
+    primary_genre,
+    rank_titles,
+)
 from app.recommendation.profile import ProfileTitle, build_profile
 from tests.conftest import FakeTitle
 
@@ -637,3 +643,167 @@ def test_famous_titles_are_never_labelled_hidden_gem() -> None:
         assert labelled, "small, well-rated films should still get the badge"
         assert labelled.isdisjoint(name for name, *_ in famous)
         assert all(r.hidden_gem == (by_id[r.title_id].name in labelled) for r in ranked)
+
+
+# ---------------------------------------------------------------------------
+# Per-collection (franchise) cap
+# ---------------------------------------------------------------------------
+
+MATRIX = {"id": 2344, "name": "The Matrix Collection"}
+
+
+def _in_collection(title: FakeTitle, collection: dict[str, object]) -> FakeTitle:
+    title.extra["collection"] = dict(collection)
+    return title
+
+
+def _franchise_heavy_catalog() -> list[FakeTitle]:
+    """Eight near-identical sequels outscore everything; plenty of alternatives exist.
+
+    Every sequel has its own director, so the director cap cannot be what
+    keeps them apart: only the collection cap can.
+    """
+    sequels = [
+        _in_collection(
+            FakeTitle(
+                name=f"Matrix {i}",
+                genres=["Science Fiction" if i % 2 else "Action"],
+                keywords=["simulated reality", "chosen one"],
+                people=[PersonSignal(f"Franchise Director {i}", "director")],
+                vote_average=7.6,
+                popularity=60.0 + i,
+            ),
+            MATRIX,
+        )
+        for i in range(10)
+    ]
+    genres = ["Science Fiction", "Action", "Thriller", "Drama", "Mystery"]
+    others = [
+        FakeTitle(
+            name=f"Standalone {i}",
+            genres=[genres[i % len(genres)]],
+            keywords=["simulated reality" if i % 3 == 0 else f"kw{i}"],
+            people=[PersonSignal(f"Director {i}", "director")],
+            vote_average=7.0 + (i % 4) * 0.3,
+            popularity=5.0 + i,
+        )
+        for i in range(70)
+    ]
+    return sequels + others
+
+
+def _collection_counts(ranked: list, catalog: list[FakeTitle]) -> Counter[int]:
+    by_id = {t.id: t for t in catalog}
+    return Counter(c for r in ranked if (c := collection_of(by_id[r.title_id])) is not None)
+
+
+@pytest.mark.parametrize("exploration_slots", [0, 3])
+@pytest.mark.parametrize("slate_size", [10, 20, 40])
+def test_no_slate_holds_more_than_n_titles_of_one_collection(
+    slate_size: int, exploration_slots: int
+) -> None:
+    """A Matrix fan's slate shows the franchise, not the franchise's whole back catalog."""
+    catalog = _franchise_heavy_catalog()
+    liked = catalog[:2]  # loved the first two films
+    vector, features = _profile_from(liked)
+    rest = [t for t in catalog if t not in liked]
+
+    # Without the cap the sequels really would crowd the slate (the repro holds).
+    uncapped = rank_titles(
+        user_vector=vector,
+        user_features=features,
+        titles=catalog,
+        exclude_ids={t.id for t in liked},
+        slate_size=slate_size,
+        mmr_lambda=0.8,
+        exploration_slots=exploration_slots,
+        max_per_collection=999,
+    )
+    assert _collection_counts(uncapped, rest)[MATRIX["id"]] > collection_cap_for(slate_size)
+
+    ranked = rank_titles(
+        user_vector=vector,
+        user_features=features,
+        titles=catalog,
+        exclude_ids={t.id for t in liked},
+        slate_size=slate_size,
+        mmr_lambda=0.8,
+        exploration_slots=exploration_slots,
+    )
+    assert len(ranked) == slate_size
+    # The taste still shows, but only up to the cap.
+    assert _collection_counts(ranked, rest)[MATRIX["id"]] == collection_cap_for(slate_size)
+
+
+def test_collection_cap_scales_with_slate_size() -> None:
+    assert collection_cap_for(1) == 1
+    assert collection_cap_for(10) == 1
+    assert collection_cap_for(20) == 1
+    assert collection_cap_for(40) == 2
+    assert collection_cap_for(100) == 5
+
+
+def test_collection_cap_relaxes_last_and_only_when_nothing_else_is_left() -> None:
+    """Short catalog: another film by one director comes before another sequel.
+
+    Six sequels (scored highest) and six films by one director, all one genre,
+    for a slate of ten. Every cap has to give; the collection cap gives last.
+    """
+    sequels = [
+        _in_collection(
+            FakeTitle(
+                name=f"Sequel {i}",
+                genres=["Drama"],
+                keywords=["saga"],
+                people=[PersonSignal(f"Saga Director {i}", "director")],
+            ),
+            {"id": 77, "name": "Saga Collection"},
+        )
+        for i in range(6)
+    ]
+    auteur = [
+        FakeTitle(
+            name=f"Auteur {i}",
+            genres=["Drama"],
+            keywords=[f"kw{i}"],
+            people=[PersonSignal("Auteur", "director")],
+        )
+        for i in range(6)
+    ]
+    catalog = [*sequels, *auteur]
+    ranked = rank_titles(
+        user_vector=list(sequels[0].embedding),
+        user_features={"kw:saga": 2.0},
+        titles=catalog,
+        exclude_ids=set(),
+        slate_size=10,
+        mmr_lambda=0.8,
+        exploration_slots=0,
+    )
+    assert len(ranked) == 10  # the slate is still filled
+    by_id = {t.id: t for t in catalog}
+    assert sum(by_id[r.title_id] in auteur for r in ranked) == 6
+    assert _collection_counts(ranked, catalog)[77] == 4
+
+
+def test_titles_without_collection_are_never_held_back() -> None:
+    """Titles ingested before the field existed, malformed values, and TV: no cap."""
+    catalog = [
+        FakeTitle(name=f"T{i}", genres=[["Drama", "Comedy", "Thriller", "Horror"][i % 4]])
+        for i in range(24)
+    ]
+    catalog[0].extra["collection"] = None
+    catalog[1].extra["collection"] = {"name": "No id"}
+    catalog[2].extra["collection"] = {"id": "not-a-number"}
+    catalog[3].extra["collection"] = "2344"
+    assert all(collection_of(t) is None for t in catalog)
+    ranked = rank_titles(
+        user_vector=list(catalog[0].embedding),
+        user_features={"genre:drama": 1.0},
+        titles=catalog,
+        exclude_ids=set(),
+        slate_size=20,
+        mmr_lambda=0.8,
+        exploration_slots=0,
+    )
+    assert len(ranked) == 20

@@ -101,7 +101,8 @@ async def main(*, limit: int | None, force: bool, percentiles_only: bool = False
                 original_language=title.original_language,
                 countries=countries,
             )
-            # Preserve demo flag and any other non-feature keys.
+            # Preserve non-feature keys (demo flag, catalog percentiles, the TMDb
+            # collection used by the franchise cap): they come from ingest, not here.
             merged = {k: v for k, v in extra.items() if k not in meta}
             merged.update(meta)
             title.embedding = embedding

@@ -284,3 +284,65 @@ async def test_ingest_ends_with_catalog_percentiles_for_every_title(
     await db_session.refresh(movie)
     assert movie.extra[CATALOG_PERCENTILES_KEY] == before
     assert "feature_snapshot" in movie.extra
+
+
+async def test_movie_collection_is_stored_and_survives_reingest_and_reembed(
+    db_session: AsyncSession,
+) -> None:
+    """The franchise cap reads Title.extra["collection"]; ingest must keep it current."""
+    from app.recommendation.pipeline import COLLECTION_KEY, collection_of
+    from app.scripts import reembed_catalog
+
+    matrix = {"id": 2344, "name": "The Matrix Collection", "poster_path": "/m.jpg"}
+
+    class CollectionTmdb(FakeTmdb):
+        def __init__(self, collection: dict[str, Any] | None) -> None:
+            super().__init__()
+            self.collection = collection
+
+        async def get_movie(self, tmdb_id: int) -> dict[str, Any]:
+            payload = await super().get_movie(tmdb_id)
+            # TMDb always sends the field on movie detail: null for standalone films.
+            payload["belongs_to_collection"] = self.collection if tmdb_id == 9_000_010 else None
+            return payload
+
+    async def stored(tmdb_id: int) -> Title:
+        db_session.expire_all()
+        title = await db_session.scalar(select(Title).where(Title.external_tmdb_id == tmdb_id))
+        assert title is not None
+        return title
+
+    service = CatalogIngestService(db_session, CollectionTmdb(matrix), batch_size=10)  # type: ignore[arg-type]
+    await service.ingest_popular(pages=1, include_tv=True)
+
+    movie = await stored(9_000_010)
+    # Only id and name are kept: poster etc. would be dead weight in every row.
+    assert movie.extra[COLLECTION_KEY] == {"id": 2344, "name": "The Matrix Collection"}
+    assert collection_of(movie) == 2344
+    assert "feature_snapshot" in movie.extra and "catalog_percentiles" in movie.extra
+    assert COLLECTION_KEY not in (await stored(9_000_011)).extra  # standalone film
+    assert COLLECTION_KEY not in (await stored(TV_ID)).extra  # TV has no collections
+
+    # Re-embed rebuilds features from the DB and must not drop the collection.
+    assert await reembed_catalog.main(limit=None, force=True) == 0
+    assert (await stored(9_000_010)).extra[COLLECTION_KEY]["id"] == 2344
+
+    # Re-ingest (refresh_existing) keeps it...
+    await CatalogIngestService(db_session, CollectionTmdb(matrix), batch_size=10).ingest_popular(  # type: ignore[arg-type]
+        pages=1, include_tv=True, refresh_existing=True
+    )
+    assert collection_of(await stored(9_000_010)) == 2344
+
+    # ...and TMDb is authoritative: a film taken out of its collection loses it.
+    await CatalogIngestService(db_session, CollectionTmdb(None), batch_size=10).upsert_movie(  # type: ignore[arg-type]
+        9_000_010
+    )
+    await db_session.commit()
+    assert COLLECTION_KEY not in (await stored(9_000_010)).extra
+
+    # A malformed value is not stored (and never breaks the ingest).
+    await CatalogIngestService(  # type: ignore[arg-type]
+        db_session, CollectionTmdb({"name": "no id"}), batch_size=10
+    ).upsert_movie(9_000_010)
+    await db_session.commit()
+    assert collection_of(await stored(9_000_010)) is None

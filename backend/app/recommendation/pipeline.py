@@ -30,6 +30,8 @@ __all__ = [
     "RankingWeights",
     "annotate_discovery_reasons",
     "catalog_percentiles",
+    "collection_cap_for",
+    "collection_of",
     "director_cap_for",
     "directors_of",
     "fame",
@@ -96,6 +98,23 @@ MIN_DIRECTOR_CAP = 1
 def director_cap_for(slate_size: int) -> int:
     """Per-director cap: 2 for a 20-card slate, scaled with slate size."""
     return max(MIN_DIRECTOR_CAP, round(slate_size * DIRECTOR_CAP_RATIO))
+
+
+# Diversity: titles per collection (TMDb ``belongs_to_collection``, i.e. a
+# franchise such as "The Matrix Collection"). One in twenty cards: the sequels
+# of a film someone loved are the most obvious picks there are — they almost
+# certainly know them already — so one card shows the franchise and the other
+# slots go to discovery. Stricter than the director cap because sequels are
+# near-duplicates; two films by one director are still two different films.
+# Ingest stores ``extra["collection"] = {"id": <TMDb id>, "name": ...}``.
+COLLECTION_KEY = "collection"
+COLLECTION_CAP_RATIO = 0.05
+MIN_COLLECTION_CAP = 1
+
+
+def collection_cap_for(slate_size: int) -> int:
+    """Per-collection cap: 1 for a 20-card slate, 2 for 40, scaled with slate size."""
+    return max(MIN_COLLECTION_CAP, round(slate_size * COLLECTION_CAP_RATIO))
 
 
 # Exploration picks must still be well rated.
@@ -328,6 +347,21 @@ def directors_of(title: Any) -> tuple[str, ...]:
     )
 
 
+def collection_of(title: Any) -> int | None:
+    """TMDb collection (franchise) id from ``extra``; None for standalone titles.
+
+    Titles ingested before the field existed have no entry until they are
+    re-ingested (``--refresh-existing``), so they are simply not capped.
+    """
+    raw = (getattr(title, "extra", None) or {}).get(COLLECTION_KEY)
+    if not isinstance(raw, dict):
+        return None
+    try:
+        return int(raw["id"])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
 def primary_genre(title: Any) -> str:
     """Main genre: the highest-weighted genre in the feature snapshot.
 
@@ -444,31 +478,50 @@ def mmr_select(
 
 
 class _SlateQuotas:
-    """Per-slate caps: titles per primary genre and per director.
+    """Per-slate caps: titles per primary genre, per director and per collection.
 
     Shared by core MMR, exploration and backfill, so no stage can undo
-    another's diversity. A co-directed film counts for each director.
+    another's diversity. A co-directed film counts for each director; a title
+    outside any collection is never held back by the collection cap.
     """
 
-    __slots__ = ("genres", "directors", "genre_cap", "director_cap", "genre_counts", "director_counts")
+    __slots__ = (
+        "genres",
+        "directors",
+        "collections",
+        "genre_cap",
+        "director_cap",
+        "collection_cap",
+        "genre_counts",
+        "director_counts",
+        "collection_counts",
+    )
 
     def __init__(
         self,
         genres: list[str],
         directors: list[tuple[str, ...]],
+        collections: list[int | None],
         *,
         genre_cap: int,
         director_cap: int,
+        collection_cap: int,
     ) -> None:
         self.genres = genres
         self.directors = directors
+        self.collections = collections
         self.genre_cap = genre_cap
         self.director_cap = director_cap
+        self.collection_cap = collection_cap
         self.genre_counts: Counter[str] = Counter()
         self.director_counts: Counter[str] = Counter()
+        self.collection_counts: Counter[int] = Counter()
 
     def allows(self, i: int) -> bool:
         if self.genre_counts[self.genres[i]] >= self.genre_cap:
+            return False
+        collection = self.collections[i]
+        if collection is not None and self.collection_counts[collection] >= self.collection_cap:
             return False
         return all(self.director_counts[d] < self.director_cap for d in self.directors[i])
 
@@ -476,6 +529,24 @@ class _SlateQuotas:
         self.genre_counts[self.genres[i]] += 1
         for director in self.directors[i]:
             self.director_counts[director] += 1
+        collection = self.collections[i]
+        if collection is not None:
+            self.collection_counts[collection] += 1
+
+    def relax(self, slate_size: int) -> None:
+        """Raise one cap by one step, in the order the slate can best afford.
+
+        Genre first (one more of a genre is the mildest repetition), then
+        director, then collection (another sequel is the most repetitive card
+        there is). A cap at ``slate_size`` can no longer bind, so the next one
+        is only raised once the earlier ones are out of the way.
+        """
+        if self.genre_cap < slate_size:
+            self.genre_cap += 1
+        elif self.director_cap < slate_size:
+            self.director_cap += 1
+        else:
+            self.collection_cap += 1
 
 
 def _interleave(main: list[int], extra: list[int]) -> list[int]:
@@ -502,6 +573,7 @@ def rank_titles(
     weights: RankingWeights = DEFAULT_WEIGHTS,
     max_per_genre: int | None = None,
     max_per_director: int | None = None,
+    max_per_collection: int | None = None,
     with_reasons: bool = True,
 ) -> list[RankedItem]:
     """Rank candidate titles for one user.
@@ -509,12 +581,14 @@ def rank_titles(
     1. Score = weighted dense similarity + sparse overlap − sparse penalty
        + hidden-gem bonus + popularity prior (cold start only)
        − low-rating penalty (off by default).
-    2. MMR over the top of the list, with per-primary-genre and per-director caps.
+    2. MMR over the top of the list, with per-primary-genre, per-director and
+       per-collection (franchise) caps.
     3. Exploration: well-rated, moderately relevant titles from genres the slate
        doesn't cover yet, spread through the slate, under the same caps.
-    4. Backfill by score, still honouring both caps; if the catalog can't fill
-       the slate that way, the genre cap is raised one step at a time, and the
-       director cap only once the genre cap no longer binds.
+    4. Backfill by score, still honouring every cap; if the catalog can't fill
+       the slate that way, the genre cap is raised one step at a time, the
+       director cap only once the genre cap no longer binds, and the
+       collection cap last of all.
     """
     if slate_size <= 0:
         return []
@@ -522,6 +596,8 @@ def rank_titles(
         max_per_genre = genre_cap_for(slate_size)
     if max_per_director is None:
         max_per_director = director_cap_for(slate_size)
+    if max_per_collection is None:
+        max_per_collection = collection_cap_for(slate_size)
     scoring_features, memory_from_features = strip_explain_memory(user_features)
     memory = explain_memory if explain_memory is not None else memory_from_features
 
@@ -605,8 +681,10 @@ def rank_titles(
     quotas = _SlateQuotas(
         genres,
         [directors_of(t) for t in pool],
+        [collection_of(t) for t in pool],
         genre_cap=max_per_genre,
         director_cap=max_per_director,
+        collection_cap=max_per_collection,
     )
 
     slots = min(max(int(exploration_slots), 0), max(slate_size - 1, 0))
@@ -652,11 +730,12 @@ def rank_titles(
                 chosen.add(i)
                 quotas.add(i)
 
-    # Backfill by score under both caps. If the slate is still short, raise the
+    # Backfill by score under every cap. If the slate is still short, raise the
     # genre cap one step at a time, so no genre gets another slot before every
     # genre with candidates left has had its turn. The director cap is raised
-    # only once the genre cap can no longer bind: a third film by one director
-    # is the last resort, not a side effect of filling a genre.
+    # only once the genre cap can no longer bind, and the collection cap after
+    # that: a third film by one director, or a second sequel, is the last
+    # resort, not a side effect of filling a genre.
     backfill: list[int] = []
     need = slate_size - len(core) - len(exploration)
     while need > 0 and len(chosen) < n:
@@ -669,10 +748,7 @@ def rank_titles(
             chosen.add(i)
             quotas.add(i)
             need -= 1
-        if quotas.genre_cap < slate_size:
-            quotas.genre_cap += 1
-        else:
-            quotas.director_cap += 1
+        quotas.relax(slate_size)
 
     final = _interleave(core + backfill, exploration)[:slate_size]
     exploration_set = set(exploration)

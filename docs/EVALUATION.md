@@ -31,8 +31,8 @@ Every strategy runs through the same protocol, so the comparison is fair.
 | `popular` | Most popular unseen titles. The baseline a recommender must beat to justify existing. |
 | `dense_only` | Content-vector similarity only (no sparse features). |
 | `sparse_only` | Interpretable feature overlap only (no vector). |
-| `hybrid_no_diversity` | Production scoring, diversity controls off. |
-| `hybrid` | **What production serves** (MMR λ=0.8, per-genre and per-director caps). |
+| `hybrid_no_diversity` | Production scoring, diversity controls off (no MMR, no caps). |
+| `hybrid` | **What production serves** (MMR λ=0.8, per-genre, per-director and per-collection caps). |
 | `hybrid_with_exploration` | Production plus 3 exploration slots. |
 | `hybrid_plus_popularity` | Production plus a warm popularity prior (`warm_popularity=0.2`); not the default. |
 | `hybrid_low_rating_penalty` | Production plus a soft penalty for ★ < 6.5 with enough votes (`low_rating=0.05`); not the default. |
@@ -196,6 +196,23 @@ Same data before and after (synthetic, slate of 20, production `hybrid`):
   14% hit rate (`hybrid_low_rating_penalty`), and the benchmark cannot show a
   benefit (ratings are random). It stays a documented knob
   (`RankingWeights.low_rating`) until real ratings say otherwise.
+
+### Per-collection (franchise) cap (November 2026)
+
+At most one title per TMDb collection in a 20-card slate (5% of the slate, at
+least 1; two in 40), in MMR, exploration and backfill, relaxed last of all
+caps. Stricter than the director cap because sequels are near-duplicates: a
+Matrix fan already knows Reloaded and Revolutions.
+
+**This benchmark cannot measure it.** Neither the synthetic dataset nor the
+MovieLens loader has collections, so the cap never binds there, and no
+collection metric was added. `python -m app.scripts.evaluate_recommender -k 20`
+(synthetic, seed 7) printed byte-identical output before and after the change:
+`hybrid` recall@20 0.090, ndcg@20 0.047, hit_rate@20 0.245 both times. That
+shows no regression, not that the cap helps. What *is* tested is the behaviour:
+`tests/test_recommender_invariants.py` checks that a franchise-heavy catalog
+yields exactly the cap per collection at slates of 10, 20 and 40, with and
+without exploration, and that the uncapped ranking would have exceeded it.
 
 ### What this benchmark does *not* prove
 

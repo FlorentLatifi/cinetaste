@@ -263,6 +263,24 @@ python -m app.scripts.reembed_catalog        # only stale rows
 python -m app.scripts.reembed_catalog --force
 ```
 
+**Franchise cap backfill (one-off).** Ranking allows one title per TMDb
+collection per 20 cards, read from `Title.extra["collection"]`, which ingest
+stores from the movie detail call. Rows ingested before that only gain it when
+re-fetched; until then they are simply not capped. The next ordinary ingest run
+(including the scheduled one) refreshes the mainstream titles, which hold most
+franchises. To re-fetch the discovery-only titles too, run the catalog workflow
+with `refresh_existing: true`, or from a shell with the same discovery options as
+the original fill:
+
+```bash
+python -m app.scripts.ingest_catalog --refresh-existing
+```
+
+This costs about as many TMDb requests as a first fill (~4,600–5,300). It
+re-fetches what this run's discover lists return, so a title that has since left
+every list keeps no collection until it reappears. Re-embedding never removes the
+field.
+
 ## 4. Production env checklist
 
 | Variable | Required | Notes |
@@ -320,7 +338,9 @@ request per unique title (plus the 62-title onboarding deck fetched first), so
 roughly 4,600–5,300. A re-run costs roughly 950: the same 264 discover pages, the
 deck, and the mainstream titles, which are refreshed. Titles found only by a
 discovery pass are **not** fetched again once stored, so an interrupted run resumes
-where it stopped. Set `refresh_existing` to re-fetch everything. Requests are capped
+where it stopped. Set `refresh_existing` to re-fetch everything (also how existing
+titles gain fields that ingest learns to store, such as the TMDb collection used
+by the franchise cap; see below). Requests are capped
 at 25 per second (TMDb allows about 50) and retried with backoff on 429/5xx.
 
 **Storage:** measured at about 15 KB per title in Postgres once its credits,
