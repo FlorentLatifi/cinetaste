@@ -98,9 +98,15 @@ def migrated_database() -> None:
 
 
 async def _reset_cache() -> None:
+    from app.application.popular_pool import reset_popular_pool
+    from app.core.concurrency import reset_guest_rank_gate
     from app.infrastructure.cache import reset_cache_for_tests
 
     await reset_cache_for_tests()
+    # Process-wide state that outlives a request: the catalog was just truncated, so a
+    # remembered popularity slice would be made of titles that no longer exist.
+    reset_popular_pool()
+    reset_guest_rank_gate()
 
 
 @pytest_asyncio.fixture(loop_scope="session")

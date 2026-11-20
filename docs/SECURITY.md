@@ -202,6 +202,12 @@ Stated rather than hidden:
   the caller reaches the origin directly. The per-account limiter is the real
   control; closing this properly needs a shared secret injected by the edge,
   which `vercel.json` rewrites cannot do (it needs Edge Middleware).
+  For the one expensive public route, `POST /guest/recommendations`, there is
+  now a backstop that does not depend on who the caller claims to be: a
+  process-wide cap on concurrent guest ranking (`GUEST_RANK_MAX_CONCURRENT`,
+  503 + `Retry-After` when saturated). It bounds the *cost* of a flood, not the
+  number of requests; the forged-bucket gap itself stays open. Numbers and
+  limits: [GUEST_PERFORMANCE.md](GUEST_PERFORMANCE.md).
 - **Registration reveals whether an email is already in use** through its `409`.
   Removing that oracle means making registration always return success and
   moving the "this address is already registered" message into an email, which
