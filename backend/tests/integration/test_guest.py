@@ -7,6 +7,7 @@ check the tables a signed-in flow would write to stay empty.
 from __future__ import annotations
 
 import asyncio
+import logging
 from unittest.mock import patch
 from uuid import uuid4
 
@@ -386,3 +387,117 @@ async def test_pooled_titles_stay_readable_after_a_request_rolls_back(
         assert title.embedding is not None
         assert title.name
         assert all(g.name for g in title.genres)
+
+
+# ------------------------------------------------------------------- timing log
+
+
+def _timing_lines(caplog) -> list[dict[str, str]]:  # noqa: ANN001
+    lines = []
+    for record in caplog.records:
+        message = record.getMessage()
+        if message.startswith(("guest_slate_timing", "guest_cards_timing")):
+            lines.append({"event": message.split()[0], **dict(p.split("=", 1) for p in message.split()[1:])})
+    return lines
+
+
+async def test_slate_requests_log_where_the_time_went(
+    client: AsyncClient, db_session: AsyncSession, api_prefix: str, caplog
+) -> None:  # noqa: ANN001
+    titles = await seed_catalog(db_session)
+    url = f"{api_prefix}/guest/recommendations"
+    body = {"reactions": _reactions(titles), "limit": 8}
+
+    with caplog.at_level(logging.INFO, logger="cinetaste.guest.timing"):
+        miss = await client.post(url, json=body, headers={"x-request-id": "req-miss"})
+        hit = await client.post(url, json=body, headers={"x-request-id": "req-hit"})
+        refused = await client.post(url, json={"reactions": _reactions(titles)[:2]})
+        await client.get(f"{api_prefix}/guest/cards", params={"limit": 8})
+    assert miss.status_code == hit.status_code == 200 and refused.status_code == 400
+
+    slate = [line for line in _timing_lines(caplog) if line["event"] == "guest_slate_timing"]
+    assert [line["outcome"] for line in slate] == ["miss", "hit", "rejected"]
+
+    ranked = slate[0]
+    assert ranked["request_id"] == "req-miss"
+    for key in ("total_ms", "cache_ms", "gate_wait_ms", "validate_ms", "profile_ms",
+                "candidates_ms", "rank_ms", "serialize_ms", "db_ms", "db_max_ms"):
+        assert key in ranked, f"missing {key}"
+    assert int(ranked["db_statements"]) >= 5, "statements are counted through the real engine"
+    assert float(ranked["db_ms"]) > 0
+    assert ranked["pool"] == "loaded"
+    assert ranked["limit"] == "8" and ranked["reactions"] == "4"
+
+    cached = slate[1]
+    assert cached["request_id"] == "req-hit"
+    assert "rank_ms" not in cached and "gate_wait_ms" not in cached, "a hit does no ranking"
+    assert int(cached["db_statements"]) <= 3  # re-reading titles + genres only
+
+    assert any(line["event"] == "guest_cards_timing" for line in _timing_lines(caplog))
+
+
+async def test_a_second_miss_reports_the_popular_pool_served_from_memory(
+    client: AsyncClient, db_session: AsyncSession, api_prefix: str, caplog
+) -> None:  # noqa: ANN001
+    titles = await seed_catalog(db_session)
+    url = f"{api_prefix}/guest/recommendations"
+    first = {"reactions": _reactions(titles), "limit": 8}
+    other = {"reactions": [{**_reactions(titles)[0], "action": "rate_3"}, *_reactions(titles)[1:]], "limit": 8}
+    with caplog.at_level(logging.INFO, logger="cinetaste.guest.timing"):
+        await client.post(url, json=first)
+        await client.post(url, json=other)
+    pools = [line["pool"] for line in _timing_lines(caplog) if line["event"] == "guest_slate_timing"]
+    assert pools == ["loaded", "memory"]
+
+
+async def test_a_refused_request_still_logs_its_wait(
+    client: AsyncClient, db_session: AsyncSession, api_prefix: str, caplog
+) -> None:  # noqa: ANN001
+    from app.api.deps import get_settings_dep
+    from app.application.recommendation_service import RecommendationService
+    from app.main import app
+
+    titles = await seed_catalog(db_session)
+    settings = get_settings().model_copy(
+        update={"guest_rank_max_concurrent": 1, "guest_rank_max_wait_seconds": 0.1}
+    )
+    app.dependency_overrides[get_settings_dep] = lambda: settings
+    entered, release = asyncio.Event(), asyncio.Event()
+    real = RecommendationService.guest_slate
+
+    async def slow(self, *a, **k):  # noqa: ANN001, ANN002, ANN003, ANN202
+        entered.set()
+        await release.wait()
+        return await real(self, *a, **k)
+
+    url = f"{api_prefix}/guest/recommendations"
+    second_body = {
+        "reactions": [
+            {"title_id": str(titles[3].id), "action": "rate_4"},
+            {"title_id": str(titles[4].id), "action": "rate_3"},
+            {"title_id": str(titles[5].id), "action": "rate_2"},
+        ],
+        "limit": 8,
+    }
+    try:
+        with (
+            patch.object(RecommendationService, "guest_slate", slow),
+            caplog.at_level(logging.INFO, logger="cinetaste.guest.timing"),
+        ):
+            running = asyncio.create_task(client.post(url, json={"reactions": _reactions(titles), "limit": 8}))
+            await asyncio.wait_for(entered.wait(), timeout=5)
+            second = asyncio.create_task(client.post(url, json=second_body))
+            done, _ = await asyncio.wait({second}, timeout=10)
+            release.set()
+            await running
+            if not done:
+                await second
+                pytest.fail("a second guest slate was admitted while the only slot was taken")
+    finally:
+        release.set()
+        app.dependency_overrides.pop(get_settings_dep, None)
+
+    busy = [line for line in _timing_lines(caplog) if line.get("outcome") == "busy"]
+    assert len(busy) == 1
+    assert float(busy[0]["gate_wait_ms"]) >= 90, "the time spent queueing is what the log is for"
+    assert "rank_ms" not in busy[0]

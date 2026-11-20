@@ -91,14 +91,44 @@ it, those admitted stay near the 800 ms target and the rest get a fast `503` the
 Defaults are `GUEST_RANK_MAX_CONCURRENT=2`, `GUEST_RANK_MAX_WAIT_SECONDS=1.0` (the
 sweep used 0.5 s; 1.0 s is deliberately more patient for real visitors on slower hardware).
 
+## Timing log: finding where production's time goes
+
+Every guest request now logs one line (logger `cinetaste.guest.timing`, INFO; WARNING when
+`total_ms` exceeds the 800 ms target). Find it in the Render logs by the `request_id` that the
+access line (`logger=cinetaste.request`) also carries. No extra load, no new infrastructure.
+
+```
+guest_slate_timing outcome=miss request_id=... limit=12 reactions=3 total_ms=262.9 cache_ms=0.0
+  gate_wait_ms=0.0 validate_ms=2.8 profile_ms=2.2 pool_load_ms=59.1 candidates_ms=234.6
+  rank_ms=20.7 cache_write_ms=0.1 serialize_ms=0.4 db_statements=9 db_ms=187.9 db_max_ms=150.9 pool=loaded
+```
+(Local, first request after start. `pool_load_ms` is part of `candidates_ms`.)
+
+`outcome` is `hit`, `miss`, `rejected` (4xx), `busy` (cap) or `error`. `GET /guest/cards` logs
+`guest_cards_timing` the same way.
+
+How to read it:
+
+| If you see | It means |
+|---|---|
+| `db_ms` close to `total_ms` | The database link is the cost: round trips to a remote DB, or a cold or suspended instance. `db_ms` includes network time. |
+| `db_max_ms` large, `db_statements` small | One slow statement (a cold first query, a missing index at scale). |
+| Phase time much larger than the `db_ms` inside it | Pool checkout/pre-ping, BEGIN/ROLLBACK, or Python: also a database-link signal when `db_statements` is high. |
+| `rank_ms` / `candidates_ms` large, `db_ms` small | CPU on a small instance. Local ranking is ~15 ms of CPU; ten times that is a slow host. |
+| `gate_wait_ms` large | Requests queueing behind the concurrency cap. |
+| `total_ms` small but the client saw seconds | The time is outside the handler: edge/proxy, a sleeping instance waking, or middleware. |
+
+Cost of the instrumentation: one `ContextVar` read per SQL statement and a few
+`perf_counter` calls per request; inert for anything that is not a guest route.
+
 ## Limits and open items
 
 - **What this does not explain.** Locally the whole path is ~50-70 ms; the externally
   measured 5.9 s / 3.8 s cannot come from code that costs that on a 4-core box. Candidates,
   **not verified**: database latency per round trip (7-9 statements + connection checkout
   and pre-ping per request), a cold or suspended hosted database, free-tier CPU, TLS to the
-  DB. Cheapest next step with no load: log phase timings for one real request. Do not
-  load-test production to find out. A fix on that list is an infrastructure change
+  DB. The timing log below answers this from one ordinary request. Do not load-test
+  production to find out. A fix on that list is an infrastructure change
   (region, plan, database): **out of scope here, per the brief.**
 - **The cap is per process.** With N workers the ceiling is N x limit. Production runs one.
 - **The cap bounds cost, not request count.** A forged-`X-Forwarded-For` flood still gets
