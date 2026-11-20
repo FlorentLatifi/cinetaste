@@ -109,6 +109,27 @@ class Settings(BaseSettings):
     # Guest routes are public and one of them ranks a whole slate, so they get
     # their own, lower ceiling. A real guest session is a handful of calls.
     rate_limit_guest_requests: int = 30
+    # Guest ranking is CPU + DB work that anyone on the internet can trigger, and
+    # the IP limit above is only as strong as X-Forwarded-For handling (the origin
+    # is directly reachable; see docs/SECURITY.md). This is the backstop that does
+    # not depend on who the caller says they are: at most this many slates are
+    # ranked at once in one process, so a flood degrades guests (503 + Retry-After)
+    # instead of queueing work behind signed-in users' requests.
+    # Ranking is CPU-bound in one process, so more slots do not add throughput: measured
+    # locally at a 40-user flood, served rate was ~14/s for limits 2, 4 and 8 while served
+    # p95 went 0.72 s, 0.94 s, 1.6 s. Tuned on a development box; revisit against hardware
+    # like production's (docs/GUEST_PERFORMANCE.md).
+    guest_rank_max_concurrent: int = Field(default=2, ge=1, le=64)
+    # How long an over-limit request may wait for a slot before it is refused. Long enough
+    # for a few real visitors arriving together, short enough that a flood is refused
+    # quickly instead of everyone waiting.
+    guest_rank_max_wait_seconds: float = Field(default=1.0, ge=0, le=30)
+    # Identical answers (same cards, same order, same limit) get the same slate, so
+    # it is stored briefly. 0 turns the cache off.
+    guest_slate_cache_ttl_seconds: int = Field(default=300, ge=0, le=3600)
+    # The popularity half of the candidate pool is the same for every guest; keep one
+    # copy per process instead of re-reading and re-decoding it each time. 0 = off.
+    guest_popular_pool_ttl_seconds: float = Field(default=300.0, ge=0, le=3600)
     # Largest request body accepted. The biggest real one, a taste-snapshot
     # import, is a few tens of KB; anything near this is not a client of ours.
     max_request_body_bytes: int = 256 * 1024

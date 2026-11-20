@@ -18,6 +18,7 @@ from app.application.history_cursor import (
     decode_history_cursor,
     encode_history_cursor,
 )
+from app.application.popular_pool import PopularPool, candidate_query
 from app.application.taste_service import load_profile_titles
 from app.core.config import Settings
 from app.data.onboarding_seed import (
@@ -72,9 +73,18 @@ class Slate:
 class RecommendationService:
     """Candidate generation + ranking. Taste *weights* live in domain.taste_signals."""
 
-    def __init__(self, session: AsyncSession, settings: Settings) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        settings: Settings,
+        *,
+        popular_pool: PopularPool | None = None,
+    ) -> None:
         self._session = session
         self._settings = settings
+        # Optional shared copy of the popularity slice (see PopularPool). None keeps
+        # the original behaviour: query it in this session, every time.
+        self._popular_pool = popular_pool
 
     # ------------------------------------------------------------------ For You
 
@@ -90,7 +100,7 @@ class RecommendationService:
         popular slice so we don't overfit to nearest neighbours only.
         Cold start (no vector): popularity-ordered pool.
         """
-        base = select(Title).where(Title.embedding.is_not(None)).options(selectinload(Title.genres))
+        base = candidate_query()
         # Deliberately no `NOT IN (exclude_ids)`: rank_titles filters the same
         # set again, so this only ever kept the candidate pool full — and the
         # list is planned and transmitted on every request. Measured at 10k
@@ -131,9 +141,14 @@ class RecommendationService:
             except Exception:
                 logger.warning("ann_candidate_query_failed; falling back to popularity", exc_info=True)
 
-            pop_rows = (
-                await self._session.scalars(base.order_by(Title.popularity.desc()).limit(pop_limit))
-            ).all()
+            if self._popular_pool is not None:
+                pop_rows = await self._popular_pool.get(pop_limit)
+            else:
+                pop_rows = (
+                    await self._session.scalars(
+                        base.order_by(Title.popularity.desc()).limit(pop_limit)
+                    )
+                ).all()
             merged: dict[UUID, Title] = {}
             for title in [*ann_rows, *pop_rows]:
                 merged[title.id] = title
@@ -190,17 +205,7 @@ class RecommendationService:
         )
 
         slate_id = uuid4()
-        items_payload = [
-            {
-                "title_id": str(item.title_id),
-                "score": item.score,
-                # `evidence` is deliberately absent. It was 95% of a 16.5 KiB
-                # payload (781 of ~824 bytes per item) and nothing renders it —
-                # the user-facing value is entirely in `message`.
-                "reasons": [{"code": r.code, "message": r.message} for r in item.reasons],
-            }
-            for item in ranked
-        ]
+        items_payload = self.slate_payload(ranked)
         await store.set(
             cache_key,
             json.dumps({"slate_id": str(slate_id), "items": items_payload}),
@@ -348,6 +353,29 @@ class RecommendationService:
                 "impression_log_failed user_id=%s slate_id=%s", user_id, sid, exc_info=True
             )
             return None
+
+    @staticmethod
+    def slate_payload(ranked: list[RankedItem]) -> list[dict[str, Any]]:
+        """The compact, cacheable form of a ranked slate (ids, scores, reasons).
+
+        ``evidence`` is deliberately absent. It was 95% of a 16.5 KiB payload (781 of
+        ~824 bytes per item) and nothing renders it — the user-facing value is entirely
+        in ``message``. Titles are not stored either; ``hydrate_slate_payload`` reads
+        them back, so a cached slate costs bytes per id rather than per poster.
+        """
+        return [
+            {
+                "title_id": str(item.title_id),
+                "score": item.score,
+                "reasons": [{"code": r.code, "message": r.message} for r in item.reasons],
+            }
+            for item in ranked
+        ]
+
+    async def hydrate_slate_payload(
+        self, payload: list[dict[str, Any]]
+    ) -> list[tuple[Title, RankedItem]]:
+        return await self._hydrate(payload)
 
     async def _hydrate(self, payload: list[dict[str, Any]]) -> list[tuple[Title, RankedItem]]:
         ids = [UUID(item["title_id"]) for item in payload]
