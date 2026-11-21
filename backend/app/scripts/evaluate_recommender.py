@@ -13,10 +13,16 @@ and report paired deltas (95% bootstrap CI) against ``--baseline``:
 
     --sweep sparse_negative=0,0.12,0.3,0.6          # one strategy per value
     --variant proposal_a:sparse_negative=0.3,warm_popularity=0.05
+    --variant caps_off:max_per_director=999,max_per_collection=999   # caps, too
     --only-variants                                  # skip the standard strategies
 
+A ranking change is measured against another code version the same way: run
+with ``--json master.json`` on ``master``, then on the branch with
+``--against master.json`` for paired deltas of each strategy against its
+namesake there.
+
 Prints Markdown tables (paste-able into docs/EVALUATION.md) and optionally
-writes the raw numbers as JSON. No database required.
+writes the raw numbers, per-user rows included, as JSON. No database required.
 """
 
 from __future__ import annotations
@@ -43,6 +49,7 @@ from app.recommendation.evaluation import (
     format_deltas,
     format_report,
     paired_deltas,
+    paired_deltas_against,
     production_variant,
     rating_count_strategy,
     run_evaluation,
@@ -55,6 +62,13 @@ DEFAULT_DELTA_METRICS = (
     "novelty",
     "dislike_recall@{k}",
     "like_dislike_auc",
+)
+# Against another code version, the launch checks matter as much as accuracy.
+AGAINST_DELTA_METRICS = (
+    *DEFAULT_DELTA_METRICS,
+    "director_over_limit",
+    "franchise_repeat",
+    "gem_famous_share",
 )
 
 
@@ -110,6 +124,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--baseline", default="production", help="Paired deltas against this")
     parser.add_argument("--json", type=Path, help="Write summary metrics (and deltas) here")
+    parser.add_argument(
+        "--against",
+        type=Path,
+        help="--json of another code version's run: paired deltas per same-named strategy",
+    )
     args = parser.parse_args(argv)
 
     max_users = args.users or None
@@ -169,11 +188,21 @@ def main(argv: list[str] | None = None) -> int:
         print()
         print(format_deltas(deltas, baseline=args.baseline))
 
+    if args.against:
+        previous = json.loads(args.against.read_text(encoding="utf-8"))
+        if previous.get("dataset") != dataset.name or previous.get("k") != args.k:
+            parser.error("--against: the previous run used another dataset or slate size")
+        metrics = [m.format(k=args.k) for m in AGAINST_DELTA_METRICS]
+        against = paired_deltas_against(run, previous, metrics=metrics)
+        print()
+        print(format_deltas(against, baseline=f"{args.against.name} (same strategy)"))
+
     if args.json:
         args.json.write_text(
             json.dumps(
                 {"dataset": dataset.name, "notes": dataset.notes, "k": args.k,
-                 "summary": run.summary, "deltas": deltas},
+                 "summary": run.summary, "deltas": deltas,
+                 "user_ids": run.user_ids, "per_user": run.per_user},
                 indent=2,
             ),
             encoding="utf-8",

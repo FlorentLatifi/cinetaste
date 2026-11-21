@@ -26,7 +26,7 @@ rating, ranks a catalog against it, keeps the slate varied, and says why.
 | **Low-friction onboarding** | Rate a curated deck of recognisable titles on a four-step scale (Didn't like it · It was ok · Really liked it · Loved it). A poster you leave alone counts as "haven't seen it" and costs nothing. |
 | **A taste profile, not a genre checkbox** | Every rating moves weights over genres, keywords, directors, writers, cast, tone, decade, language and country. |
 | **Explained recommendations** | Every card carries reasons built from real evidence — a shared director, shared themes, a tone you keep rating highly. |
-| **Discovery on purpose** | Diversity control, per-genre caps, exploration slots and hidden gems (well-rated titles that are not chart-toppers). |
+| **Discovery on purpose** | Diversity control, per-genre, per-director and per-franchise caps, exploration slots and hidden gems (well-rated titles less known than most of the catalog). |
 | **You can inspect and undo it** | The Taste tab in Account shows the signals learned, History lists every action, Undo reverses one, and the taste snapshot exports as JSON. |
 | **Where to watch** | Streaming, rent and buy options per region (TMDb/JustWatch). |
 
@@ -49,7 +49,7 @@ rating ──▶ interaction_events (append-only)
    score = 0.2·cosine + 0.6·feature overlap − 0.12·penalty + hidden-gem + cold-start prior
              │
              ▼
-   MMR (λ=0.8) ──▶ genre cap (40% of slate) ──▶ exploration slots ──▶ reasons
+   MMR (λ=0.8) ──▶ caps: genre 40%, director 10%, franchise 5% ──▶ exploration slots ──▶ reasons
 ```
 
 **Two representations, on purpose.** The sparse feature map is interpretable, so
@@ -82,29 +82,35 @@ details, 581 users, production-sized 4,500-title catalog, slate of 20):
 
 | strategy | recall@20 | hit rate@20 | novelty | catalog coverage |
 |---|---|---|---|---|
-| random | 0.003 | 0.055 | 0.509 | 0.918 |
+| random | 0.003 | 0.057 | 0.509 | 0.918 |
 | most popular on TMDb | 0.035 | 0.275 | 0.003 | 0.013 |
-| most rated by MovieLens users | **0.093** | 0.444 | 0.064 | 0.034 |
-| **production** | 0.069 | **0.448** | **0.211** | **0.235** |
-| production + popularity prior (opt-in) | 0.084 | 0.504 | 0.067 | 0.141 |
+| most rated by MovieLens users | **0.093** | **0.444** | 0.064 | 0.034 |
+| **production** | 0.052 | 0.375 | **0.382** | **0.316** |
+| production + quality prior (proposed, off) | 0.067 | 0.439 | 0.280 | 0.253 |
+| production + popularity prior (opt-in, off) | 0.077 | 0.482 | 0.100 | 0.211 |
 
 The honest headline: **with directors, cast, keywords and synopses, the
-recommender doubles the popularity it can see, but "what this population
-rated most" still finds more held-out favourites** — by recommending the
-charts (under a third of the novelty, a seventh of the coverage). Popularity still
-buys accuracy only by giving up discovery, so the prior ships switched off.
+recommender beats the popularity it can see by half again, but "what this
+population rated most" still finds more held-out favourites** — by
+recommending the charts (a sixth of the novelty, a tenth of the coverage).
+Offline recall rewards re-finding what people would have found anyway, so
+every lever that favours famous films raises it; the ones that ship are the
+ones that keep discovery.
 
 What the evaluation changed or found:
 
 - On MovieLens' own sparse metadata (September), the hashed content vector was
   the weakest signal, so weight moved to the interpretable features — confirmed
   with real metadata in November.
-- "Hidden gem" labels currently go to famous films (TMDb's popularity scale
-  shrank under the rule's thresholds), and half of all slates hold 3+ films by
-  one director. Both are measured, explained and tracked in
-  [docs/EVALUATION.md](docs/EVALUATION.md).
+- "Hidden gem" labels went to famous films (TMDb's popularity scale shrank
+  under the rule's thresholds: Pulp Fiction, Forrest Gump), and half of all
+  slates held 3+ films by one director. Gems now use catalog percentiles and
+  slates cap directors (2 in 20) and franchises (1 in 20): both launch checks
+  pass, at a measured 25% of offline recall — half of it the old gem rule
+  having doubled as a quality prior. A proposed explicit quality prior buys it back.
+  Details in [docs/EVALUATION.md](docs/EVALUATION.md).
 - On a synthetic benchmark where taste is learnable from metadata, the same
-  ranker finds 3.5× more held-out favourites than random or popular.
+  ranker finds 3–4× more held-out favourites than random or popular.
 
 ## Screenshots
 

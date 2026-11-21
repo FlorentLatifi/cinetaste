@@ -18,15 +18,19 @@ from app.recommendation.evaluation import (
     _context,
     make_ranking_strategy,
     paired_deltas,
+    paired_deltas_against,
     production_variant,
     rating_count_strategy,
     run_evaluation,
 )
-from app.recommendation.pipeline import MAX_GEM_LABELS
+from app.recommendation.pipeline import CATALOG_PERCENTILES_KEY, COLLECTION_KEY, MAX_GEM_LABELS
 
 
 def _payload(tmdb_id: int, *, director: str, votes: int, genre: str) -> dict[str, Any]:
+    # Ann Director's two films are one franchise.
+    collection = {"id": 900, "name": "Ann Saga"} if director == "Ann Director" else None
     return {
+        "belongs_to_collection": collection,
         "id": tmdb_id,
         "title": f"Film {tmdb_id}",
         "overview": f"A {genre.lower()} story number {tmdb_id}.",
@@ -118,6 +122,60 @@ def test_loader_builds_production_features_and_a_production_sized_catalog(moviel
     assert first.vote_count == 9000 and first.popularity == pytest.approx(90.0)
     assert dataset.notes["titles_with_tmdb_metadata"] == 6
     assert dataset.notes["ratings_with_metadata"] == dataset.notes["ratings_total"] - 1
+
+
+def test_loader_stores_collections_and_catalog_percentiles_as_ingest_does(movielens_tmdb) -> None:
+    dataset = _load(movielens_tmdb)
+    by_name = {t.name: t for t in [*dataset.titles, *dataset.profile_only_titles]}
+    assert by_name["Film 101"].extra[COLLECTION_KEY] == {"id": 900, "name": "Ann Saga"}
+    assert by_name["Film 101"].collection == by_name["Film 102"].collection == 900
+    assert COLLECTION_KEY not in by_name["Film 103"].extra
+    # percent_rank over the catalog (5 titles), as the ingest SQL computes it.
+    stored = {t.name: t.extra[CATALOG_PERCENTILES_KEY] for t in dataset.titles}
+    assert stored["Film 101"] == {"popularity": 1.0, "vote_count": 1.0}
+    assert stored["Film 103"] == {"popularity": 0.5, "vote_count": 0.5}
+    assert stored["Film 105"] == {"popularity": 0.0, "vote_count": 0.0}
+    # Profile-only titles are not candidates, so ingest's catalog does not include them.
+    assert CATALOG_PERCENTILES_KEY not in by_name["Film 106"].extra
+
+
+def test_production_passes_both_launch_checks_offline() -> None:
+    """S2 (≤ 2 films per director) and "no famous title labelled Hidden gem"."""
+    dataset = build_synthetic_dataset(n_titles=400, n_users=20, seed=5)
+    run = run_evaluation(
+        dataset,
+        {
+            "production": DEFAULT_STRATEGIES["production"],
+            "hybrid_no_diversity": DEFAULT_STRATEGIES["hybrid_no_diversity"],
+        },
+        k=20,
+    )
+    production = run.summary["production"]
+    assert production["director_over_limit"] == 0.0
+    assert production["director_max"] <= 2.0
+    assert production["gem_famous_share"] == 0.0
+    # The ablation lifts every cap, so it still shows what the caps prevent.
+    assert run.summary["hybrid_no_diversity"]["director_max"] > 2.0
+
+
+def test_production_variant_overrides_caps_as_well_as_weights() -> None:
+    variant = production_variant(max_per_director=999, sparse_negative=0.5)
+    assert variant.max_per_director == 999 and variant.max_per_collection is None
+    assert variant.weights.sparse_negative == 0.5
+    assert variant.candidate_pool == "production"
+
+
+def test_paired_deltas_against_another_run_pair_by_user() -> None:
+    dataset = build_synthetic_dataset(n_titles=200, n_users=8, seed=3)
+    strategies = {"production": DEFAULT_STRATEGIES["production"]}
+    before = run_evaluation(dataset, strategies, k=10)
+    after = run_evaluation(dataset, strategies, k=10)
+    previous = {"user_ids": before.user_ids, "per_user": before.per_user}
+    deltas = paired_deltas_against(after, previous, metrics=["recall@10"])
+    delta, low, high, pairs = deltas["production"]["recall@10"]
+    assert (delta, low, high, pairs) == (0.0, 0.0, 0.0, len(after.user_ids))
+    with pytest.raises(ValueError, match="different users"):
+        paired_deltas_against(after, {**previous, "user_ids": before.user_ids[::-1]}, metrics=[])
 
 
 def test_loader_split_negatives_and_leak_free_popularity(movielens_tmdb) -> None:
@@ -225,6 +283,24 @@ def test_cli_runs_sweeps_and_variants_with_paired_deltas(tmp_path: Path, capsys)
     }
     assert set(written["deltas"]) == set(written["summary"]) - {"production"}
     assert "vs `production`" in capsys.readouterr().out
+
+
+def test_cli_compares_against_another_code_versions_run(tmp_path: Path, capsys) -> None:
+    from app.scripts.evaluate_recommender import main
+
+    base = ["-k", "5", "--users", "6", "--titles", "80", "--strategies", "production"]
+    previous = tmp_path / "master.json"
+    assert main([*base, "--json", str(previous)]) == 0
+    written = json.loads(previous.read_text())
+    assert len(written["per_user"]["production"]) == len(written["user_ids"]) > 0
+    capsys.readouterr()
+
+    assert main([*base, "--against", str(previous)]) == 0
+    out = capsys.readouterr().out
+    assert "master.json (same strategy)" in out
+    assert "+0.0000 [+0.0000, +0.0000]" in out  # same code, same users: no difference
+    with pytest.raises(SystemExit):
+        main([*base[:1], "10", *base[2:], "--against", str(previous)])  # another slate size
 
 
 def test_engagement_markdown_shows_rates_with_intervals() -> None:
