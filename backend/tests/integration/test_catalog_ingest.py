@@ -426,17 +426,18 @@ async def test_a_row_the_database_rejects_costs_only_its_title(db_session: Async
 
     The set-based write fails as a whole, so the batch is written again one
     title at a time: the bad title fails alone, the rest are stored, and the
-    bad title's people are rolled back with it, as before batching.
+    bad title's other new people are rolled back with it, as before batching.
     """
     bad_id = 9_400_002
 
     class OneTooLong(RichTmdb):
         def _movie(self, tmdb_id: int) -> dict[str, Any]:
             payload = super()._movie(tmdb_id)
-            if tmdb_id == bad_id:  # credits.character is varchar(255)
-                payload["credits"]["cast"].insert(
-                    0, {"id": 9999, "name": "Only Here", "order": 0, "character": "x" * 300}
-                )
+            if tmdb_id == bad_id:  # people.name is varchar(255), and names are never cut
+                payload["credits"]["cast"][:0] = [
+                    {"id": 9998, "name": "n" * 300, "order": 0},
+                    {"id": 9999, "name": "Only Here", "order": 1},
+                ]
             return payload
 
     service = CatalogIngestService(db_session, OneTooLong(), batch_size=10)  # type: ignore[arg-type]
@@ -447,6 +448,39 @@ async def test_a_row_the_database_rejects_costs_only_its_title(db_session: Async
     stored = set(await db_session.scalars(select(Title.external_tmdb_id)))
     assert {9_400_000 + i for i in range(5)} - stored == {bad_id}
     assert await db_session.scalar(select(Person.id).where(Person.external_tmdb_id == 9999)) is None
+
+
+async def test_an_anthology_role_too_long_for_its_column_is_cut_not_the_film(
+    db_session: AsyncSession,
+) -> None:
+    """TMDb 45005 lists every segment role in one 500-character string.
+
+    credits.character is varchar(255), and the insert failing used to cost the
+    whole film. The role is display text, so it is cut to fit with an ellipsis.
+    """
+    from app.application.catalog_ingest import CHARACTER_MAX_LENGTH
+
+    role = " / ".join(f"Role {i} (segment \"Part {i}\")" for i in range(30))
+    assert len(role) > CHARACTER_MAX_LENGTH
+
+    class Anthology(RichTmdb):
+        def _movie(self, tmdb_id: int) -> dict[str, Any]:
+            payload = super()._movie(tmdb_id)
+            payload["credits"]["cast"][0]["character"] = role
+            return payload
+
+    service = CatalogIngestService(db_session, Anthology(), batch_size=10)  # type: ignore[arg-type]
+    await service._ensure_genres()
+    stats = await service._ingest_ids([("movie", 9_450_000)])
+
+    assert stats["created"] == 1 and stats["failed"] == 0
+    stored = await db_session.scalar(
+        select(Credit.character)
+        .join(Title, Title.id == Credit.title_id)
+        .where(Title.external_tmdb_id == 9_450_000, Credit.billing_order == 0)
+    )
+    assert stored is not None and len(stored) == CHARACTER_MAX_LENGTH
+    assert stored.endswith("…") and role.startswith(stored[:-1])
 
 
 class TrickyTmdb(RichTmdb):
