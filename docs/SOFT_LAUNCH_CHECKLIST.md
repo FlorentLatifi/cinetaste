@@ -28,6 +28,9 @@ rest is already in the code and is listed so it can be checked, not redone.
 - [ ] **Catalog.** Repository secrets `DATABASE_URL` and `TMDB_API_KEY`, then
       Actions → Catalog → `seed-only`, then `popular`. `/api/v1/ready` must say
       `"catalog":"ok"`.
+      Both runs end by storing catalog percentiles, which "Hidden gem"
+      needs; on a catalog filled before them, run `seed-only` once
+      ([DEPLOY.md](DEPLOY.md)).
 - [ ] **Monitoring.** Repository variables `API_BASE_URL` and `APP_BASE_URL`
       switch on the Uptime workflow (it also keeps the free API from sleeping).
       `SENTRY_DSN` (API) and `VITE_SENTRY_DSN` (SPA) are optional; the CSP
@@ -56,7 +59,7 @@ rest is already in the code and is listed so it can be checked, not redone.
 | Open `/` in a private window | Landing with the poster wall, instantly (no spinner even if the API sleeps) |
 | *Try it now* → rate 3 posters → *Show my picks* | A row of explained picks; *Want to watch* counts up |
 | *Keep my picks* → sign up | "Check your inbox" (with verification on); the link asks for the password and continues to onboarding with the guest answers carried over |
-| Finish onboarding | For You: swipeable picks, at most 3 labelled "Hidden gem" |
+| Finish onboarding | For You: swipeable picks, at most 3 labelled "Hidden gem" and none of them a famous film; no more than 2 picks by one director (S2) or 1 from one franchise in 20. Measured offline in [EVALUATION.md](EVALUATION.md#before-and-after-director-and-franchise-caps-catalog-percentile-gems) |
 | Open a pick | Detail shows *Want to watch / Seen it / Not for me*; after saving, a reload still says "In your watchlist" |
 | Watchlist, History, Search | Saved titles listed; history shows the ratings; search finds by title |
 | Sign out | Back to the landing page |
