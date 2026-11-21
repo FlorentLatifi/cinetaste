@@ -257,6 +257,40 @@ class TasteService:
             if isinstance(obj, TasteProfile) and obj.user_id == user_id:
                 self._session.expire(obj)
 
+    async def _upsert_profile(
+        self, user_id: UUID, *, features: dict[str, Any] | None = None
+    ) -> TasteProfile:
+        """Write the profile row whether or not it exists yet, and return it.
+
+        Import and clear hold ``_lock_profile_rebuilds``, but the rating
+        request's ``bump_profile_version`` deliberately does not. So for a user
+        with no profile, a first rating can create the row between this
+        transaction reading "no row" and writing one. A plain INSERT then waits
+        on the rating's row and fails on the primary key once it commits,
+        taking the import or clear down with it. An upsert resolves that in
+        SQL, as the bump does.
+
+        ``features`` replaces the row's features; ``None`` creates an empty
+        row or leaves an existing one untouched. The version is never changed
+        here: a new row starts at 1, and a caller that changes the profile
+        rebuilds it next, which bumps the version.
+        """
+        stmt = pg_insert(TasteProfile).values(
+            user_id=user_id, version=1, features=features or {}, vector=None
+        )
+        if features is None:
+            # A no-op SET rather than DO NOTHING, which would return no row.
+            updates: dict[str, Any] = {"version": TasteProfile.version}
+        else:
+            updates = {"features": stmt.excluded.features, "updated_at": func.now()}
+        stmt = stmt.on_conflict_do_update(
+            index_elements=[TasteProfile.user_id], set_=updates
+        ).returning(TasteProfile)
+        result = await self._session.execute(
+            stmt, execution_options={"populate_existing": True}
+        )
+        return result.scalar_one()
+
     async def recompute_profile(self, user_id: UUID) -> TasteProfile:
         await self._lock_profile_rebuilds(user_id)
         events = (
@@ -335,25 +369,11 @@ class TasteService:
         if not overlay and not likes and not dislikes:
             # Nothing to merge — still return profile
             if profile is None:
-                profile = TasteProfile(
-                    user_id=user_id, version=1, features={}, vector=None
-                )
-                self._session.add(profile)
-                await self._session.flush()
+                profile = await self._upsert_profile(user_id)
             return profile
 
         existing_features[IMPORT_OVERLAY_KEY] = overlay
-        if profile is None:
-            profile = TasteProfile(
-                user_id=user_id,
-                version=1,
-                features=existing_features,
-                vector=None,
-            )
-            self._session.add(profile)
-        else:
-            profile.features = existing_features
-        await self._session.flush()
+        await self._upsert_profile(user_id, features=existing_features)
         return await self.recompute_profile(user_id)
 
     async def clear_import_overlay(self, user_id: UUID) -> TasteProfile:
@@ -361,10 +381,8 @@ class TasteService:
         await self._lock_profile_rebuilds(user_id)  # before the row; see merge_taste_snapshot
         profile = await self._session.get(TasteProfile, user_id, populate_existing=True)
         if profile is None:
-            profile = TasteProfile(user_id=user_id, version=1, features={}, vector=None)
-            self._session.add(profile)
-            await self._session.flush()
-            return profile
+            # No overlay to clear and nothing to rebuild; just make sure the row exists.
+            return await self._upsert_profile(user_id)
 
         features = dict(profile.features or {})
         if IMPORT_OVERLAY_KEY in features:
