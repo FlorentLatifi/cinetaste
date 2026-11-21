@@ -25,16 +25,20 @@ from app.recommendation.explanations import (
 # Re-export for callers/tests that import Reason from pipeline.
 __all__ = [
     "DEFAULT_WEIGHTS",
+    "CandidateChannels",
     "Reason",
     "RankedItem",
     "RankingWeights",
     "annotate_discovery_reasons",
+    "blend_scores",
+    "candidate_channels",
     "genre_cap_for",
     "explain",
     "gem_boost",
     "mmr_select",
     "primary_genre",
     "rank_titles",
+    "select_slate",
 ]
 
 
@@ -296,37 +300,54 @@ def _interleave(main: list[int], extra: list[int]) -> list[int]:
     return out
 
 
-def rank_titles(
+@dataclass(slots=True)
+class CandidateChannels:
+    """Per-candidate scoring inputs for one user, before any weights apply.
+
+    Weight-independent, so one computation serves every weighting of the same
+    pool: offline evaluation sweeps weights without re-scoring the sparse
+    overlap, which is the expensive part.
+    """
+
+    pool: list[Any]
+    unit: np.ndarray  # L2-normalised content vectors, one row per candidate
+    similarity: np.ndarray  # cosine to the user's taste vector
+    positive: np.ndarray  # sparse overlap with liked features
+    negative: np.ndarray  # sparse overlap with disliked features
+    gems: np.ndarray  # hidden-gem bonus
+    popularity: np.ndarray
+    genres: list[str]  # primary genre per candidate
+    cold: bool  # thin profile: the cold-start popularity prior applies
+
+    def subset(self, indices: Sequence[int]) -> CandidateChannels:
+        """The same channels restricted to ``indices`` (in that order)."""
+        idx = np.asarray(indices, dtype=np.int64)
+        return CandidateChannels(
+            pool=[self.pool[i] for i in idx],
+            unit=self.unit[idx],
+            similarity=self.similarity[idx],
+            positive=self.positive[idx],
+            negative=self.negative[idx],
+            gems=self.gems[idx],
+            popularity=self.popularity[idx],
+            genres=[self.genres[i] for i in idx],
+            cold=self.cold,
+        )
+
+
+def candidate_channels(
     *,
     user_vector: Sequence[float] | None,
     user_features: dict[str, Any],
     titles: list[Any],
     exclude_ids: set[UUID],
-    slate_size: int,
-    mmr_lambda: float,
-    exploration_slots: int = 3,
-    explain_memory: dict[str, Any] | None = None,
-    weights: RankingWeights = DEFAULT_WEIGHTS,
-    max_per_genre: int | None = None,
-    with_reasons: bool = True,
-) -> list[RankedItem]:
-    """Rank candidate titles for one user.
+) -> CandidateChannels | None:
+    """Score inputs for every rankable candidate; None when nothing is rankable.
 
-    1. Score = weighted dense similarity + sparse overlap − sparse penalty
-       + hidden-gem bonus + popularity prior (cold start only).
-    2. MMR over the top of the list, with a per-primary-genre cap.
-    3. Exploration: well-rated, moderately relevant titles from genres the slate
-       doesn't cover yet, spread through the slate.
-    4. Backfill by score, still honouring the genre cap; if the catalog can't
-       fill the slate that way, the cap is raised one step at a time.
+    Candidates are de-duplicated, excluded ids and unembedded titles dropped.
+    ``user_features`` may still carry the explain-memory block; it is ignored.
     """
-    if slate_size <= 0:
-        return []
-    if max_per_genre is None:
-        max_per_genre = genre_cap_for(slate_size)
-    scoring_features, memory_from_features = strip_explain_memory(user_features)
-    memory = explain_memory if explain_memory is not None else memory_from_features
-
+    scoring_features, _memory = strip_explain_memory(user_features)
     pool: list[Any] = []
     seen_ids: set[UUID] = set()
     for title in titles:
@@ -335,7 +356,7 @@ def rank_titles(
         seen_ids.add(title.id)
         pool.append(title)
     if not pool:
-        return []
+        return None
     n = len(pool)
 
     unit = _unit_matrix([t.embedding for t in pool])
@@ -355,34 +376,124 @@ def rank_titles(
         sparse = [sparse_channel_scores(scoring_features, snap) for snap in snapshots]
     else:
         sparse = [(0.0, 0.0)] * n
-    positive = np.asarray([p for p, _ in sparse], dtype=np.float64)
-    negative = np.asarray([q for _, q in sparse], dtype=np.float64)
 
-    popularity = np.asarray([float(t.popularity) for t in pool], dtype=np.float64)
-    gems = np.asarray(
-        [
-            gem_boost(float(t.vote_average), float(t.popularity), getattr(t, "vote_count", None))
-            for t in pool
-        ],
-        dtype=np.float64,
+    return CandidateChannels(
+        pool=pool,
+        unit=unit,
+        similarity=similarity,
+        positive=np.asarray([p for p, _ in sparse], dtype=np.float64),
+        negative=np.asarray([q for _, q in sparse], dtype=np.float64),
+        gems=np.asarray(
+            [
+                gem_boost(
+                    float(t.vote_average), float(t.popularity), getattr(t, "vote_count", None)
+                )
+                for t in pool
+            ],
+            dtype=np.float64,
+        ),
+        popularity=np.asarray([float(t.popularity) for t in pool], dtype=np.float64),
+        genres=[primary_genre(t) for t in pool],
+        cold=cold,
     )
-    prior = np.minimum(popularity / 200.0, 0.22) if cold else np.zeros(n)
+
+
+def blend_scores(channels: CandidateChannels, weights: RankingWeights = DEFAULT_WEIGHTS) -> np.ndarray:
+    """Score = weighted dense similarity + sparse overlap − sparse penalty
+    + hidden-gem bonus + popularity prior (cold start, or warm when enabled)."""
+    n = len(channels.pool)
+    popularity = channels.popularity
+    prior = np.minimum(popularity / 200.0, 0.22) if channels.cold else np.zeros(n)
     warm_prior = np.zeros(n)
-    if not cold and weights.warm_popularity and n > 1:
+    if not channels.cold and weights.warm_popularity and n > 1:
         # Rank-based percentile: 1.0 for the most popular candidate, 0.0 for the least.
         warm_prior = np.argsort(np.argsort(popularity, kind="stable"), kind="stable") / (n - 1)
-
-    scores = (
-        weights.similarity * similarity
-        + weights.sparse_positive * positive
-        - weights.sparse_negative * negative
-        + weights.hidden_gem * gems
+    return (
+        weights.similarity * channels.similarity
+        + weights.sparse_positive * channels.positive
+        - weights.sparse_negative * channels.negative
+        + weights.hidden_gem * channels.gems
         + weights.cold_popularity * prior
         + weights.warm_popularity * warm_prior
     )
+
+
+def rank_titles(
+    *,
+    user_vector: Sequence[float] | None,
+    user_features: dict[str, Any],
+    titles: list[Any],
+    exclude_ids: set[UUID],
+    slate_size: int,
+    mmr_lambda: float,
+    exploration_slots: int = 3,
+    explain_memory: dict[str, Any] | None = None,
+    weights: RankingWeights = DEFAULT_WEIGHTS,
+    max_per_genre: int | None = None,
+    with_reasons: bool = True,
+) -> list[RankedItem]:
+    """Rank candidate titles for one user.
+
+    1. Score (``candidate_channels`` → ``blend_scores``) = weighted dense
+       similarity + sparse overlap − sparse penalty + hidden-gem bonus
+       + popularity prior (cold start only).
+    2. MMR over the top of the list, with a per-primary-genre cap.
+    3. Exploration: well-rated, moderately relevant titles from genres the slate
+       doesn't cover yet, spread through the slate.
+    4. Backfill by score, still honouring the genre cap; if the catalog can't
+       fill the slate that way, the cap is raised one step at a time.
+    """
+    if slate_size <= 0:
+        return []
+    channels = candidate_channels(
+        user_vector=user_vector,
+        user_features=user_features,
+        titles=titles,
+        exclude_ids=exclude_ids,
+    )
+    if channels is None:
+        return []
+    return select_slate(
+        channels,
+        blend_scores(channels, weights),
+        user_features=user_features,
+        slate_size=slate_size,
+        mmr_lambda=mmr_lambda,
+        exploration_slots=exploration_slots,
+        explain_memory=explain_memory,
+        max_per_genre=max_per_genre,
+        with_reasons=with_reasons,
+    )
+
+
+def select_slate(
+    channels: CandidateChannels,
+    scores: np.ndarray,
+    *,
+    user_features: dict[str, Any],
+    slate_size: int,
+    mmr_lambda: float,
+    exploration_slots: int = 3,
+    explain_memory: dict[str, Any] | None = None,
+    max_per_genre: int | None = None,
+    with_reasons: bool = True,
+) -> list[RankedItem]:
+    """Steps 2–4 of ``rank_titles`` over already-scored candidates."""
+    if slate_size <= 0 or not channels.pool:
+        return []
+    if max_per_genre is None:
+        max_per_genre = genre_cap_for(slate_size)
+    scoring_features, memory_from_features = strip_explain_memory(user_features)
+    memory = explain_memory if explain_memory is not None else memory_from_features
+
+    pool = channels.pool
+    n = len(pool)
+    unit = channels.unit
+    similarity = channels.similarity
+    gems = channels.gems
+    genres = channels.genres
     order = [int(i) for i in np.argsort(-scores, kind="stable")]
 
-    genres = [primary_genre(t) for t in pool]
     genre_index = {g: i for i, g in enumerate(dict.fromkeys(genres))}
     genre_ids = np.asarray([genre_index[g] for g in genres], dtype=np.int64)
 
