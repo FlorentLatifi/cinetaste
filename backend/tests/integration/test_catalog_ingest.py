@@ -219,3 +219,130 @@ async def test_tv_id_colliding_with_a_stored_movie_never_overwrites_it(
     assert stats["failed"] >= 1
     await db_session.refresh(movie)
     assert movie.media_type == "movie" and movie.name == f"Movie {RATED_ID}"
+
+
+async def test_catalog_percentiles_are_written_and_refresh_is_incremental(
+    db_session: AsyncSession,
+) -> None:
+    """Ranking reads catalog-wide percentiles from Title.extra (no schema change)."""
+    from uuid import uuid4
+
+    from app.application.catalog_percentiles import refresh_catalog_percentiles
+    from app.recommendation.pipeline import CATALOG_PERCENTILES_KEY
+
+    rows = [  # (popularity, vote_count): one huge trending outlier, as in production
+        (2569.0, 30_000),
+        (47.9, 20_000),
+        (7.5, 16_000),  # a classic with a low trending score
+        (3.0, 120),
+        (1.0, 10),
+    ]
+    titles = [
+        Title(
+            id=uuid4(),
+            external_tmdb_id=9_500_000 + i,
+            media_type="movie",
+            name=f"P{i}",
+            popularity=popularity,
+            vote_count=votes,
+            extra={"demo": True} if i == 0 else None,
+        )
+        for i, (popularity, votes) in enumerate(rows)
+    ]
+    db_session.add_all(titles)
+    await db_session.commit()
+
+    assert await refresh_catalog_percentiles(db_session) == len(rows)
+    await db_session.commit()
+    for title in titles:
+        await db_session.refresh(title)
+    stored = [t.extra[CATALOG_PERCENTILES_KEY] for t in titles]
+    assert [s["popularity"] for s in stored] == [1.0, 0.75, 0.5, 0.25, 0.0]
+    assert [s["vote_count"] for s in stored] == [1.0, 0.75, 0.5, 0.25, 0.0]
+    assert titles[0].extra["demo"] is True  # other keys survive the merge
+
+    # Nothing changed, nothing rewritten.
+    assert await refresh_catalog_percentiles(db_session) == 0
+
+
+async def test_ingest_ends_with_catalog_percentiles_for_every_title(
+    db_session: AsyncSession,
+) -> None:
+    from app.recommendation.pipeline import CATALOG_PERCENTILES_KEY
+
+    service = CatalogIngestService(db_session, FakeTmdb(), batch_size=10)  # type: ignore[arg-type]
+    await service.ingest_popular(pages=1, include_tv=True)
+    extras = (await db_session.scalars(select(Title.extra))).all()
+    assert extras and all(CATALOG_PERCENTILES_KEY in (extra or {}) for extra in extras)
+
+    # A single re-ingested title keeps its stored value until the next refresh.
+    movie = await db_session.scalar(select(Title).where(Title.external_tmdb_id == 9_000_010))
+    assert movie is not None
+    before = movie.extra[CATALOG_PERCENTILES_KEY]
+    await service.upsert_movie(9_000_010)
+    await db_session.commit()
+    await db_session.refresh(movie)
+    assert movie.extra[CATALOG_PERCENTILES_KEY] == before
+    assert "feature_snapshot" in movie.extra
+
+
+async def test_movie_collection_is_stored_and_survives_reingest_and_reembed(
+    db_session: AsyncSession,
+) -> None:
+    """The franchise cap reads Title.extra["collection"]; ingest must keep it current."""
+    from app.recommendation.pipeline import COLLECTION_KEY, collection_of
+    from app.scripts import reembed_catalog
+
+    matrix = {"id": 2344, "name": "The Matrix Collection", "poster_path": "/m.jpg"}
+
+    class CollectionTmdb(FakeTmdb):
+        def __init__(self, collection: dict[str, Any] | None) -> None:
+            super().__init__()
+            self.collection = collection
+
+        async def get_movie(self, tmdb_id: int) -> dict[str, Any]:
+            payload = await super().get_movie(tmdb_id)
+            # TMDb always sends the field on movie detail: null for standalone films.
+            payload["belongs_to_collection"] = self.collection if tmdb_id == 9_000_010 else None
+            return payload
+
+    async def stored(tmdb_id: int) -> Title:
+        db_session.expire_all()
+        title = await db_session.scalar(select(Title).where(Title.external_tmdb_id == tmdb_id))
+        assert title is not None
+        return title
+
+    service = CatalogIngestService(db_session, CollectionTmdb(matrix), batch_size=10)  # type: ignore[arg-type]
+    await service.ingest_popular(pages=1, include_tv=True)
+
+    movie = await stored(9_000_010)
+    # Only id and name are kept: poster etc. would be dead weight in every row.
+    assert movie.extra[COLLECTION_KEY] == {"id": 2344, "name": "The Matrix Collection"}
+    assert collection_of(movie) == 2344
+    assert "feature_snapshot" in movie.extra and "catalog_percentiles" in movie.extra
+    assert COLLECTION_KEY not in (await stored(9_000_011)).extra  # standalone film
+    assert COLLECTION_KEY not in (await stored(TV_ID)).extra  # TV has no collections
+
+    # Re-embed rebuilds features from the DB and must not drop the collection.
+    assert await reembed_catalog.main(limit=None, force=True) == 0
+    assert (await stored(9_000_010)).extra[COLLECTION_KEY]["id"] == 2344
+
+    # Re-ingest (refresh_existing) keeps it...
+    await CatalogIngestService(db_session, CollectionTmdb(matrix), batch_size=10).ingest_popular(  # type: ignore[arg-type]
+        pages=1, include_tv=True, refresh_existing=True
+    )
+    assert collection_of(await stored(9_000_010)) == 2344
+
+    # ...and TMDb is authoritative: a film taken out of its collection loses it.
+    await CatalogIngestService(db_session, CollectionTmdb(None), batch_size=10).upsert_movie(  # type: ignore[arg-type]
+        9_000_010
+    )
+    await db_session.commit()
+    assert COLLECTION_KEY not in (await stored(9_000_010)).extra
+
+    # A malformed value is not stored (and never breaks the ingest).
+    await CatalogIngestService(  # type: ignore[arg-type]
+        db_session, CollectionTmdb({"name": "no id"}), batch_size=10
+    ).upsert_movie(9_000_010)
+    await db_session.commit()
+    assert collection_of(await stored(9_000_010)) is None

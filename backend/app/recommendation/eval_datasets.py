@@ -23,8 +23,30 @@ from uuid import UUID, uuid4
 
 from app.recommendation.embeddings import build_title_signals
 from app.recommendation.evaluation import Dataset, EvalTitle, EvalUser
+from app.recommendation.pipeline import CATALOG_PERCENTILES_KEY, percent_rank
 
 T0 = datetime(2024, 1, 1, tzinfo=UTC)
+
+
+def stamp_catalog_percentiles(catalog: list[EvalTitle]) -> list[EvalTitle]:
+    """Store catalog-wide percentiles in ``extra`` the way ingest does.
+
+    Mirrors ``app/application/catalog_percentiles.py``: SQL ``percent_rank()``
+    over every title in the catalog, rounded to 4 places. Without it, ranking
+    would fall back to percentiles of whatever pool it is handed, which in
+    evaluation is the catalog minus the user's own ratings.
+    """
+    popularity = percent_rank([t.popularity for t in catalog])
+    votes = percent_rank([float(t.vote_count) for t in catalog])
+    for i, title in enumerate(catalog):
+        title.extra = {
+            **(title.extra or {}),
+            CATALOG_PERCENTILES_KEY: {
+                "popularity": round(float(popularity[i]), 4),
+                "vote_count": round(float(votes[i]), 4),
+            },
+        }
+    return catalog
 
 # --------------------------------------------------------------------- synthetic
 
@@ -110,7 +132,7 @@ def build_synthetic_dataset(
         if events and test:
             users.append(EvalUser(user_id=f"synthetic-{user_index}", train_events=events, test_positive_ids=test))
 
-    return Dataset(name="synthetic", titles=titles, users=users)
+    return Dataset(name="synthetic", titles=stamp_catalog_percentiles(titles), users=users)
 
 
 # -------------------------------------------------------------------- MovieLens
@@ -263,7 +285,7 @@ def load_movielens_dataset(
                 )
             )
 
-    return Dataset(name="movielens", titles=titles, users=users)
+    return Dataset(name="movielens", titles=stamp_catalog_percentiles(titles), users=users)
 
 
 # ------------------------------------------------------- MovieLens + TMDb
@@ -306,6 +328,8 @@ def load_movielens_tmdb_dataset(
 
     Ratings of films TMDb has no details for are dropped (``notes`` says how many).
     """
+    from app.application.catalog_ingest import tmdb_collection
+    from app.recommendation.pipeline import COLLECTION_KEY
     from app.recommendation.tmdb_eval_cache import (
         STATUS_OK,
         load_cache,
@@ -333,6 +357,11 @@ def load_movielens_tmdb_dataset(
             payload = record["payload"]
             inputs = signal_inputs_from_payload("movie", payload)
             embedding, _features, meta = build_title_signals(**inputs)
+            # The franchise, as ingest stores it. Caches fetched before the
+            # field was kept have no collections: the cap is then idle.
+            collection = tmdb_collection(payload.get("belongs_to_collection"))
+            if collection:
+                meta = {**meta, COLLECTION_KEY: collection}
             title = EvalTitle(
                 id=uuid4(),
                 name=inputs["name"],
@@ -423,7 +452,7 @@ def load_movielens_tmdb_dataset(
 
     return Dataset(
         name="movielens-tmdb",
-        titles=catalog,
+        titles=stamp_catalog_percentiles(catalog),
         users=users,
         profile_only_titles=profile_only,
         notes={

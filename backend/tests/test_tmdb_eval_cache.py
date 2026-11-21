@@ -17,7 +17,12 @@ from typing import Any
 import httpx
 import pytest
 
-from app.application.catalog_ingest import MAX_CAST, MAX_KEYWORDS, CatalogIngestService
+from app.application.catalog_ingest import (
+    MAX_CAST,
+    MAX_KEYWORDS,
+    CatalogIngestService,
+    tmdb_collection,
+)
 from app.domain.exceptions import AppError
 from app.infrastructure.db.models.catalog import Title
 from app.recommendation.embeddings import build_title_signals
@@ -119,6 +124,21 @@ def test_movie_features_match_ingest_exactly() -> None:
     assert "person:writer:jim uhls" in snapshot
     assert "person:writer:chuck palahniuk" not in snapshot  # "Novel" is not an ingest job
     assert "country:DE" in snapshot
+
+
+def test_collection_survives_trimming_and_matches_ingest() -> None:
+    """The franchise cap reads ``extra["collection"]``; evaluation must see what ingest stores."""
+    payload = {
+        **_movie_payload(),
+        "belongs_to_collection": {"id": 10, "name": " Fight Saga ", "poster_path": "/x.jpg"},
+    }
+    title = _ingest("movie", payload)
+    trimmed = trim_movie_payload(payload)
+    assert trimmed["belongs_to_collection"] == {"id": 10, "name": " Fight Saga "}
+    assert tmdb_collection(trimmed["belongs_to_collection"]) == title.extra["collection"]
+    assert title.extra["collection"] == {"id": 10, "name": "Fight Saga"}
+    standalone = trim_movie_payload({**_movie_payload(), "belongs_to_collection": None})
+    assert standalone["belongs_to_collection"] is None
 
 
 def test_untrimmed_and_trimmed_payloads_give_the_same_signals() -> None:

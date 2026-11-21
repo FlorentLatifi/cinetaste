@@ -149,6 +149,13 @@ def signal_inputs_from_payload(media_type: str, payload: Mapping[str, Any]) -> d
     }
 
 
+def _trim_collection(raw: Any) -> dict[str, Any] | None:
+    """``belongs_to_collection`` reduced to what ingest keeps (``id``, ``name``)."""
+    if not isinstance(raw, Mapping):
+        return None
+    return {"id": raw.get("id"), "name": raw.get("name")}
+
+
 def trim_movie_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
     """The subset of a movie detail payload the mapping above (and ranking) reads."""
     credits = payload.get("credits") or {}
@@ -171,6 +178,8 @@ def trim_movie_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
             {"iso_3166_1": c.get("iso_3166_1")} for c in payload.get("production_countries") or []
         ],
         "origin_country": payload.get("origin_country") or [],
+        # The franchise (TMDb collection) for the per-collection slate cap.
+        "belongs_to_collection": _trim_collection(payload.get("belongs_to_collection")),
         "credits": {
             "cast": [
                 {"id": c.get("id"), "name": c.get("name"), "order": c.get("order")}

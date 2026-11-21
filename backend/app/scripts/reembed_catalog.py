@@ -1,10 +1,12 @@
 """Rebuild title embeddings + feature_snapshot from DB relations (no TMDb).
 
 Use after FEATURE_SCHEMA_VERSION changes so ranking uses richer people/lang/
-country/tone signals without a full re-ingest.
+country/tone signals without a full re-ingest. Always ends by refreshing the
+catalog-wide popularity / vote-count percentiles in ``Title.extra``.
 
     python -m app.scripts.reembed_catalog
     python -m app.scripts.reembed_catalog --limit 100
+    python -m app.scripts.reembed_catalog --percentiles-only   # backfill percentiles only
 """
 
 from __future__ import annotations
@@ -17,6 +19,7 @@ import sys
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
+from app.application.catalog_percentiles import refresh_catalog_percentiles
 from app.core.config import get_settings
 from app.core.logging import configure_logging
 from app.infrastructure.db.models.catalog import Credit, Title
@@ -49,12 +52,20 @@ def _people_from_title(title: Title) -> list[PersonSignal]:
     return people
 
 
-async def main(*, limit: int | None, force: bool) -> int:
+async def main(*, limit: int | None, force: bool, percentiles_only: bool = False) -> int:
     settings = get_settings()
     configure_logging(debug=settings.app_debug)
     log = logging.getLogger("reembed")
 
     async with async_session_factory() as session:
+        if percentiles_only:
+            changed = await refresh_catalog_percentiles(session)
+            await session.commit()
+            stats_only = {"catalog_percentiles_changed": changed}
+            log.info("Catalog percentiles refreshed: %s", stats_only)
+            print(stats_only)
+            return 0
+
         q = (
             select(Title)
             .options(
@@ -90,7 +101,8 @@ async def main(*, limit: int | None, force: bool) -> int:
                 original_language=title.original_language,
                 countries=countries,
             )
-            # Preserve demo flag and any other non-feature keys.
+            # Preserve non-feature keys (demo flag, catalog percentiles, the TMDb
+            # collection used by the franchise cap): they come from ingest, not here.
             merged = {k: v for k, v in extra.items() if k not in meta}
             merged.update(meta)
             title.embedding = embedding
@@ -98,11 +110,15 @@ async def main(*, limit: int | None, force: bool) -> int:
             updated += 1
 
         await session.commit()
+        # Whole catalog, regardless of --limit: percentiles are relative to all titles.
+        percentiles_changed = await refresh_catalog_percentiles(session)
+        await session.commit()
         stats = {
             "scanned": len(titles),
             "updated": updated,
             "skipped_current": skipped,
             "feature_schema_version": FEATURE_SCHEMA_VERSION,
+            "catalog_percentiles_changed": percentiles_changed,
         }
         log.info("Re-embed complete: %s", stats)
         print(stats)
@@ -117,9 +133,18 @@ if __name__ == "__main__":
         action="store_true",
         help="Rebuild even if feature_schema_version is current",
     )
+    parser.add_argument(
+        "--percentiles-only",
+        action="store_true",
+        help="Only refresh catalog popularity / vote-count percentiles (no re-embed)",
+    )
     args = parser.parse_args()
     try:
-        raise SystemExit(asyncio.run(main(limit=args.limit, force=args.force)))
+        raise SystemExit(
+            asyncio.run(
+                main(limit=args.limit, force=args.force, percentiles_only=args.percentiles_only)
+            )
+        )
     except Exception as exc:  # noqa: BLE001
         print(f"ERROR: {exc}", file=sys.stderr)
         raise SystemExit(1) from exc
