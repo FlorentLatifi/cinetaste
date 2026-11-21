@@ -4,16 +4,28 @@ Three layers, each answering a different question.
 
 | Layer | Count | Question | Needs |
 |---|---|---|---|
-| Unit — backend (`backend/tests/*.py`) | 237 | Is the logic right? | nothing |
-| Unit — frontend (`frontend/src/**/*.test.ts`) | 77 | Do the pure functions hold? | nothing |
-| Integration (`backend/tests/integration/`) | 22 | Do the API, migrations and database agree? | Postgres + pgvector |
-| End-to-end (`frontend/e2e/`) | 47 | Does the app work in a browser, accessibly? | built SPA |
+| Unit — backend (`backend/tests/*.py`) | 399 | Is the logic right? | nothing |
+| Unit — frontend (`frontend/src/**/*.test.ts`) | 112 | Do the pure functions hold? | nothing |
+| Integration (`backend/tests/integration/`) | 62 | Do the API, migrations and database agree? | Postgres + pgvector |
+| End-to-end (`frontend/e2e/`) | 66 | Does the app work in a browser, accessibly? | built SPA |
+
+Counts are from November 2026. To recount, collect rather than run (no
+database or browser needed):
+
+```bash
+# From the repo root. Settings must validate, but nothing connects.
+(cd backend && APP_ENV=test JWT_SECRET=ci-test-secret-key-at-least-32-characters-long \
+  DATABASE_URL=postgresql+asyncpg://cinetaste:cinetaste@localhost:5432/cinetaste_test \
+  pytest --collect-only -q -m "not integration")   # then -m integration
+(cd frontend && npx vitest list | wc -l && npx playwright test --list | tail -1)
+```
 
 ## Coverage
 
-Backend 84%, gated in CI two ways: `--cov-fail-under=80` on the total, and
-`backend/tools/coverage_gate.py` on each package, because a total is easy to
-hold up with well-covered trivia while ranking and taste quietly rot.
+Backend 87% (CI on `master`, November 2026), gated in CI two ways:
+`--cov-fail-under=80` on the total, and `backend/tools/coverage_gate.py` on
+each package, because a total is easy to hold up with well-covered trivia while
+ranking and taste quietly rot.
 
 One setting makes those numbers mean anything. SQLAlchemy's async layer runs
 database work inside greenlets, and coverage does not follow a greenlet switch
@@ -102,6 +114,6 @@ uses; a re-implementation would measure the re-implementation.
 
 ## Gaps worth knowing
 
-- Coverage is reported in CI but not gated; pick a floor from a measured run.
-- No frontend unit tests (hooks are covered indirectly through e2e).
+- No frontend unit tests for hooks or components (`useForYouQueue`,
+  `useOnboardingDeck`, pages); they are covered only through e2e.
 - No load testing; latency claims come from micro-benchmarks, not a load run.
