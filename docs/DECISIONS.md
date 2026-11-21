@@ -4,6 +4,47 @@ Lightweight ADR-style log. Newest first.
 
 ---
 
+## 2026-11-21 — Catalog ingest writes a batch per round trip, not a title
+
+### Decision
+`CatalogIngestService` writes each batch of 25 titles with a fixed set of
+statements: one `SELECT` each for the batch's titles, people and keywords
+(`= ANY($1)`, so asyncpg reuses the prepared statement), one flush inserting the
+new people, keywords and titles, one executemany `UPDATE` for stored titles, one
+`DELETE` per join table and one flush inserting the join rows. That is 11
+statements for a batch of new titles and 12 for stored ones, whatever the batch
+size. Lookup rules are unchanged and run in memory (genres and keywords by TMDb
+id, then by name; people by id; the first name seen wins). If the database
+rejects one title's row, the batch is redone one savepoint per title, so that
+title alone fails, as before.
+
+### Rationale
+The Catalog workflow runs on a GitHub runner, ~150 ms from Neon, so every
+statement is a round trip. Writing title by title took 57 statements for a
+stored title and up to 98 for a new one: run #8 measured 8.5 s per title, and
+`popular` (~3,400 titles) needed about 8 hours against a 150-minute job limit.
+`tools/profile_catalog_ingest.py` reproduces this locally through a proxy that
+adds latency: at 150 ms the old code took 9.4 s per stored title and 11.5 s per
+new one. The new code takes 0.15 s and 0.11 s. On 420 real TMDb payloads the
+old and new code store identical rows in every catalog table.
+`tests/integration/test_catalog_ingest.py` pins the statement count.
+
+Stored titles are updated through one executemany instead of the unit of work
+because `Base` sets `eager_defaults=True`. That `RETURNING updated_at` forces a
+separate `UPDATE` per row, and it stays, because async code must not lazy-load
+`updated_at`.
+
+### Also fixed
+A batch redone after a lost connection ran inside the `except` block, so any
+error in it carried the lost connection as `__context__`. `_connection_is_lost`
+follows that chain, so one malformed payload in the redone batch stopped the
+run as a second lost connection.
+
+### Status
+Active. Confirm with the next `popular` run's `ingest_progress` lines.
+
+---
+
 ## 2026-11-21 — Penalise disliked features harder (`sparse_negative` 0.12 → 0.5)
 
 ### Decision
