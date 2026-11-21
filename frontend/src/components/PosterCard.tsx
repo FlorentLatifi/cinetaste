@@ -40,12 +40,9 @@ export function PosterCard({
 
   return (
     <article className={`poster-card ${compact ? "compact" : ""} ${className}`.trim()}>
-      <Link
-        to={`/titles/${title.id}`}
-        className="poster-card-cover"
-        viewTransition
-        aria-label={`${name}${year ? `, ${year}` : ""}`}
-      >
+      {/* No aria-label: the caption (title, type, year, rating) and any badge are
+          the name, so it matches what is on screen (WCAG 2.5.3, label in name). */}
+      <Link to={`/titles/${title.id}`} className="poster-card-cover" viewTransition>
         <div className="poster-card-frame">
           {src ? (
             <img

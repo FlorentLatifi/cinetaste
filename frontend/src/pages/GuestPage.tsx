@@ -136,7 +136,9 @@ export function GuestPage() {
 
       <header className="landing-topbar">
         <div className="landing-topbar-inner">
-          <Link to="/" className="brand landing-brand" aria-label="CineTaste home">
+          {/* No aria-label: the visible text is the name. A label that differs from it
+              fails WCAG 2.5.3 (label in name) for people who navigate by voice. */}
+          <Link to="/" className="brand landing-brand">
             <span className="brand-mark" aria-hidden="true">C</span>
             <div className="brand-text">
               <div className="brand-name">CineTaste</div>
