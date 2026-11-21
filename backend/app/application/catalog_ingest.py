@@ -79,6 +79,10 @@ EXISTING_LOOKUP_CHUNK = 1000
 MAX_KEYWORDS = 25
 MAX_CAST = 8
 CREW_JOBS = {"Director", "Writer", "Screenplay"}
+# credits.character is varchar(255). An anthology film lists every segment role
+# in one string (TMDb 45005: over 500 characters), and the insert failing cost
+# the whole film. The role is display text only, so it is cut to fit instead.
+CHARACTER_MAX_LENGTH: int = Credit.__table__.c.character.type.length  # type: ignore[attr-defined]
 
 
 class IngestConnectionLost(RuntimeError):
@@ -139,6 +143,13 @@ def _connection_is_lost(exc: BaseException) -> bool:
             if isinstance(nxt, BaseException):
                 pending.append(nxt)
     return False
+
+
+def _fit_character(value: Any) -> Any:
+    """A cast member's role, cut to the column with a trailing "…" when TMDb's is longer."""
+    if isinstance(value, str) and len(value) > CHARACTER_MAX_LENGTH:
+        return value[: CHARACTER_MAX_LENGTH - 1].rstrip() + "…"
+    return value
 
 
 def _parse_date(value: str | None) -> date | None:
@@ -254,7 +265,7 @@ class _Detail:
                     credit_type="cast",
                     job=None,
                     signal_role="cast",
-                    character=cast.get("character"),
+                    character=_fit_character(cast.get("character")),
                     billing_order=int(order) if order is not None else None,
                 )
             )
