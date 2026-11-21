@@ -22,12 +22,9 @@ export function AppShell({ children }: { children: ReactNode }) {
       </a>
       <header className="topbar">
         <div className="topbar-inner">
-          <Link
-            to="/"
-            className="brand"
-            style={{ textDecoration: "none", color: "inherit" }}
-            aria-label="CineTaste home"
-          >
+          {/* No aria-label: the visible text is the name. A label that differs from it
+              fails WCAG 2.5.3 (label in name) for people who navigate by voice. */}
+          <Link to="/" className="brand" style={{ textDecoration: "none", color: "inherit" }}>
             <span className="brand-mark" aria-hidden="true">
               C
             </span>

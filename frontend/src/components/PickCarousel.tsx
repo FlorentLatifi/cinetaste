@@ -1,4 +1,5 @@
 import {
+  Fragment,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -247,6 +248,13 @@ function PickCard({
   const headingId = `pick-${title.id}`;
   const gem = reasons.some((r) => r.code === "hidden_gem");
   const discovery = reasons.some((r) => r.code === "discovery");
+  // Shown on the poster and named in its link's label, from one list. WCAG 2.5.3
+  // (label in name): the link's label must contain its visible text, which is
+  // these badges, plus the title when the poster image fails to load.
+  const badges = [
+    ...(gem ? [{ key: "gem", label: "Hidden gem" }] : []),
+    ...(discovery ? [{ key: "discovery", label: "Discovery" }] : []),
+  ];
 
   const frame = (
     <div className="pick-poster-frame">
@@ -265,14 +273,21 @@ function PickCard({
         />
       ) : (
         <div className="pick-poster pick-poster-fallback" aria-hidden="true">
-          <span className="fy-fallback-letter">{title.name.slice(0, 1)}</span>
+          {/* Drawn by CSS: a decorative initial that is not part of the link's text. */}
+          <span className="fy-fallback-letter" data-letter={title.name.slice(0, 1)} />
           <span className="fy-fallback-name">{title.name}</span>
         </div>
       )}
-      {(gem || discovery) && (
+      {badges.length > 0 && (
         <div className="fy-badges">
-          {gem && <span className="rec-badge gem">Hidden gem</span>}
-          {discovery && <span className="rec-badge discovery">Discovery</span>}
+          {/* The spaces keep the title and each badge separate words in the
+              link's visible text; whitespace in this flex row is not drawn. */}
+          {badges.map((b) => (
+            <Fragment key={b.key}>
+              {" "}
+              <span className={`rec-badge ${b.key}`}>{b.label}</span>
+            </Fragment>
+          ))}
         </div>
       )}
     </div>
@@ -290,7 +305,12 @@ function PickCard({
           className="pick-poster-link"
           viewTransition
           style={index === 0 ? ({ viewTransitionName: "title-poster" } as CSSProperties) : undefined}
-          aria-label={`Open details for ${title.name}${year ? `, ${year}` : ""}`}
+          // The year is in parentheses so the title and badges stay adjacent,
+          // as they are on screen.
+          aria-label={[
+            `Open details for ${title.name}${year ? ` (${year})` : ""}`,
+            ...badges.map((b) => b.label),
+          ].join(", ")}
         >
           {frame}
         </Link>
