@@ -199,3 +199,22 @@ def test_works_across_event_loops() -> None:
 
     asyncio.run(burst())
     asyncio.run(burst())
+
+
+async def test_a_followers_wait_is_recorded_for_the_timing_log() -> None:
+    from app.core.timing import start_timer, stop_timer
+
+    flight, cache = SingleFlight[str](), Cache()
+    leader = asyncio.create_task(
+        flight.do("k", lookup=cache.lookup, compute=_compute(cache, delay=0.08), wait_seconds=5)
+    )
+    await asyncio.sleep(0.01)
+
+    timer, token = start_timer()
+    try:
+        await flight.do("k", lookup=cache.lookup, compute=_compute(cache), wait_seconds=5)
+    finally:
+        stop_timer(token)
+    await leader
+    fields = dict(part.split("=") for part in timer.fields().split())
+    assert 50 <= float(fields["flight_wait_ms"]) < 500

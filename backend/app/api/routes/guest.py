@@ -61,11 +61,16 @@ GUEST_MIN_POSITIVE = 1
 # them all. Short enough that a fresh ingest shows up within minutes.
 _CARDS_CACHE_TTL_SECONDS = 600
 
-# Followers wait at most this long for the request computing the deck before doing the
-# work themselves. A cold deck takes seconds on a slow database, and the connection pool
-# gives up after 5 s, so a leader that is not done by then is not coming back soon.
-_CARDS_FLIGHT_WAIT_SECONDS = 10.0
+# Followers wait at most this long for the request computing the same thing before doing
+# the work themselves. A cold deck or slate takes seconds on a slow database, and the
+# connection pool gives up after 5 s, so a leader that is not done by then is not coming
+# back soon.
+_FLIGHT_WAIT_SECONDS = 10.0
 _cards_flight: SingleFlight[OnboardingCardsOut] = SingleFlight()
+# Keyed by the slate cache key, so a different limit or different answers never share.
+# Shares the serialized response, never ORM objects: the leader's session may roll back or
+# close while a follower is still reading.
+_slate_flight: SingleFlight[RecommendationSlateOut] = SingleFlight()
 
 
 @router.get("/cards", response_model=OnboardingCardsOut)
@@ -130,10 +135,9 @@ async def _cards(
     # Many visitors landing on a cold or just-expired deck at once would each run the
     # same query and hold a pooled connection for it. One computes; the rest wait for
     # that result (see app.core.singleflight for how failures are handled).
-    with phase("flight"):
-        out, how = await _cards_flight.do(
-            cache_key, lookup=lookup, compute=compute, wait_seconds=_CARDS_FLIGHT_WAIT_SECONDS
-        )
+    out, how = await _cards_flight.do(
+        cache_key, lookup=lookup, compute=compute, wait_seconds=_FLIGHT_WAIT_SECONDS
+    )
     # "computed" is this request doing the work; "shared" is waiting for someone else's.
     return out, {"hit": "hit", "computed": "miss", "shared": "shared", "fallback": "miss"}[how]
 
@@ -180,57 +184,68 @@ async def _recommendations(
     normalized = normalize_reactions(
         [{"title_id": str(r.title_id), "action": r.action} for r in body.reactions]
     )
-
-    # Before any database work. Only slates that passed the gates below are ever
-    # stored, so a hit is already known to be valid and needs no re-validation.
     cache = GuestSlateCache(get_store(), ttl_seconds=settings.guest_slate_cache_ttl_seconds)
     cache_key = guest_slate_cache_key(normalized, body.limit)
-    with phase("cache"):
-        cached = await cache.get(cache_key)
-        hydrated: list = []
-        if cached is not None:
+
+    async def lookup() -> RecommendationSlateOut | None:
+        # Before any database work. Only slates that passed the gates in ``compute`` are
+        # ever stored, so a hit is already known to be valid and needs no re-validation.
+        with phase("cache"):
+            cached = await cache.get(cache_key)
+            if cached is None:
+                return None
             try:
                 hydrated = await service.hydrate_slate_payload(cached)
             except Exception:  # noqa: BLE001
                 logger.warning("guest_slate_cache_hydrate_failed key=%s", cache_key, exc_info=True)
-    if hydrated:
-        return _slate_out(hydrated), "hit"
+                return None
+        return _slate_out(hydrated) if hydrated else None
 
-    # Everything from here is database + CPU work, so it all runs under the cap. The
-    # slot is taken *before* the first query: a request waiting for a slot must not
-    # also be holding one of the pooled connections (15 per worker), or a flood
-    # queues on the pool instead and the cap protects nothing.
-    gate = get_guest_rank_gate(
-        settings.guest_rank_max_concurrent, settings.guest_rank_max_wait_seconds
+    async def compute() -> RecommendationSlateOut:
+        # Everything here is database + CPU work, so it all runs under the cap. The slot
+        # is taken *before* the first query: a request waiting for a slot must not also
+        # be holding one of the pooled connections (15 per worker), or a flood queues on
+        # the pool instead and the cap protects nothing.
+        gate = get_guest_rank_gate(
+            settings.guest_rank_max_concurrent, settings.guest_rank_max_wait_seconds
+        )
+        async with gate.slot():
+            with phase("validate"):
+                # Answers about titles we don't have can't shape a profile, so they must
+                # not count toward the gate either.
+                known = await service.existing_title_ids([t for t, _e in normalized])
+                answers = [(t, event) for t, event in normalized if t in known]
+
+                rated, positive = count_ratings(answers)
+                if rated < GUEST_MIN_RATINGS:
+                    raise AppError(
+                        f"Rate at least {GUEST_MIN_RATINGS} titles you've seen. You've rated {rated}.",
+                        status_code=400,
+                        code="guest_insufficient_ratings",
+                    )
+                if positive < GUEST_MIN_POSITIVE:
+                    raise AppError(
+                        "Mark at least one title you liked so we know what to look for.",
+                        status_code=400,
+                        code="guest_insufficient_positive",
+                    )
+
+            ranked = await service.guest_slate(answers, limit=body.limit)
+
+        with phase("cache_write"):
+            await cache.set(cache_key, service.slate_payload([item for _title, item in ranked]))
+        with phase("serialize"):
+            return _slate_out(ranked)
+
+    # Identical answers arriving together (a shared link, the SPA replaying them, a
+    # double-fired request) are one piece of work: one request ranks, the rest wait for
+    # its result instead of each taking a rank slot and a pooled connection. Failure is
+    # never shared (see app.core.singleflight): a follower of a failed leader does the work
+    # itself, exactly as it would have without this.
+    out, how = await _slate_flight.do(
+        cache_key, lookup=lookup, compute=compute, wait_seconds=_FLIGHT_WAIT_SECONDS
     )
-    async with gate.slot():
-        with phase("validate"):
-            # Answers about titles we don't have can't shape a profile, so they must
-            # not count toward the gate either.
-            known = await service.existing_title_ids([title_id for title_id, _e in normalized])
-            normalized = [(title_id, event) for title_id, event in normalized if title_id in known]
-
-            rated, positive = count_ratings(normalized)
-            if rated < GUEST_MIN_RATINGS:
-                raise AppError(
-                    f"Rate at least {GUEST_MIN_RATINGS} titles you've seen. You've rated {rated}.",
-                    status_code=400,
-                    code="guest_insufficient_ratings",
-                )
-            if positive < GUEST_MIN_POSITIVE:
-                raise AppError(
-                    "Mark at least one title you liked so we know what to look for.",
-                    status_code=400,
-                    code="guest_insufficient_positive",
-                )
-
-        ranked = await service.guest_slate(normalized, limit=body.limit)
-
-    with phase("cache_write"):
-        await cache.set(cache_key, service.slate_payload([item for _title, item in ranked]))
-    with phase("serialize"):
-        out = _slate_out(ranked)
-    return out, "miss"
+    return out, {"hit": "hit", "computed": "miss", "shared": "shared", "fallback": "miss"}[how]
 
 
 def _slate_out(ranked: list) -> RecommendationSlateOut:
