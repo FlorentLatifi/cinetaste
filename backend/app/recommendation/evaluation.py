@@ -45,6 +45,7 @@ from app.recommendation.pipeline import (
     RankingWeights,
     blend_scores,
     candidate_channels,
+    collection_of,
     primary_genre,
     select_slate,
 )
@@ -64,6 +65,8 @@ PROD_MMR_LAMBDA = 0.8
 PROD_EXPLORATION_SLOTS = 3
 # "≤ 2 titles per director per slate" — the S2 launch check.
 DIRECTOR_SLATE_LIMIT = 2
+# Caps lifted for the "no diversity" ablations.
+NO_CAP = 999
 # A gem label on a title in the top tenth of the catalog by vote count is a
 # famous film called a "hidden gem".
 FAMOUS_FAME_PERCENTILE = 0.9
@@ -109,6 +112,11 @@ class EvalTitle:
     def directors(self) -> tuple[str, ...]:
         snapshot = (self.extra or {}).get("feature_snapshot") or {}
         return tuple(k for k in snapshot if str(k).startswith("person:director:"))
+
+    @cached_property
+    def collection(self) -> int | None:
+        """TMDb collection (franchise) id, as ingest stores it; None if standalone."""
+        return collection_of(self)
 
 
 @dataclass
@@ -277,6 +285,8 @@ class RankingStrategy:
     mmr_lambda: float = 0.7
     exploration_slots: int = 0
     max_per_genre: int | None = None
+    max_per_director: int | None = None
+    max_per_collection: int | None = None
     candidate_pool: str = "catalog"
 
     def __call__(self, user: EvalUser, dataset: Dataset, k: int) -> list[RankedItem]:
@@ -294,6 +304,8 @@ class RankingStrategy:
             mmr_lambda=self.mmr_lambda,
             exploration_slots=self.exploration_slots,
             max_per_genre=self.max_per_genre,
+            max_per_director=self.max_per_director,
+            max_per_collection=self.max_per_collection,
             with_reasons=True,
         )
 
@@ -316,14 +328,18 @@ def make_ranking_strategy(
     mmr_lambda: float = 0.7,
     exploration_slots: int = 0,
     max_per_genre: int | None = None,
+    max_per_director: int | None = None,
+    max_per_collection: int | None = None,
     candidate_pool: str = "catalog",
 ) -> RankingStrategy:
-    """The production ranker with a given configuration."""
+    """The production ranker with a given configuration (caps default to production's)."""
     return RankingStrategy(
         weights=weights,
         mmr_lambda=mmr_lambda,
         exploration_slots=exploration_slots,
         max_per_genre=max_per_genre,
+        max_per_director=max_per_director,
+        max_per_collection=max_per_collection,
         candidate_pool=candidate_pool,
     )
 
@@ -379,14 +395,20 @@ DEFAULT_STRATEGIES: dict[str, Strategy] = {
     "dense_only": make_ranking_strategy(
         weights=RankingWeights(similarity=1.0, sparse_positive=0.0, sparse_negative=0.0),
         mmr_lambda=1.0,
-        max_per_genre=999,
+        max_per_genre=NO_CAP,
+        max_per_director=NO_CAP,
+        max_per_collection=NO_CAP,
     ),
     "sparse_only": make_ranking_strategy(
         weights=RankingWeights(similarity=0.0, sparse_positive=1.0, sparse_negative=0.3),
         mmr_lambda=1.0,
-        max_per_genre=999,
+        max_per_genre=NO_CAP,
+        max_per_director=NO_CAP,
+        max_per_collection=NO_CAP,
     ),
-    "hybrid_no_diversity": make_ranking_strategy(mmr_lambda=1.0, max_per_genre=999),
+    "hybrid_no_diversity": make_ranking_strategy(
+        mmr_lambda=1.0, max_per_genre=NO_CAP, max_per_director=NO_CAP, max_per_collection=NO_CAP
+    ),
     "hybrid": make_ranking_strategy(mmr_lambda=PROD_MMR_LAMBDA),
     "hybrid_with_exploration": make_ranking_strategy(
         mmr_lambda=PROD_MMR_LAMBDA, exploration_slots=PROD_EXPLORATION_SLOTS
@@ -404,13 +426,23 @@ DEFAULT_STRATEGIES: dict[str, Strategy] = {
 }
 
 
-def production_variant(**weight_overrides: float) -> RankingStrategy:
-    """``production`` with some weights changed — for sweeps and proposals."""
+_CAP_OVERRIDES = ("max_per_genre", "max_per_director", "max_per_collection")
+
+
+def production_variant(**overrides: float) -> RankingStrategy:
+    """``production`` with some weights — or slate caps — changed.
+
+    Weight names are ``RankingWeights`` fields; ``max_per_genre``,
+    ``max_per_director`` and ``max_per_collection`` override a cap
+    (``max_per_director=999`` turns the director cap off).
+    """
+    caps = {name: int(overrides.pop(name)) for name in _CAP_OVERRIDES if name in overrides}
     return make_ranking_strategy(
-        weights=replace(DEFAULT_WEIGHTS, **weight_overrides),
+        weights=replace(DEFAULT_WEIGHTS, **overrides),
         mmr_lambda=PROD_MMR_LAMBDA,
         exploration_slots=PROD_EXPLORATION_SLOTS,
         candidate_pool="production",
+        **caps,
     )
 
 
@@ -470,6 +502,9 @@ def _user_row(
     top_director = max(directors.values(), default=0)
     row["director_max"] = float(top_director)
     row["director_over_limit"] = 1.0 if top_director > DIRECTOR_SLATE_LIMIT else 0.0
+    # Franchise repetition: share of slates where one TMDb collection holds 2+ titles.
+    collections = Counter(t.collection for t in slate_titles if t.collection is not None)
+    row["franchise_repeat"] = 1.0 if max(collections.values(), default=0) > 1 else 0.0
 
     # Negative feedback: held-out dislikes should not be recommended, and the
     # score should place them below held-out likes.
@@ -577,6 +612,40 @@ def paired_deltas(
     return out
 
 
+def paired_deltas_against(
+    run: EvaluationRun,
+    previous: Mapping[str, Any],
+    *,
+    metrics: Sequence[str],
+    n_boot: int = 2000,
+    seed: int = 0,
+) -> dict[str, dict[str, tuple[float, float, float, int]]]:
+    """Like ``paired_deltas``, but against another code version's run.
+
+    ``previous`` is the ``--json`` output of ``evaluate_recommender`` run on
+    another branch (same dataset, users and k): each strategy here is paired,
+    user by user, with the strategy of the same name there. This is how a
+    ranking change is measured against ``master`` with paired intervals.
+    """
+    if list(previous.get("user_ids") or []) != run.user_ids:
+        raise ValueError("the previous run evaluated different users; rerun it on the same dataset")
+    old_rows: Mapping[str, list[Mapping[str, float | None]]] = previous.get("per_user") or {}
+    out: dict[str, dict[str, tuple[float, float, float, int]]] = {}
+    for name in run.per_user:
+        if name not in old_rows:
+            continue
+        out[name] = {
+            metric: M.paired_bootstrap(
+                [row.get(metric) for row in old_rows[name]],
+                run.metric(name, metric),
+                n_boot=n_boot,
+                seed=seed,
+            )
+            for metric in metrics
+        }
+    return out
+
+
 def _percentiles(titles: Sequence[EvalTitle], *, key: Callable[[EvalTitle], float]) -> dict[UUID, float]:
     """0.0 for the title with the highest ``key``, 1.0 for the lowest."""
     if not titles:
@@ -596,6 +665,7 @@ SAFETY_COLUMNS = (
     "like_dislike_auc",
     "director_max",
     "director_over_limit",
+    "franchise_repeat",
     "gem_labels",
     "gem_fame_pct",
     "gem_famous_share",
