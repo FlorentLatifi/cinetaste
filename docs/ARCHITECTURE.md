@@ -68,8 +68,11 @@ any scoring change. That is why Undo is a `clear` event rather than a delete.
 ## Recommendation pipeline
 
 1. **Ingest** (`application/catalog_ingest.py`) — TMDb details fetched
-   concurrently in batches, each title upserted in a savepoint. For every title
-   it stores a **sparse feature snapshot** and a **384-d content vector**.
+   concurrently in batches. Each batch is written with a fixed set of
+   statements, one per table, because every statement is a round trip to the
+   database. A row the database rejects sends its batch through one savepoint
+   per title, so only that title fails. For every title ingest stores a
+   **sparse feature snapshot** and a **384-d content vector**.
 2. **Signals** (`domain/taste_signals.py`) — one policy table: weight, polarity,
    tier, resulting state, feed exclusion. Per title the latest event of the
    strongest tier wins (opinion > intent > implicit), after the last `clear`.

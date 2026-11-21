@@ -320,9 +320,9 @@ the external database URL is slow and dies when the machine sleeps.
 1. GitHub → Settings → Secrets and variables → Actions → **Secrets**:
    - `DATABASE_URL` = the same connection string the API uses (Neon → Connect)
    - `TMDB_API_KEY`
-2. Actions → **Catalog** → Run workflow. `seed-only` fills the onboarding deck in
-   a few minutes; `plan` counts what `popular` would fetch (TMDb discover only,
-   writes nothing); `popular` fills the catalog (see below).
+2. Actions → **Catalog** → Run workflow. `seed-only` fills the 62-title onboarding
+   deck; `plan` counts what `popular` would fetch (TMDb discover only, writes
+   nothing); `popular` fills the catalog (see below).
 3. It then refreshes monthly on its own. Re-running is always safe (upserts).
 
 ### Catalog size and discovery passes
@@ -364,9 +364,21 @@ the schema. Neon's free plan (0.5 GB per project at the time of writing; check t
 Neon console) leaves room for about 30,000 titles at this density.
 
 **Recommended first run:** `mode = plan` (about 270 requests, no writes) to see the
-real counts, then `mode = popular` with all other inputs empty. It takes tens of
-minutes from a runner; the job times out at 150 minutes, and re-running continues
-from what was committed.
+real counts, then `mode = popular` with all other inputs empty. The job times out at
+150 minutes, and re-running continues from what was committed.
+
+**How long a run takes.** Almost all of a run is round trips to the database, which
+is ~150 ms from the runner. Ingest writes a batch of 25 titles with a fixed set of
+about a dozen statements. Measured locally with 150 ms of added latency, that is
+about 0.11–0.16 s per title, against 8.5 s per title before the November change
+(run #8). So the database side of a ~3,500-title `popular` fill should take about
+10 minutes, and fetching at 25 TMDb requests per second adds about 3 more. To
+measure it yourself (local database only; it empties the catalog tables):
+
+```bash
+python tools/profile_catalog_ingest.py --fetch ~/cinetaste-ingest-payloads.jsonl
+python tools/profile_catalog_ingest.py --payloads ~/cinetaste-ingest-payloads.jsonl --rtt-ms 150
+```
 
 | Want | Inputs |
 |------|--------|
