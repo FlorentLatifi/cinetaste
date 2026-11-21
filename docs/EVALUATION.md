@@ -109,41 +109,41 @@ stores them, and TMDb collections (franchises) the way ingest stores them.
 
 Temporal split per user (latest 20% held out), slate of 20. TMDb metadata
 fetched 2026-11-21. The tables describe the current code: per-director and
-per-franchise caps, and hidden gems on catalog percentiles. What `master`
-scored before that change, paired user by user, is in
+per-franchise caps, hidden gems on catalog percentiles, and `sparse_negative`
+0.5. What `master` scored before the caps and gems, paired user by user, is in
 [Before and after](#before-and-after-director-and-franchise-caps-catalog-percentile-gems).
 
 | strategy | recall@20 | ndcg@20 | hit_rate@20 | mrr | diversity | genre_variety | novelty | coverage |
 |---|---|---|---|---|---|---|---|---|
-| random | 0.003 | 0.003 | 0.057 | 0.010 | 0.945 | 0.442 | 0.509 | 0.918 |
+| random | 0.003 | 0.003 | 0.053 | 0.010 | 0.945 | 0.443 | 0.508 | 0.918 |
 | popular (TMDb) | 0.035 | 0.029 | 0.275 | 0.059 | 0.911 | 0.341 | 0.003 | 0.013 |
 | popular_ml | **0.093** | **0.082** | 0.444 | **0.178** | 0.927 | 0.425 | 0.064 | 0.034 |
 | dense_only | 0.014 | 0.011 | 0.107 | 0.024 | 0.821 | 0.290 | 0.629 | 0.208 |
 | sparse_only | 0.060 | 0.052 | 0.384 | 0.117 | 0.893 | 0.348 | 0.347 | 0.324 |
-| hybrid_no_diversity | 0.055 | 0.046 | 0.353 | 0.102 | 0.884 | 0.344 | 0.415 | 0.312 |
-| hybrid | 0.042 | 0.039 | 0.336 | 0.104 | 0.911 | 0.381 | 0.454 | 0.317 |
-| hybrid_with_exploration | 0.041 | 0.038 | 0.325 | 0.103 | 0.911 | 0.485 | 0.460 | 0.308 |
-| hybrid_plus_popularity | 0.072 | 0.064 | **0.473** | 0.147 | 0.914 | 0.365 | 0.096 | 0.220 |
-| **production** | **0.052** | **0.046** | **0.375** | **0.112** | **0.887** | **0.431** | **0.382** | **0.316** |
+| hybrid_no_diversity | 0.056 | 0.046 | 0.356 | 0.100 | 0.884 | 0.341 | 0.418 | 0.320 |
+| hybrid | 0.042 | 0.039 | 0.336 | 0.103 | 0.911 | 0.380 | 0.457 | 0.324 |
+| hybrid_with_exploration | 0.041 | 0.038 | 0.325 | 0.102 | 0.912 | 0.485 | 0.464 | 0.314 |
+| hybrid_plus_popularity | 0.071 | 0.065 | **0.468** | 0.147 | 0.915 | 0.362 | 0.098 | 0.237 |
+| **production** | **0.053** | **0.046** | **0.382** | **0.112** | **0.887** | **0.430** | **0.383** | **0.326** |
 
 | strategy | dislike_recall@20 | like_rank_pct | dislike_rank_pct | like_dislike_auc | director_max | director_over_limit | franchise_repeat | gem_labels | gem_fame_pct | gem_famous_share |
 |---|---|---|---|---|---|---|---|---|---|---|
-| random | 0.003 | – | – | – | 1.19 | 0.003 | 0.022 | – | – | – |
+| random | 0.003 | – | – | – | 1.19 | 0.005 | 0.019 | – | – | – |
 | popular (TMDb) | 0.022 | 0.272 | 0.342 | 0.568 | 2.95 | 0.957 | 0.993 | – | – | – |
 | popular_ml | 0.028 | 0.146 | 0.204 | 0.593 | 2.94 | 0.788 | 0.883 | – | – | – |
 | sparse_only | 0.008 | 0.245 | 0.387 | 0.653 | 5.04 | 0.890 | 0.668 | 1.5 | 0.256 | 0.000 |
-| hybrid_no_diversity | 0.008 | 0.255 | 0.390 | 0.645 | 4.53 | 0.833 | 0.613 | 2.4 | 0.245 | 0.000 |
-| hybrid | 0.012 | 0.255 | 0.390 | 0.645 | 1.93 | 0.000 | 0.000 | 2.8 | 0.235 | 0.000 |
-| **production** | **0.007** | **0.255** | **0.390** | **0.645** | **1.93** | **0.000** | **0.000** | **2.4** | **0.233** | **0.000** |
+| hybrid_no_diversity | 0.008 | 0.262 | 0.408 | 0.657 | 4.48 | 0.826 | 0.599 | 2.4 | 0.244 | 0.000 |
+| hybrid | 0.012 | 0.262 | 0.408 | 0.657 | 1.92 | 0.000 | 0.000 | 2.8 | 0.234 | 0.000 |
+| **production** | **0.007** | **0.262** | **0.408** | **0.657** | **1.93** | **0.000** | **0.000** | **2.4** | **0.232** | **0.000** |
 
 ### What it says
 
 **1. With real metadata the recommender beats the popularity production can
 see — but not in-domain popularity.** Production's recall is 1.5× the TMDb
-popularity baseline (0.052 vs 0.035; paired Δ −0.016 [−0.028, −0.005] for
+popularity baseline (0.053 vs 0.035; paired Δ −0.018 [−0.029, −0.007] for
 `popular`). The most-rated-in-MovieLens baseline still wins on recall (Δ
-+0.041 [+0.027, +0.057]) and MRR, and gets there by recommending the charts:
-novelty 0.064 vs 0.382, coverage 3% vs 32% of the catalog. Part of that win is
++0.040 [+0.025, +0.055]) and MRR, and gets there by recommending the charts:
+novelty 0.064 vs 0.383, coverage 3% vs 33% of the catalog. Part of that win is
 the protocol, not taste: MovieLens users rate what they watch, and what this
 population watched next is what was popular with this population — an
 advantage no content model can have.
@@ -160,14 +160,15 @@ and franchise caps together cost Δ recall −0.0036 [−0.0072, −0.0003]
 (`caps_off` in the sweep), the franchise cap alone −0.0020 [−0.0039,
 −0.0006]. Exploration slots raise genre variety from 0.38 to 0.43–0.49.
 Ranking production's ANN+popular pool now beats ranking the whole catalog
-(Δ +0.0105 [+0.0036, +0.0182] vs `hybrid_with_exploration`): over all 4,500
+(Δ +0.012 [+0.005, +0.020] vs `hybrid_with_exploration`): over all 4,500
 titles the gem bonus reaches many more obscure films than the pool holds.
 
 **4. Dislikes are respected, mostly by the content itself.** A held-out
 disliked title reaches the slate at a seventh of the rate of a liked one
-(0.007 vs 0.052), and the score separates likes from dislikes with AUC 0.645
-(TMDb popularity: 0.568). That AUC was 0.703 before this change: the old gem
-bonus was also the strongest like/dislike separator (point 6).
+(0.007 vs 0.053), and the score separates likes from dislikes with AUC 0.657
+(TMDb popularity: 0.568). That AUC was 0.703 before the caps and gems: the old
+gem bonus was also the strongest like/dislike separator (point 6).
+`sparse_negative` 0.5 (was 0.12) contributes +0.012 of today's 0.657.
 
 **5. "Hidden gem" now means a hidden gem.** None of production's gem labels
 land on the catalog's most-voted 10% (was 96%), and the mean labelled title
@@ -201,12 +202,12 @@ obscure films only, which offline recall penalises by construction: on the
 new rules `hidden_gem=0` *gains* +0.0063 [+0.0026, +0.0103] recall and loses
 0.064 novelty. An explicit quality prior (a vote-count-shrunk rating
 percentile, `quality`, off by default) restores what the accident provided —
-see Proposal 2.
+see the quality-prior proposal under [Weight changes](#weight-changes).
 
 **7. The director check (S2) passes, and franchises no longer repeat.** No
 production slate gives one director more than 2 of 20 cards (was 49.6%; mean
 maximum 1.9, was 2.7), and none holds two films of one franchise (was 29%).
-Without MMR and the caps (`hybrid_no_diversity`) it would be 83% and 61%.
+Without MMR and the caps (`hybrid_no_diversity`) it would be 83% and 60%.
 
 ### Before and after: director and franchise caps, catalog-percentile gems
 
@@ -230,6 +231,10 @@ Without MMR and the caps (`hybrid_no_diversity`) it would be 83% and 61%.
 ¹ `master`'s harness has no franchise metric; measured once by joining its
 slates to the same TMDb collections (not part of the committed harness).
 
+Both columns use `sparse_negative` 0.12, the default at the time; moving it
+to 0.5 afterwards put production at the numbers in the main table (recall
+0.053, AUC 0.657 — see [Weight changes](#weight-changes)).
+
 Both launch checks are fixed, and offline recall drops 25%. Where the loss
 comes from, step by step (recall@20, paired):
 
@@ -248,8 +253,8 @@ a held-out film is one the user found *without*
 CineTaste, and well-known films are the ones people find without help. This
 is the number most likely to overstate the real cost; the online report
 ([below](#online-what-users-do-with-their-picks)) settles it once soft-launch
-traffic exists. Proposal 2 shows the accuracy can be bought back without
-undoing either fix.
+traffic exists. The quality-prior proposal shows the accuracy can be bought
+back without undoing either fix.
 
 An earlier scratch run of `florent/ecstatic-hypatia-gexedy`'s own ranker
 measured −0.0150 [−0.0227, −0.0066]. The difference is mostly the franchise
@@ -259,7 +264,8 @@ not exercise: the evaluation cache had no collections then.
 ### Weight sweeps (production configuration)
 
 Each row changes one weight (or cap) of `production`; deltas are paired
-against it. Every row except the two cap rows keeps `director_over_limit`,
+against it. The sweep was run with the previous default `sparse_negative`
+0.12 as the base, before the change it motivated. Every row except the two cap rows keeps `director_over_limit`,
 `franchise_repeat` and `gem_famous_share` at 0; with both caps off,
 `director_over_limit` is 0.489 and `franchise_repeat` 0.269, and with only the
 franchise cap off `franchise_repeat` is 0.229.
@@ -268,9 +274,9 @@ franchise cap off `franchise_repeat` is 0.229.
 |---|---|---|---|---|---|---|---|
 | sparse_negative=0 | 0.052 | 0.046 | 0.381 | 0.310 | 0.639 | 0.253 | 0.383 |
 | sparse_negative=0.06 | 0.052 | 0.046 | 0.382 | 0.314 | 0.645 | 0.254 | 0.387 |
-| **sparse_negative=0.12 (default)** | **0.052** | **0.046** | **0.382** | **0.316** | **0.645** | **0.255** | **0.390** |
+| sparse_negative=0.12 (previous default) | 0.052 | 0.046 | 0.382 | 0.316 | 0.645 | 0.255 | 0.390 |
 | sparse_negative=0.25 | 0.052 | 0.046 | 0.383 | 0.320 | 0.651 | 0.258 | 0.398 |
-| sparse_negative=0.5 | 0.053 | 0.046 | 0.383 | 0.326 | 0.657 | 0.262 | 0.408 |
+| **sparse_negative=0.5 (default)** | **0.053** | **0.046** | **0.383** | **0.326** | **0.657** | **0.262** | **0.408** |
 | sparse_negative=1 | 0.053 | 0.045 | 0.386 | 0.335 | 0.657 | 0.270 | 0.424 |
 | sparse_negative=2 | 0.054 | 0.046 | 0.387 | 0.343 | 0.655 | 0.280 | 0.445 |
 | warm_popularity=0.05 | 0.061 | 0.054 | 0.278 | 0.300 | 0.653 | 0.223 | 0.356 |
@@ -288,8 +294,8 @@ franchise cap off `franchise_repeat` is 0.229.
 | caps off (director, franchise) | 0.055 | 0.048 | 0.376 | 0.321 | 0.645 | 0.255 | 0.390 |
 | franchise cap off | 0.054 | 0.047 | 0.378 | 0.315 | 0.645 | 0.255 | 0.390 |
 
-**Is `sparse_negative=0.12` too weak?** Somewhat, and it matters less than
-expected. AUC rises from 0.639 (0) to 0.657 (0.5–1) and falls after it; past
+**Was `sparse_negative=0.12` too weak?** Somewhat — it is now 0.5 — and it
+matters less than expected. AUC rises from 0.639 (0) to 0.657 (0.5–1) and falls after it; past
 0.5 the penalty starts pushing *liked* titles down too (`like_rank_pct` 0.255
 → 0.280 at 2.0), because liked and disliked films share genres, decades and
 cast. The whole range moves AUC by under 0.02 — far less than a quality prior
@@ -304,25 +310,31 @@ novelty, `quality=0.1` (0.280) has more recall than `warm_popularity=0.05`
 `warm_popularity=0.1` at ~0.20 novelty: 0.078 vs 0.071. Ranking films people
 rate well is a better prior than ranking films people know.
 
-### Proposals (not shipped — default weights are unchanged)
+### Weight changes
 
-**Proposal 1 — `sparse_negative` 0.12 → 0.5.** Recommended.
+**Shipped 2026-11-21 — `sparse_negative` 0.12 → 0.5.**
 
 | setting | Δ recall | Δ ndcg | Δ novelty | Δ dislike_recall | Δ like_dislike_auc |
 |---|---|---|---|---|---|
-| k=20, 4.5k catalog, current rules | +0.0014 [−0.0000, +0.0030] | +0.0006 [−0.0003, +0.0016] | +0.0011 [−0.0007, +0.0028] | +0.0008 [0.0000, +0.0022] | **+0.0119 [+0.0023, +0.0235]** |
+| k=20, 4.5k catalog, current rules | +0.0014 [−0.0000, +0.0030] | +0.0006 [−0.0003, +0.0016] | +0.0012 [−0.0006, +0.0029] | +0.0008 [0.0000, +0.0022] | **+0.0119 [+0.0023, +0.0235]** |
+| k=10, 4.5k catalog, current rules | −0.0002 [−0.0016, +0.0011] | −0.0004 [−0.0016, +0.0007] | +0.0033 [+0.0007, +0.0059] | 0.0000 [0.0000, 0.0000] | +0.0119 [+0.0023, +0.0235] |
 | k=20, 4.5k catalog, rules before the caps | +0.0026 [−0.0010, +0.0071] | +0.0012 [−0.0001, +0.0026] | +0.0041 [+0.0025, +0.0057] | −0.0008 [−0.0022, 0.0000] | +0.0103 [+0.0031, +0.0194] |
 | k=10, 4.5k catalog, rules before the caps | +0.0014 [+0.0003, +0.0028] | +0.0013 [+0.0003, +0.0025] | +0.0050 [+0.0026, +0.0073] | +0.0002 [−0.0005, +0.0012] | +0.0103 [+0.0031, +0.0194] |
 | k=20, full 9.6k catalog, rules before the caps | −0.0005 [−0.0027, +0.0020] | −0.0005 [−0.0017, +0.0007] | +0.0040 [+0.0026, +0.0055] | −0.0001 [−0.0004, 0.0000] | +0.0084 [+0.0020, +0.0161] |
 
-Better separation of likes from dislikes in every setting, and no accuracy
-cost anywhere. It survives the new caps and gem rule unchanged (first row).
-Small, consistent and cheap; it does not change director or gem behaviour.
-Ship it behind the online report: compare the negative-action rate before
-and after.
+Better separation of likes from dislikes in every setting (AUC +0.010 to
++0.012) and no measurable accuracy cost anywhere; it does not change director
+or gem behaviour. The first two rows were re-measured independently, on a
+fresh TMDb download, and reproduce PR #61's figures exactly. One honest wrinkle:
+at k=20 on the current rules, held-out dislikes reach the slate very slightly
+*more* often (+0.0008, interval touching zero) even though the score ranks
+them lower overall — the penalty reorders the head of the list, and a few
+near-miss dislikes move up as stronger-penalised ones move out. Watch the
+negative-action rate in `engagement_report` after deploy; it should not rise.
 
-**Proposal 2 — a quality prior, `quality` 0 → 0.1.** Recommended, for the
-owner to decide: it is the trade this change exposed. The knob ranks by a
+**Proposed, not shipped — a quality prior, `quality` 0 → 0.1.** For the
+owner to decide: it is the trade the caps and gems exposed. Measured with
+`sparse_negative` 0.12. The knob ranks by a
 vote-count-shrunk rating (`quality_percentiles`, the IMDb top-list formula, as
 a candidate-pool percentile), from `florent/fervent-keller-0l0j9b`.
 
@@ -344,7 +356,7 @@ recall −0.0087 [−0.0159, −0.0010] vs `master`, AUC level with it, novelty
 0.329. The caveat that matters most: TMDb's ratings are from 2026, ratings in
 MovieLens are from years before, so offline the prior knows how a film was
 eventually judged — this flatters it. Ship behind the online report, like
-Proposal 1, and compare positive-action rates before and after.
+the `sparse_negative` change, and compare positive-action rates before and after.
 
 **No other weight change is proposed.** Everything else measured is a trade,
 not an improvement:
@@ -478,8 +490,8 @@ logged (cache hits are not), so one impression can stand for several views.
 
 What to look at first: action rate by position (does the first row earn its
 place?), negative rate on `hidden_gem` and `discovery` reasons (do stretches
-annoy?), and the negative rate before and after any weight change such as
-proposal 1.
+annoy?), and the negative rate before and after any weight change, such as
+`sparse_negative` 0.12 → 0.5 (shipped 2026-11-21).
 
 **Whether the director/franchise caps and percentile gems cost anything real.**
 Offline they cost 25% of recall@20, mostly by recommending films users had not
@@ -489,7 +501,7 @@ cards with the `hidden_gem` reason and overall, against a period before the
 change. Its labels now go to films like *Paper Moon* rather than *Pulp
 Fiction*: a save or a "seen it, loved it" on those is the discovery the
 product is for, and a "Not for me" is the cost. Compare the two periods
-with `--since`/`--window-days`, and run it again after Proposal 2 if it ships.
+with `--since`/`--window-days`, and run it again after the quality prior if it ships.
 
 ## Reproducing
 
@@ -510,7 +522,9 @@ python -m app.scripts.fetch_eval_metadata --movielens ~/.cache/cinetaste/eval/ml
 ML=~/.cache/cinetaste/eval/ml-latest-small
 python -m app.scripts.evaluate_recommender --dataset movielens-tmdb --path $ML -k 20 --users 0
 
-# 4. Weight and cap sweeps on the production configuration (~5 min each)
+# 4. Weight and cap sweeps on the production configuration (~5 min each).
+#    The published sweep used the previous default sparse_negative=0.12 as its
+#    base; on today's code every other row now sits on 0.5, so expect small shifts.
 python -m app.scripts.evaluate_recommender --dataset movielens-tmdb --path $ML -k 20 --users 0 \
     --only-variants --sweep sparse_negative=0,0.06,0.25,0.5,1.0,2.0 \
     --sweep warm_popularity=0.05,0.1,0.2 \
@@ -519,9 +533,9 @@ python -m app.scripts.evaluate_recommender --dataset movielens-tmdb --path $ML -
     --only-variants --sweep hidden_gem=0 --sweep quality=0.05,0.1,0.2 --sweep low_rating=0.2 \
     --variant caps_off:max_per_director=999,max_per_collection=999 \
     --variant franchise_cap_off:max_per_collection=999 \
-    --variant proposal_1:sparse_negative=0.5
+    --sweep sparse_negative=0.12                      # the previous default, paired against today's
 
-# 5. Proposal 2 at another slate size and on the full catalog
+# 5. The quality-prior proposal at another slate size and on the full catalog
 python -m app.scripts.evaluate_recommender --dataset movielens-tmdb --path $ML -k 10 --users 0 \
     --only-variants --sweep quality=0.05,0.1
 python -m app.scripts.evaluate_recommender --dataset movielens-tmdb --path $ML -k 20 --users 0 \

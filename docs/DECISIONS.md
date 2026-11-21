@@ -4,6 +4,35 @@ Lightweight ADR-style log. Newest first.
 
 ---
 
+## 2026-11-21 — Penalise disliked features harder (`sparse_negative` 0.12 → 0.5)
+
+### Decision
+`RankingWeights.sparse_negative` defaults to 0.5 (was 0.12): the score
+subtracts more for overlap with features the user's dislikes outweigh.
+
+### Rationale
+On 581 MovieLens users with TMDb metadata, the score separates held-out liked
+from held-out disliked titles better — like/dislike AUC +0.012 [+0.002,
++0.024] on the current slate rules, +0.010 [+0.003, +0.019] on the rules
+before the caps, replicated at k=10 and on the full 9.6k catalog — with no
+measurable accuracy cost in any setting. The sweep rises from 0 to 0.5 and
+falls after it: beyond 0.5 liked titles start being pushed down too, because
+likes and dislikes share genres, decades and cast. The whole range moves AUC by
+under 0.02 — MovieLens dislikes are films the user chose to watch, so most of
+their features cancel against the likes. A "Not for me" on a recommended card
+is a cleaner negative, which is why the online check matters more than the
+offline one here.
+
+### Watch
+At k=20, held-out dislikes reach the slate very slightly more often (+0.0008,
+interval touching zero). The negative-action rate in `engagement_report`
+should not rise after deploy; if it does, revert to 0.12.
+
+### Status
+Active.
+
+---
+
 ## 2026-11-21 — Cap directors and franchises; hidden gems by catalog percentile
 
 ### Decision

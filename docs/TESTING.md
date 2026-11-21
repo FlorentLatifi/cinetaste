@@ -4,14 +4,14 @@ Three layers, each answering a different question.
 
 | Layer | Count | Question | Needs |
 |---|---|---|---|
-| Unit — backend (`backend/tests/*.py`) | 414 | Is the logic right? | nothing |
-| Unit — frontend (`frontend/src/**/*.test.ts`) | 112 | Do the pure functions hold? | nothing |
-| Integration (`backend/tests/integration/`) | 74 | Do the API, migrations and database agree? | Postgres + pgvector |
-| End-to-end (`frontend/e2e/`) | 66 | Does the app work in a browser, accessibly? | built SPA |
+| Unit — backend (`backend/tests/*.py`) | 449 | Is the logic right? | nothing |
+| Unit — frontend (`frontend/src/**/*.test.ts`) | 117 | Do the pure functions hold? | nothing |
+| Integration (`backend/tests/integration/`) | 77 | Do the API, migrations and database agree? | Postgres + pgvector |
+| End-to-end (`frontend/e2e/`) | 69 | Does the app work in a browser, accessibly? | built SPA |
 
 ## Coverage
 
-Backend 87% (87.6% in a full run, unit + integration), gated in CI two ways: `--cov-fail-under=80` on the total, and
+Backend 89% (88.7% in a full run, unit + integration), gated in CI two ways: `--cov-fail-under=80` on the total, and
 `backend/tools/coverage_gate.py` on each package, because a total is easy to
 hold up with well-covered trivia while ranking and taste quietly rot.
 

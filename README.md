@@ -82,12 +82,14 @@ details, 581 users, production-sized 4,500-title catalog, slate of 20):
 
 | strategy | recall@20 | hit rate@20 | novelty | catalog coverage |
 |---|---|---|---|---|
-| random | 0.003 | 0.057 | 0.509 | 0.918 |
+| random | 0.003 | 0.053 | 0.508 | 0.918 |
 | most popular on TMDb | 0.035 | 0.275 | 0.003 | 0.013 |
 | most rated by MovieLens users | **0.093** | **0.444** | 0.064 | 0.034 |
-| **production** | 0.052 | 0.375 | **0.382** | **0.316** |
+| **production** | 0.053 | 0.382 | **0.383** | **0.326** |
 | production + quality prior (proposed, off) | 0.067 | 0.439 | 0.280 | 0.253 |
 | production + popularity prior (opt-in, off) | 0.077 | 0.482 | 0.100 | 0.211 |
+
+The two prior rows were measured with the previous `sparse_negative` (0.12).
 
 The honest headline: **with directors, cast, keywords and synopses, the
 recommender beats the popularity it can see by half again, but "what this
@@ -212,11 +214,11 @@ Errors share one shape: `{code, message, request_id}` (validation adds `errors[]
 ## Testing
 
 ```bash
-cd backend && pytest -m "not integration"   # 414 unit tests
+cd backend && pytest -m "not integration"   # 449 unit tests
 docker compose up -d db                      # integration needs Postgres
-INTEGRATION_REQUIRED=1 pytest -m integration # 74 API + DB tests, run the migrations
-cd frontend && npm test                     # 112 unit tests (vitest)
-cd frontend && npx playwright test           # 66 e2e + axe accessibility tests
+INTEGRATION_REQUIRED=1 pytest -m integration # 77 API + DB tests, run the migrations
+cd frontend && npm test                     # 117 unit tests (vitest)
+cd frontend && npx playwright test           # 69 e2e + axe accessibility tests
 ```
 
 Integration tests build the schema with `alembic upgrade head` (migrations are
