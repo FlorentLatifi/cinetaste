@@ -77,32 +77,34 @@ held-out ratings through the production ranking code and compares it with
 baselines. Full method, all metrics and caveats in
 [docs/EVALUATION.md](docs/EVALUATION.md).
 
-**On real ratings (MovieLens, 193 users, slate of 20):**
+**On real ratings with real metadata** (MovieLens ratings joined to TMDb
+details, 581 users, production-sized 4,500-title catalog, slate of 20):
 
-| strategy | recall@20 | hit rate@20 | novelty |
-|---|---|---|---|
-| random | 0.001 | 0.026 | 0.511 |
-| **most popular** | **0.072** | **0.415** | 0.002 |
-| **production** | 0.025 | 0.254 | **0.225** |
-| production + popularity prior (opt-in) | 0.049 | 0.404 | 0.044 |
+| strategy | recall@20 | hit rate@20 | novelty | catalog coverage |
+|---|---|---|---|---|
+| random | 0.003 | 0.055 | 0.509 | 0.918 |
+| most popular on TMDb | 0.035 | 0.275 | 0.003 | 0.013 |
+| most rated by MovieLens users | **0.093** | 0.444 | 0.064 | 0.034 |
+| **production** | 0.069 | **0.448** | **0.211** | **0.235** |
+| production + popularity prior (opt-in) | 0.084 | 0.504 | 0.067 | 0.141 |
 
-The honest headline: **on MovieLens, recommending the most popular films is more
-accurate than this recommender.** MovieLens only gives genres, a few tags and a
-year — no cast, director or synopsis — so content-based ranking has little to
-work with, and what people rate next there is dominated by popular films.
+The honest headline: **with directors, cast, keywords and synopses, the
+recommender doubles the popularity it can see, but "what this population
+rated most" still finds more held-out favourites** — by recommending the
+charts (under a third of the novelty, a seventh of the coverage). Popularity still
+buys accuracy only by giving up discovery, so the prior ships switched off.
 
-What the evaluation changed:
+What the evaluation changed or found:
 
-- It showed the hashed content vector was the weakest signal on real data, so
-  weight moved to the interpretable features. On the same users, hit rate went
-  from 0.155 to 0.254 and NDCG rose 65%, with no loss on the synthetic benchmark.
-- A popularity prior closes most of the gap (hit rate 0.404) but mostly
-  recommends the charts (novelty 0.044). For a discovery product that is the
-  wrong default, so it ships switched off and documented.
+- On MovieLens' own sparse metadata (September), the hashed content vector was
+  the weakest signal, so weight moved to the interpretable features — confirmed
+  with real metadata in November.
+- "Hidden gem" labels currently go to famous films (TMDb's popularity scale
+  shrank under the rule's thresholds), and half of all slates hold 3+ films by
+  one director. Both are measured, explained and tracked in
+  [docs/EVALUATION.md](docs/EVALUATION.md).
 - On a synthetic benchmark where taste is learnable from metadata, the same
-  ranker finds 3.5× more held-out favourites than random or popular. The
-  diversity controls' cost (about a third of recall) is what set the genre cap
-  and MMR λ.
+  ranker finds 3.5× more held-out favourites than random or popular.
 
 ## Screenshots
 

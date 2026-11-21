@@ -108,3 +108,47 @@ def catalog_coverage(slates: Iterable[Sequence[Id]], catalog_size: int) -> float
     for slate in slates:
         shown.update(slate)
     return len(shown) / float(catalog_size)
+
+
+def pairwise_auc(positive_scores: Sequence[float], negative_scores: Sequence[float]) -> float:
+    """P(a random positive outscores a random negative); ties count half.
+
+    0.5 is chance; 1.0 means every liked title outranks every disliked one.
+    """
+    if not positive_scores or not negative_scores:
+        return float("nan")
+    wins = 0.0
+    for p in positive_scores:
+        for n in negative_scores:
+            if p > n:
+                wins += 1.0
+            elif p == n:
+                wins += 0.5
+    return wins / (len(positive_scores) * len(negative_scores))
+
+
+def paired_bootstrap(
+    baseline: Sequence[float | None],
+    candidate: Sequence[float | None],
+    *,
+    n_boot: int = 2000,
+    seed: int = 0,
+) -> tuple[float, float, float, int]:
+    """Mean of (candidate − baseline) over paired users, with a 95% bootstrap CI.
+
+    Pairs where either side is missing are dropped. Returns
+    ``(delta, ci_low, ci_high, n_pairs)``; NaNs when there are no pairs.
+    """
+    import numpy as np
+
+    pairs = [
+        (b, c) for b, c in zip(baseline, candidate, strict=True) if b is not None and c is not None
+    ]
+    if not pairs:
+        return float("nan"), float("nan"), float("nan"), 0
+    diffs = np.asarray([c - b for b, c in pairs], dtype=np.float64)
+    rng = np.random.default_rng(seed)
+    samples = rng.integers(0, len(diffs), size=(n_boot, len(diffs)))
+    boot = diffs[samples].mean(axis=1)
+    low, high = np.percentile(boot, [2.5, 97.5])
+    return float(diffs.mean()), float(low), float(high), len(diffs)

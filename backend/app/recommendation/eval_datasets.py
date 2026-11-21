@@ -264,3 +264,177 @@ def load_movielens_dataset(
             )
 
     return Dataset(name="movielens", titles=titles, users=users)
+
+
+# ------------------------------------------------------- MovieLens + TMDb
+
+# Held-out ratings at or below this many stars are "dislikes" (CineTaste rate_1).
+DISLIKE_RATING_THRESHOLD = 2.0
+# The production catalog after a default ingest (docs/DEPLOY.md: ~4–4.7k titles).
+PRODUCTION_CATALOG_SIZE = 4500
+
+
+def load_movielens_tmdb_dataset(
+    directory: str | Path,
+    cache_path: str | Path,
+    *,
+    catalog_size: int | None = PRODUCTION_CATALOG_SIZE,
+    min_ratings: int = 20,
+    max_users: int | None = None,
+    test_fraction: float = 0.2,
+    seed: int = 7,
+) -> Dataset:
+    """MovieLens ratings joined (links.csv → tmdbId) to cached TMDb metadata.
+
+    Title features come from ``signal_inputs_from_payload`` →
+    ``build_title_signals`` — the ingest path — so directors, writers, cast,
+    keywords, tones, synopsis words, language and countries are all present.
+    Ranking priors use TMDb's ``popularity`` / ``vote_average`` /
+    ``vote_count``, as production does.
+
+    * **Split** — temporal per user: the most recent ``test_fraction`` of each
+      user's ratings is held out. Held-out ≥ 4 stars are relevant; held-out
+      ≤ ``DISLIKE_RATING_THRESHOLD`` stars are dislikes.
+    * **Catalog** — the ``catalog_size`` titles with the most TMDb votes (the
+      closest stand-in for ingest's popularity / vote-count discovery), so
+      coverage and candidate retrieval behave at production scale. Titles
+      outside it still shape profiles when users rated them, but are never
+      candidates or held-out targets.
+    * **No leakage into the baseline** — ``train_interactions`` counts only
+      training-split ratings, so the in-domain popularity baseline cannot see
+      the held-out period.
+
+    Ratings of films TMDb has no details for are dropped (``notes`` says how many).
+    """
+    from app.recommendation.tmdb_eval_cache import (
+        STATUS_OK,
+        load_cache,
+        read_movielens_links,
+        signal_inputs_from_payload,
+    )
+
+    directory = Path(directory)
+    links = read_movielens_links(directory)
+    cache = load_cache(Path(cache_path))
+    if not cache:
+        raise FileNotFoundError(
+            f"No TMDb cache at {cache_path}. Run python -m app.scripts.fetch_eval_metadata first."
+        )
+
+    # One title per TMDb id (a few MovieLens ids point at the same film).
+    title_by_tmdb: dict[int, EvalTitle] = {}
+    title_by_movie: dict[str, EvalTitle] = {}
+    for movie_id, tmdb_id in links.items():
+        record = cache.get(tmdb_id)
+        if record is None or record.get("status") != STATUS_OK:
+            continue
+        title = title_by_tmdb.get(tmdb_id)
+        if title is None:
+            payload = record["payload"]
+            inputs = signal_inputs_from_payload("movie", payload)
+            embedding, _features, meta = build_title_signals(**inputs)
+            title = EvalTitle(
+                id=uuid4(),
+                name=inputs["name"],
+                embedding=embedding,
+                extra=meta,
+                popularity=float(payload.get("popularity") or 0.0),
+                vote_average=float(payload.get("vote_average") or 0.0),
+                vote_count=int(payload.get("vote_count") or 0),
+                year=inputs["release_year"],
+                genre_names=tuple(inputs["genres"]),
+            )
+            title_by_tmdb[tmdb_id] = title
+        title_by_movie[movie_id] = title
+
+    ratings_total = 0
+    by_user: dict[str, list[tuple[float, str, float]]] = defaultdict(list)
+    with (directory / "ratings.csv").open(encoding="utf-8", newline="") as handle:
+        for row in csv.DictReader(handle):
+            ratings_total += 1
+            if row["movieId"] in title_by_movie:
+                by_user[row["userId"]].append(
+                    (float(row["timestamp"]), row["movieId"], float(row["rating"]))
+                )
+    ratings_kept = sum(len(rows) for rows in by_user.values())
+
+    # Split everyone first: the popularity baseline counts training ratings only.
+    splits: dict[str, tuple[list[tuple[float, str, float]], list[tuple[float, str, float]]]] = {}
+    for user_id, rows in by_user.items():
+        rows.sort()
+        if len(rows) < min_ratings:
+            for _ts, movie_id, _stars in rows:
+                title_by_movie[movie_id].train_interactions += 1
+            continue
+        split_at = max(int(len(rows) * (1 - test_fraction)), 1)
+        splits[user_id] = (rows[:split_at], rows[split_at:])
+        for _ts, movie_id, _stars in rows[:split_at]:
+            title_by_movie[movie_id].train_interactions += 1
+
+    every_title = list(title_by_tmdb.values())
+    ranked = sorted(every_title, key=lambda t: (t.vote_count, t.popularity), reverse=True)
+    if catalog_size is not None and catalog_size < len(ranked):
+        catalog, profile_only = ranked[:catalog_size], ranked[catalog_size:]
+    else:
+        catalog, profile_only = ranked, []
+    in_catalog = {t.id for t in catalog}
+
+    rng = random.Random(seed)
+    user_ids = sorted(splits)
+    if max_users is not None and len(user_ids) > max_users:
+        user_ids = rng.sample(user_ids, max_users)
+
+    users: list[EvalUser] = []
+    for user_id in user_ids:
+        train_rows, test_rows = splits[user_id]
+        events: list[tuple[UUID, str, float, datetime]] = []
+        for timestamp, movie_id, stars in train_rows:
+            event_type, weight = _EVENT_BY_RATING[stars]
+            events.append(
+                (
+                    title_by_movie[movie_id].id,
+                    event_type,
+                    weight,
+                    datetime.fromtimestamp(timestamp, tz=UTC),
+                )
+            )
+        seen = {event[0] for event in events}
+
+        gains: dict[UUID, float] = {}
+        dislikes: set[UUID] = set()
+        for _ts, movie_id, stars in test_rows:
+            tid = title_by_movie[movie_id].id
+            if tid not in in_catalog or tid in seen:
+                continue
+            if stars >= POSITIVE_RATING_THRESHOLD:
+                gains[tid] = 2.0 if stars >= 4.5 else 1.0
+            elif stars <= DISLIKE_RATING_THRESHOLD:
+                dislikes.add(tid)
+        if events and gains:
+            users.append(
+                EvalUser(
+                    user_id=f"ml-{user_id}",
+                    train_events=events,
+                    test_positive_ids=set(gains),
+                    test_gains=gains,
+                    test_negative_ids=dislikes,
+                )
+            )
+
+    return Dataset(
+        name="movielens-tmdb",
+        titles=catalog,
+        users=users,
+        profile_only_titles=profile_only,
+        notes={
+            "movielens_movies": len(links),
+            "titles_with_tmdb_metadata": len(every_title),
+            "catalog_titles": len(catalog),
+            "ratings_total": ratings_total,
+            "ratings_with_metadata": ratings_kept,
+            "users_evaluated": len(users),
+            "users_with_heldout_dislikes": sum(1 for u in users if u.test_negative_ids),
+            "heldout_likes": sum(len(u.test_positive_ids) for u in users),
+            "heldout_dislikes": sum(len(u.test_negative_ids) for u in users),
+        },
+    )
