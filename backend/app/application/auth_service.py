@@ -394,8 +394,13 @@ class AuthService:
 
     async def reset_password(self, *, token: str, new_password: str) -> None:
         token_hash = hash_token(token.strip())
+        # Row lock: a link submitted twice at once (two tabs, a double click)
+        # must be spent once. Without it both requests read it as unused and
+        # both changed the password.
         stored = await self._session.scalar(
-            select(PasswordResetToken).where(PasswordResetToken.token_hash == token_hash)
+            select(PasswordResetToken)
+            .where(PasswordResetToken.token_hash == token_hash)
+            .with_for_update()
         )
         if stored is None or stored.used_at is not None:
             raise AppError("Invalid or expired reset link", status_code=400, code="invalid_reset_token")
@@ -511,9 +516,9 @@ class AuthService:
         learn whether one existed, had been used, or had merely expired.
         """
         stored = await self._session.scalar(
-            select(EmailVerificationToken).where(
-                EmailVerificationToken.token_hash == hash_token(token.strip())
-            )
+            select(EmailVerificationToken)
+            .where(EmailVerificationToken.token_hash == hash_token(token.strip()))
+            .with_for_update()  # one-time, even under concurrent clicks
         )
         invalid = AppError(
             "Invalid or expired verification link",

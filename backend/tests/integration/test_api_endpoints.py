@@ -458,3 +458,65 @@ async def test_a_rating_is_recorded_even_if_the_rebuild_would_fail(
 
     history = (await client.get(f"{api_prefix}/me/history", headers=headers)).json()
     assert [i["title"]["id"] for i in history["items"]] == [str(titles[0].id)]
+
+
+async def test_a_reset_link_works_once_even_when_submitted_twice_at_once(
+    client: AsyncClient, api_prefix: str
+) -> None:
+    """Two tabs (or a double-click) racing the same one-time link: one wins.
+
+    The token row was read without a lock, so both requests saw it unused,
+    both changed the password, and the "one-time" link was used twice.
+    """
+    user = await _register(client, api_prefix)
+    forgot = await client.post(f"{api_prefix}/auth/forgot-password", json={"email": user["email"]})
+    token = forgot.json()["dev_reset_token"]
+
+    passwords = ("racing-pass-one-1", "racing-pass-two-2")
+    first, second = await asyncio.gather(
+        *(
+            client.post(
+                f"{api_prefix}/auth/reset-password",
+                json={"token": token, "new_password": password},
+            )
+            for password in passwords
+        )
+    )
+    assert sorted([first.status_code, second.status_code]) == [204, 400]
+
+    # The password the user was told was set is the one that works.
+    winner, loser = passwords if first.status_code == 204 else passwords[::-1]
+    for password, expected in ((winner, 200), (loser, 401)):
+        login = await client.post(
+            f"{api_prefix}/auth/login", json={"email": user["email"], "password": password}
+        )
+        assert login.status_code == expected, login.text
+
+
+async def test_a_verification_link_works_once_even_when_opened_twice_at_once(
+    client: AsyncClient, api_prefix: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Same race as the reset link, on the email-verification token."""
+    user = await _register(client, api_prefix)
+    issued = await client.post(f"{api_prefix}/auth/resend-verification", headers=_auth(user))
+    token = issued.json()["dev_verification_token"]
+
+    # Reset hashes a password between reading the token and spending it, which
+    # holds the race open on its own. Verification has no such step, so the two
+    # requests ran one after the other and this test passed without the lock.
+    # Slow the user lookup in between so both reads land before either write.
+    real_get = AsyncSession.get
+
+    async def slow_get(self: AsyncSession, *args: object, **kwargs: object) -> object:
+        await asyncio.sleep(0.2)
+        return await real_get(self, *args, **kwargs)
+
+    monkeypatch.setattr(AsyncSession, "get", slow_get)
+
+    first, second = await asyncio.gather(
+        *(
+            client.post(f"{api_prefix}/auth/verify-email", json={"token": token})
+            for _ in range(2)
+        )
+    )
+    assert sorted([first.status_code, second.status_code]) == [200, 400]
