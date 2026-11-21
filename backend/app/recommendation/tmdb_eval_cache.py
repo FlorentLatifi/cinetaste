@@ -82,7 +82,7 @@ STATUS_NOT_FOUND = "not_found"
 def signal_inputs_from_payload(media_type: str, payload: Mapping[str, Any]) -> dict[str, Any]:
     """``build_title_signals`` keyword arguments, exactly as ingest builds them.
 
-    Mirrors ``CatalogIngestService._upsert_from_detail`` / ``_add_credits``:
+    Mirrors ingest's ``_Detail.parse`` and ``CatalogIngestService._stage``:
     keywords are the first ``MAX_KEYWORDS`` TMDb returns, cast the first
     ``MAX_CAST`` billed (entries without an id or name skipped *after* the
     cut, as ingest does), crew limited to ``CREW_JOBS``, TV creators count as

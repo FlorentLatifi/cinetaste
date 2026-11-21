@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.catalog_discovery import DiscoveryPlan
@@ -346,3 +346,211 @@ async def test_movie_collection_is_stored_and_survives_reingest_and_reembed(
     ).upsert_movie(9_000_010)
     await db_session.commit()
     assert collection_of(await stored(9_000_010)) is None
+
+
+# ------------------------------------------------------------ statement budget
+#
+# The production ingest runs on a GitHub runner against hosted Postgres, ~150 ms
+# away. Every statement is a round trip, so the number of statements *is* the
+# run time. Written one title at a time, a title cost 57 statements when it was
+# already stored and up to 98 when it was new (8.5 s each in production, which
+# is why a full run could not finish in the job's 150 minutes). A batch now costs
+# a fixed handful, however many titles, keywords and people it holds.
+
+GENRES = [{"id": 18, "name": "Drama"}, {"id": 35, "name": "Comedy"}, {"id": 80, "name": "Crime"}]
+
+
+class RichTmdb(FakeTmdb):
+    """Payloads shaped like real ones: 25 keywords, 8 cast, the crew jobs ingest keeps."""
+
+    async def get_genres(self, media_type: str) -> list[dict[str, Any]]:
+        return GENRES
+
+    def _movie(self, tmdb_id: int) -> dict[str, Any]:
+        payload = super()._movie(tmdb_id)
+        shared = [{"id": 1000 + i, "name": f"shared keyword {i}"} for i in range(10)]
+        own = [{"id": tmdb_id * 100 + i, "name": f"keyword {tmdb_id}-{i}"} for i in range(15)]
+        payload["genres"] = GENRES
+        payload["keywords"] = {"keywords": shared + own}
+        payload["credits"] = {
+            "cast": [
+                {"id": 5000 + (tmdb_id + i) % 12, "name": f"Actor {(tmdb_id + i) % 12}", "order": i}
+                for i in range(8)
+            ],
+            "crew": [
+                {"id": 6000 + tmdb_id % 3, "name": f"Director {tmdb_id % 3}", "job": "Director"},
+                {"id": 7000 + tmdb_id, "name": f"Writer {tmdb_id}", "job": "Screenplay"},
+                {"id": 7000 + tmdb_id, "name": f"Writer {tmdb_id}", "job": "Writer"},
+                {"id": 8000 + tmdb_id, "name": f"Grip {tmdb_id}", "job": "Key Grip"},
+            ],
+        }
+        return payload
+
+
+async def _statements(work: Any) -> int:
+    from app.core.timing import start_timer, stop_timer
+
+    timer, token = start_timer()
+    try:
+        await work
+    finally:
+        stop_timer(token)
+    return timer.db_statements
+
+
+async def test_statements_per_batch_do_not_grow_with_titles(db_session: AsyncSession) -> None:
+    service = CatalogIngestService(db_session, RichTmdb(), batch_size=20)  # type: ignore[arg-type]
+    await service._ensure_genres()  # once per run, not per batch
+
+    ten = [("movie", 9_200_000 + i) for i in range(10)]
+    twenty = [("movie", 9_300_000 + i) for i in range(20)]
+    new_10 = await _statements(service._ingest_ids(ten))
+    new_20 = await _statements(service._ingest_ids(twenty))
+    # A new run (fresh caches) over stored titles: the shape of a seed-only run.
+    again = CatalogIngestService(db_session, RichTmdb(), batch_size=20)  # type: ignore[arg-type]
+    await again._ensure_genres()
+    refresh_10 = await _statements(again._ingest_ids(ten))
+    assert (await db_session.scalar(select(func.count()).select_from(Credit))) > 0
+
+    # SAVEPOINT; SELECT titles, people, keywords; INSERT people, keywords,
+    # titles, title_genres, title_keywords, credits; RELEASE.
+    assert new_10 == 11, f"{new_10} statements for a batch of new titles (pinned: 11)"
+    assert new_20 == new_10, "a bigger batch must not cost more statements"
+    # SAVEPOINT; SELECT x3; UPDATE titles (one executemany); DELETE x3 join
+    # tables; INSERT x3 join tables; RELEASE. No people or keywords are new.
+    assert refresh_10 == 12, f"{refresh_10} statements for a batch of stored titles (pinned: 12)"
+
+
+async def test_a_row_the_database_rejects_costs_only_its_title(db_session: AsyncSession) -> None:
+    """Postgres refuses one title's row (a value too long for its column).
+
+    The set-based write fails as a whole, so the batch is written again one
+    title at a time: the bad title fails alone, the rest are stored, and the
+    bad title's people are rolled back with it, as before batching.
+    """
+    bad_id = 9_400_002
+
+    class OneTooLong(RichTmdb):
+        def _movie(self, tmdb_id: int) -> dict[str, Any]:
+            payload = super()._movie(tmdb_id)
+            if tmdb_id == bad_id:  # credits.character is varchar(255)
+                payload["credits"]["cast"].insert(
+                    0, {"id": 9999, "name": "Only Here", "order": 0, "character": "x" * 300}
+                )
+            return payload
+
+    service = CatalogIngestService(db_session, OneTooLong(), batch_size=10)  # type: ignore[arg-type]
+    await service._ensure_genres()
+    stats = await service._ingest_ids([("movie", 9_400_000 + i) for i in range(5)])
+
+    assert stats == {"requested": 5, "created": 4, "updated": 0, "failed": 1}
+    stored = set(await db_session.scalars(select(Title.external_tmdb_id)))
+    assert {9_400_000 + i for i in range(5)} - stored == {bad_id}
+    assert await db_session.scalar(select(Person.id).where(Person.external_tmdb_id == 9999)) is None
+
+
+class TrickyTmdb(RichTmdb):
+    """Cross-title cases the batch has to resolve exactly as one-at-a-time did."""
+
+    def _movie(self, tmdb_id: int) -> dict[str, Any]:
+        payload = super()._movie(tmdb_id)
+        n = tmdb_id % 10
+        # Within the first MAX_CAST (8), or ingest never sees them:
+        # the same person under another name in every title (the first name
+        # seen is stored and used), and billed twice in one title (one credit).
+        renamed = {"id": 5001, "name": f"Actor 1 as credited in {n}", "order": 0}
+        payload["credits"]["cast"] = [
+            renamed,
+            dict(renamed, order=7),
+            *payload["credits"]["cast"][:6],
+        ]
+        # A keyword TMDb renumbered: a new id under a name an earlier title stored.
+        renamed = f"keyword {tmdb_id - 1}-0" if n else "renamed keyword"
+        payload["keywords"]["keywords"].insert(0, {"id": 4000 + n, "name": renamed})
+        # A genre missing from TMDb's genre list, and a TV-style genre name clash.
+        payload["genres"] = [*GENRES, {"id": 10770 + n % 2, "name": "TV Movie"}]
+        return payload
+
+
+async def _catalog_rows(session: AsyncSession) -> dict[str, list[tuple[Any, ...]]]:
+    """Everything ingest stores, keyed by TMDb ids and names instead of generated uuids."""
+    from app.infrastructure.db.models.catalog import Genre, Keyword, TitleGenre, TitleKeyword
+
+    session.expire_all()
+    queries = {
+        "titles": select(
+            Title.external_tmdb_id, Title.media_type, Title.name, Title.runtime, Title.extra,
+            Title.embedding,
+        ),
+        "genres": select(Genre.external_tmdb_id, Genre.name),
+        "people": select(Person.external_tmdb_id, Person.name, Person.profile_path),
+        "keywords": select(Keyword.external_tmdb_id, Keyword.name),
+        "title_genres": select(Title.external_tmdb_id, Genre.name)
+        .join(TitleGenre, TitleGenre.title_id == Title.id)
+        .join(Genre, Genre.id == TitleGenre.genre_id),
+        "title_keywords": select(Title.external_tmdb_id, Keyword.external_tmdb_id, Keyword.name)
+        .join(TitleKeyword, TitleKeyword.title_id == Title.id)
+        .join(Keyword, Keyword.id == TitleKeyword.keyword_id),
+        "credits": select(
+            Title.external_tmdb_id, Person.external_tmdb_id, Credit.credit_type, Credit.job,
+            Credit.character, Credit.billing_order,
+        )
+        .join(Credit, Credit.title_id == Title.id)
+        .join(Person, Person.id == Credit.person_id),
+    }  # fmt: skip
+    rows: dict[str, list[tuple[Any, ...]]] = {}
+    for name, query in queries.items():
+        result = (await session.execute(query)).all()
+        rows[name] = sorted((tuple(map(_comparable, row)) for row in result), key=repr)
+    return rows
+
+
+def _comparable(value: Any) -> Any:
+    if hasattr(value, "tolist"):  # pgvector hands back numpy arrays
+        return tuple(value.tolist())
+    if isinstance(value, dict):
+        return repr(sorted(value.items()))
+    return value
+
+
+async def test_a_batch_stores_exactly_what_writing_one_title_at_a_time_did(
+    db_session: AsyncSession, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Batch size 1 is the old order of events: each title sees every earlier one stored.
+
+    The batch must get there by itself. A mistake that breaks a statement
+    would be repaired by the one-title-at-a-time fallback and still store the
+    right rows, so the test also requires that the fallback never ran.
+    """
+    from app.infrastructure.db.base import Base
+    from app.infrastructure.db.session import engine
+
+    async def ingest(batch_size: int) -> dict[str, list[tuple[Any, ...]]]:
+        tables = ", ".join(t.name for t in Base.metadata.sorted_tables)
+        await db_session.commit()
+        async with engine.begin() as conn:
+            await conn.execute(text(f"TRUNCATE TABLE {tables} RESTART IDENTITY CASCADE"))
+        targets = [("movie", 9_500_100 + i) for i in range(8)]
+        # A second run re-ingests some of them with nothing cached: lookups go
+        # to the database (keywords by name included), not to this run's memory.
+        for run_targets in (targets, targets[2:6]):
+            service = CatalogIngestService(db_session, TrickyTmdb(), batch_size=batch_size)  # type: ignore[arg-type]
+            await service._ensure_genres()
+            assert (await service._ingest_ids(run_targets))["failed"] == 0
+        return await _catalog_rows(db_session)
+
+    one_at_a_time = await ingest(batch_size=1)
+    batched = await ingest(batch_size=8)
+
+    assert "ingest_batch_write_failed" not in caplog.text
+    assert len(one_at_a_time["titles"]) == 8
+    assert ("TV Movie",) in {row[1:] for row in one_at_a_time["genres"]}
+    for table, rows in one_at_a_time.items():
+        assert batched[table] == rows, table
+
+    # And both are what ingest always stored: a stored person keeps the first
+    # name seen, and a renumbered keyword links to the stored one instead of
+    # getting a row of its own.
+    assert dict((row[0], row[1]) for row in batched["people"])[5001] == "Actor 1 as credited in 0"
+    keyword_ids = {row[0] for row in batched["keywords"]}
+    assert 4000 in keyword_ids and keyword_ids.isdisjoint(range(4001, 4008))

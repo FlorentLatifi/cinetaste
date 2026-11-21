@@ -48,6 +48,9 @@ class _RecordingSession:
     async def scalar(self, _statement: Any) -> None:
         return None
 
+    async def scalars(self, _statement: Any) -> list[Any]:
+        return []  # an empty database: every lookup finds no rows
+
     async def execute(self, _statement: Any) -> None:
         return None
 
