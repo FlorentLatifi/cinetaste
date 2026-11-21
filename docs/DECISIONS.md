@@ -4,6 +4,131 @@ Lightweight ADR-style log. Newest first.
 
 ---
 
+## 2026-11-21 — Cap directors and franchises; hidden gems by catalog percentile
+
+### Decision
+* **Slate caps**, shared by MMR, exploration and backfill (`_SlateQuotas` in
+  `select_slate`): primary genre 40% of the slate, **director 10%** (2 in 20),
+  **franchise (TMDb collection) 5%** (1 in 20). When a slate cannot be filled,
+  backfill relaxes the genre cap first, then director, then franchise.
+* **Hidden gem** = ★7.2+, 50+ votes, and below the 40th *catalog* percentile
+  on both popularity and vote count. Percentiles live in
+  `Title.extra["catalog_percentiles"]`, refreshed by one SQL statement at the
+  end of every ingest and re-embed (`reembed_catalog --percentiles-only`
+  backfills on its own).
+* A quality prior exists as a knob (`RankingWeights.quality`) and is **off**.
+
+### Rationale
+Both were soft-launch checks that `master` failed, measured on 581 real
+MovieLens users with TMDb metadata (docs/EVALUATION.md):
+
+* In 49.6% of 20-card slates one director held 3+ titles; the genre cap could
+  not see it (a guest slate on the live site once opened with eight Nolan films
+  in nine cards). With the caps: 0%.
+* 96% of "hidden gem" labels went to the catalog's 10% most-voted films. The
+  rule tested TMDb `popularity < 40`, but TMDb's popularity is a trending score
+  whose scale shrank: 99.8% of titles are below 40, so Pulp Fiction and Forrest
+  Gump were "hidden gems". Percentiles mean the same thing whatever TMDb's
+  scale does. With them: 0%. A false reason is worse than none.
+
+The cost is offline recall@20 0.069 → 0.052 (paired Δ −0.017 [−0.025, −0.009]).
+About half is the old gem bonus going away — it fired on nearly every
+well-rated film, so it was a quality prior in disguise — and about a third is
+the new bonus promoting genuinely little-known films, which offline recall
+counts as a miss by construction. The caps alone cost −0.002 (interval spans
+zero). Shipped anyway, because the offline metric is the one most likely to
+overstate the loss; `engagement_report` measures the real one.
+
+### Rejected alternatives
+* **Rescaling the raw popularity thresholds** — breaks again the next time
+  TMDb changes its formula.
+* **The quality prior on by default** (`quality=0.1` recovers master's recall
+  and beats it on like/dislike AUC, at 60% of the novelty gain) — left as the
+  owner's call, to be decided on online numbers.
+
+### Origin
+The November 9 quality audit (`florent/fervent-keller-0l0j9b`, 44fd168),
+re-done in `florent/ecstatic-hypatia-gexedy` and landed by PR #61 on top of
+the `candidate_channels` → `blend_scores` → `select_slate` split.
+
+### Status
+Active. Production needs one percentile backfill after deploy, and franchises
+reach existing titles on the next ingest (docs/DEPLOY.md).
+
+---
+
+## 2026-11-21 — The benchmark measures what production serves, on real metadata
+
+### Decision
+The offline benchmark joins MovieLens ratings to TMDb details (`links.csv`),
+built into features by the same mapping ingest uses (a parity test runs the
+real ingest code on the same payloads). The `production` strategy ranks the
+candidate pool the API retrieves, with exploration slots. The in-domain
+popularity baseline counts training ratings only. Strategies are compared with
+paired bootstrap intervals. The TMDb cache lives outside the repository.
+
+### Rationale
+MovieLens alone has genres, tags and a year, so directors, cast, keywords,
+tones and synopses — what production ranks on — were never exercised, and
+popularity won. Strategies also ranked the whole catalog, which production
+never does, and held-out ratings leaked into the popularity baseline. Weights
+were being chosen against a different system.
+
+### Status
+Active. `python -m app.scripts.evaluate_recommender --dataset movielens-tmdb`.
+
+---
+
+## 2026-11-21 — The engagement report reads a local copy, never production
+
+### Decision
+`engagement_report` runs with `default_transaction_read_only=on` and refuses
+any database host that is not local, with no override. Production data is
+analysed from a restored backup. The GitHub Actions workflow on
+`florent/fervent-keller-0l0j9b` that ran a similar report against the
+production `DATABASE_URL` was not adopted.
+
+### Rationale
+Analysis tooling should not hold production credentials or be one flag away
+from reading live user data. Restoring a backup is a few minutes of friction
+for a report that is read every few weeks.
+
+### Revisit when
+Reports are wanted on a schedule: then a dedicated read-only database role
+and a workflow that can use nothing else.
+
+### Status
+Active.
+
+---
+
+## 2026-11-21 — Profile rebuilds are serialised per user
+
+### Decision
+`recompute_profile` takes a transaction-scoped advisory lock keyed by the user
+and writes the profile as an upsert with `version = version + 1` in SQL. The
+request-path version bump is the same kind of upsert and never takes the lock.
+Snapshot import and clear take the lock before touching the row.
+
+### Rationale
+Deferred rebuilds made overlapping rebuilds normal for anyone rating quickly.
+The rebuild that read the log first could commit last and overwrite the newer
+profile, so the latest rating vanished from recommendations until the next
+one; two first ratings at once could also both insert the row. Row locks were
+rejected: the row may not exist yet, and `SELECT … FOR UPDATE` in the rebuild
+would make the request's bump wait for it, undoing the reason rebuilds were
+deferred. Import and clear lock first because the opposite order (row, then
+lock) deadlocks against a background rebuild holding the lock.
+
+### Origin
+Found in the November 9 audit (`florent/fervent-keller-0l0j9b`, 0e5bcf8);
+landed in PR #59 with the races reproduced in `test_profile_concurrency.py`.
+
+### Status
+Active.
+
+---
+
 ## 2026-09-24 — The taste rebuild happens after the response
 
 ### Decision
