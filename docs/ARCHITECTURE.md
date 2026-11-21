@@ -82,7 +82,7 @@ any scoring change. That is why Undo is a `clear` event rather than a delete.
    popularity slice; cold start is popularity-ordered.
 5. **Ranking** (`recommendation/pipeline.py`, `rank_titles` =
    `candidate_channels` → `blend_scores` → `select_slate`) —
-   `0.2·cosine + 0.6·overlap − 0.12·penalty + gem + cold prior`, then MMR
+   `0.2·cosine + 0.6·overlap − 0.5·penalty + gem + cold prior`, then MMR
    (λ=0.8), a per-genre cap of 40% of the slate, a per-director cap of 10%
    (2 in 20) and a per-collection (franchise) cap of 5% (1 in 20, 2 in 40),
    exploration slots interleaved, and score-ordered backfill under the same

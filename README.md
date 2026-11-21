@@ -46,7 +46,7 @@ rating ──▶ interaction_events (append-only)
    candidates      pgvector ANN (HNSW, cosine) + a popular slice   ~370 titles
              │
              ▼
-   score = 0.2·cosine + 0.6·feature overlap − 0.12·penalty + hidden-gem + cold-start prior
+   score = 0.2·cosine + 0.6·feature overlap − 0.5·penalty + hidden-gem + cold-start prior
              │
              ▼
    MMR (λ=0.8) ──▶ caps: genre 40%, director 10%, franchise 5% ──▶ exploration slots ──▶ reasons
