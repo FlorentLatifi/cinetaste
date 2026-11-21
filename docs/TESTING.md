@@ -4,14 +4,14 @@ Three layers, each answering a different question.
 
 | Layer | Count | Question | Needs |
 |---|---|---|---|
-| Unit — backend (`backend/tests/*.py`) | 237 | Is the logic right? | nothing |
-| Unit — frontend (`frontend/src/**/*.test.ts`) | 77 | Do the pure functions hold? | nothing |
-| Integration (`backend/tests/integration/`) | 22 | Do the API, migrations and database agree? | Postgres + pgvector |
-| End-to-end (`frontend/e2e/`) | 47 | Does the app work in a browser, accessibly? | built SPA |
+| Unit — backend (`backend/tests/*.py`) | 396 | Is the logic right? | nothing |
+| Unit — frontend (`frontend/src/**/*.test.ts`) | 112 | Do the pure functions hold? | nothing |
+| Integration (`backend/tests/integration/`) | 69 | Do the API, migrations and database agree? | Postgres + pgvector |
+| End-to-end (`frontend/e2e/`) | 66 | Does the app work in a browser, accessibly? | built SPA |
 
 ## Coverage
 
-Backend 84%, gated in CI two ways: `--cov-fail-under=80` on the total, and
+Backend 87% (87.3% in a full run, unit + integration), gated in CI two ways: `--cov-fail-under=80` on the total, and
 `backend/tools/coverage_gate.py` on each package, because a total is easy to
 hold up with well-covered trivia while ranking and taste quietly rot.
 
@@ -23,7 +23,9 @@ in `backend/pyproject.toml`; do not remove it.
 
 Frontend unit coverage is scoped to the pure-logic modules (`vite.config.ts`),
 since components and pages are the e2e suite's job and blending the two would
-make one number mean neither.
+make one number mean neither. It is gated too: `npm run test:coverage` runs in
+CI with thresholds of 95% statements, 92% branches, 95% functions and 95% lines
+(98.5% statements in a full run).
 
 ## The test database
 
@@ -102,6 +104,6 @@ uses; a re-implementation would measure the re-implementation.
 
 ## Gaps worth knowing
 
-- Coverage is reported in CI but not gated; pick a floor from a measured run.
-- No frontend unit tests (hooks are covered indirectly through e2e).
+- Frontend unit tests cover only the pure-logic modules; components, pages and
+  hooks are covered indirectly through e2e.
 - No load testing; latency claims come from micro-benchmarks, not a load run.

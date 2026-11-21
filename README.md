@@ -8,7 +8,7 @@ in a sentence you can check.
 Not a TMDb browser with a search box: a taste profile that updates on every
 rating, ranks a catalog against it, keeps the slate varied, and says why.
 
-![For You: one poster, the reasons behind it, and a six-point rating strip](docs/screenshots/03-for-you.png)
+![For You: one poster, the reasons behind it, and the four-step rating scale](docs/screenshots/03-for-you.png)
 
 ---
 
@@ -23,11 +23,11 @@ rating, ranks a catalog against it, keeps the slate varied, and says why.
 
 | | |
 |---|---|
-| **Low-friction onboarding** | Rate a curated deck of recognisable titles. "Haven't seen it" costs nothing and pulls in a fresh card. |
+| **Low-friction onboarding** | Rate a curated deck of recognisable titles on a four-step scale (Didn't like it · It was ok · Really liked it · Loved it). A poster you leave alone counts as "haven't seen it" and costs nothing. |
 | **A taste profile, not a genre checkbox** | Every rating moves weights over genres, keywords, directors, writers, cast, tone, decade, language and country. |
 | **Explained recommendations** | Every card carries reasons built from real evidence — a shared director, shared themes, a tone you keep rating highly. |
 | **Discovery on purpose** | Diversity control, per-genre caps, exploration slots and hidden gems (well-rated titles that are not chart-toppers). |
-| **You can inspect and undo it** | A profile page shows the signals learned, History lists every action, Undo reverses one, and the taste snapshot exports as JSON. |
+| **You can inspect and undo it** | The Taste tab in Account shows the signals learned, History lists every action, Undo reverses one, and the taste snapshot exports as JSON. |
 | **Where to watch** | Streaming, rent and buy options per region (TMDb/JustWatch). |
 
 ## How the recommender works
@@ -204,11 +204,11 @@ Errors share one shape: `{code, message, request_id}` (validation adds `errors[]
 ## Testing
 
 ```bash
-cd backend && pytest -m "not integration"   # 237 unit tests
+cd backend && pytest -m "not integration"   # 396 unit tests
 docker compose up -d db                      # integration needs Postgres
-INTEGRATION_REQUIRED=1 pytest -m integration # 15 API + DB tests, run the migrations
-cd frontend && npm test                     # 77 unit tests (vitest)
-cd frontend && npx playwright test           # 47 e2e + axe accessibility tests
+INTEGRATION_REQUIRED=1 pytest -m integration # 69 API + DB tests, run the migrations
+cd frontend && npm test                     # 112 unit tests (vitest)
+cd frontend && npx playwright test           # 66 e2e + axe accessibility tests
 ```
 
 Integration tests build the schema with `alembic upgrade head` (migrations are

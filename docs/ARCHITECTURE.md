@@ -144,8 +144,14 @@ once per computed slate, not per cache hit.
 - React 19 + TypeScript, Vite, React Router, lazy-loaded authenticated routes.
 - `AuthContext` keeps the access token in memory only; session restore and 401
   retries share one single-flight refresh, so two tabs can't trip reuse detection.
-- The rating scale is defined once (`features/taste/ratingScale.ts`) and used by
-  For You, onboarding, the detail page and the undo toast.
+- The rating scale is defined once (`features/taste/ratingScale.ts`). Wherever
+  someone rates a film they have seen (onboarding, guest mode, For You's "Seen
+  it", the detail page) it is four steps: Didn't like it (`rate_1`), It was ok
+  (`mid`), Really liked it (`rate_3`), Loved it (`rate_4`). `rate_2` ("Liked
+  it") and `haven't_seen` remain valid events with their own labels, which the
+  undo toast and History use, so older ratings keep their meaning.
+- What the app has learned is shown in the **Taste** tab of the Account page
+  (`/account?tab=taste`), not on a page of its own.
 - Accessibility: skip link, live regions for loading/empty/error, keyboard
   shortcuts, reduced-motion and forced-colors support, axe checks in CI.
 

@@ -29,7 +29,11 @@ rest is already in the code and is listed so it can be checked, not redone.
       Actions → Catalog → `seed-only`, then `popular`. `/api/v1/ready` must say
       `"catalog":"ok"`.
 - [ ] **Monitoring.** Repository variables `API_BASE_URL` and `APP_BASE_URL`
-      switch on the Uptime workflow (it also keeps the free API from sleeping).
+      switch on the Uptime workflow. It is scheduled every 10 minutes
+      (`*/10` in `uptime.yml`), but GitHub runs scheduled workflows on a
+      best-effort basis: the recent scheduled runs landed roughly every 3–9
+      hours. Treat it as a coarse down-check, not as something that reliably
+      keeps the free API from sleeping.
       `SENTRY_DSN` (API) and `VITE_SENTRY_DSN` (SPA) are optional; the CSP
       already allows Sentry.
 - [ ] **TMDb logo** at `frontend/public/tmdb.svg`. The required wording is

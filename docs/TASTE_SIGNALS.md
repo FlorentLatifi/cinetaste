@@ -31,22 +31,23 @@ User action
 
 ## Policy table
 
-| Action | `event_type` | Weight | Polarity | Updates taste vector / features? | `user_title_state` | Exclude from For You? | Special handling |
+| Action (wording from `frontend/src/features/taste/ratingScale.ts`) | `event_type` | Weight | Polarity | Updates taste vector / features? | `user_title_state` | Exclude from For You? | Special handling |
 |--------|--------------|--------|----------|----------------------------------|--------------------|------------------------|------------------|
-| **Bad** | `rate_1` | **−0.90** | negative | **Yes** — strong | `dislike` | Yes | Seen + disliked. Pushes away shared features. |
-| **It's ok** | `rate_2` | **+0.30** | positive | **Yes** — weak | `rated` | Yes | Seen, mild like. Not an explain anchor alone. |
-| **Good** | `rate_3` | **+1.00** | positive | **Yes** | `like` | Yes | Primary positive rating. Explain anchor. |
-| **Favorite** | `rate_4` | **+1.55** | positive | **Yes** — strongest | `like` | Yes | Highest boost. Preferred explain anchor. |
+| **Didn't like it** | `rate_1` | **−0.90** | negative | **Yes** — strong | `dislike` | Yes | Seen + disliked. Pushes away shared features. |
+| **It was ok** | `mid` | **+0.10** | positive | **Yes** — barely | `rated` | Yes | Seen, neutral. Counts as a rating for the onboarding gate but not as a *positive* one. Not an explain anchor. |
+| **Liked it** | `rate_2` | **+0.30** | positive | **Yes** — weak | `rated` | Yes | Seen, mild like. Not an explain anchor alone. Not on the four-step scale, but still a valid event, so older ratings keep their meaning. |
+| **Really liked it** | `rate_3` | **+1.00** | positive | **Yes** | `like` | Yes | Primary positive rating. Explain anchor. |
+| **Loved it** | `rate_4` | **+1.55** | positive | **Yes** — strongest | `like` | Yes | Highest boost. Preferred explain anchor. |
 | **Haven't seen it** | `haven't_seen` | **0.00** | zero | **No** | `haven't_seen` | **No** | Unfamiliarity ≠ dislike. Log only; may still recommend. |
-| **Not interested** | `not_interested` | **−0.40** | negative | **Yes** — mild | `not_interested` | Yes | Rejection without full rating scale. Milder than Bad. |
-| **Watchlist / Save** | `watchlist` | **+0.45** | positive | **Yes** — mild | `watchlist` | Yes | Intent, not quality. Weaker than Good. |
-| **Like** (feed shortcut) | `like` | **+1.00** | positive | **Yes** | `like` | Yes | Same strength as Good (`rate_3`). |
-| **Dislike / Pass** (feed) | `dislike` | **−0.85** | negative | **Yes** | `dislike` | Yes | ≈ Bad; prefer `rate_1` when on rating UI. |
+| **Not interested** | `not_interested` | **−0.40** | negative | **Yes** — mild | `not_interested` | Yes | Rejection without full rating scale. Milder than Didn't like it. |
+| **Watchlist / Save** | `watchlist` | **+0.45** | positive | **Yes** — mild | `watchlist` | Yes | Intent, not quality. Weaker than Really liked it. |
+| **Like** (feed shortcut) | `like` | **+1.00** | positive | **Yes** | `like` | Yes | Same strength as Really liked it (`rate_3`). |
+| **Dislike / Pass** (feed) | `dislike` | **−0.85** | negative | **Yes** | `dislike` | Yes | ≈ Didn't like it; prefer `rate_1` when on rating UI. |
 | **Undo / clear** | `clear` | **0.00** | zero | **No** | `none` | **No** | Soft undo: title can reappear; recompute ignores events for that title up to the clear. |
 | **Skip** | `skip` | **−0.15** | negative | **Yes** — tiny | *(no state)* | No | Soft dismiss; barely moves profile. |
 | **View** | `view` | **+0.05** | neutral | **Yes** — near-zero | *(no state)* | No | Impression analytics; never treat as a like. |
 | **Watched (no rating)** | `watched` | **+0.20** | positive | Yes — weak | `watched` | Yes | Prefer `rate_1`–`rate_4` after watch when possible. |
-| **Watched + liked** | `watched_liked` | **+1.10** | positive | Yes | `like` | Yes | Convenience; slightly above Good. |
+| **Watched + liked** | `watched_liked` | **+1.10** | positive | Yes | `like` | Yes | Convenience; slightly above Really liked it. |
 | **Watched + disliked** | `watched_disliked` | **−0.95** | negative | Yes | `dislike` | Yes | Strong negative — they invested time. |
 
 ### Taste snapshot export / import
@@ -86,9 +87,9 @@ For You and prior events for that title are superseded on recompute.
 
 ### Post-watch UI (title detail)
 
-1. User taps **Watched** → rate panel (Bad / It's ok / Good / Favorite).  
-2. Choosing a rating records `rate_1`…`rate_4` (full learning + feed exclusion).  
-3. **Watched — skip rating** records `watched` only (weak positive, still excluded from For You).  
+1. User taps **Seen it** → rate panel with the four-step scale: Didn't like it (`rate_1`) · It was ok (`mid`) · Really liked it (`rate_3`) · Loved it (`rate_4`).  
+2. Choosing a rating records that event (full learning + feed exclusion).  
+3. **Seen it — skip rating** records `watched` only (weak positive, still excluded from For You).  
 4. Once a title has a rating the page shows it ("Seen it · Loved it") and no
    longer offers **Want to watch**, **Not for me** or **skip rating** — none of
    them would change the title's state (see *Durable title state*), and their
@@ -101,7 +102,7 @@ For You and prior events for that title are superseded on recompute.
 
 ## Detailed rules
 
-### Rating scale (Bad → Favorite)
+### Rating scale (Didn't like it → Loved it)
 
 Use when the user **has seen** (or knows) the title:
 
@@ -120,7 +121,7 @@ Use when the user **has seen** (or knows) the title:
    (default 365, `0` disables) — because taste drifts.
 6. `rate_3` / `rate_4` / `like` (weight ≥ **0.85**) become **explain anchors** for human reasons.
 
-Onboarding requires **≥ 6** real ratings (`rate_1`, `mid`, `rate_2`–`rate_4`) and **≥ 2** positive among `rate_2`–`rate_4` / `like`.  
+Onboarding requires **≥ 6** real ratings (`rate_1`, `mid`, `rate_2`–`rate_4`; the deck's buttons send `rate_1`, `mid`, `rate_3`, `rate_4`) and **≥ 2** positive among `rate_2`–`rate_4` / `like`.  
 `haven't_seen` does **not** count toward either gate, and repeating the same
 title counts once.
 
@@ -187,26 +188,24 @@ A later rating after `clear` applies normally (only events *after* the latest cl
 ### Not interested → mild negative
 
 Use when the user rejects the title (or its vibe) without using the full scale.  
-Stronger avoidance than skip, **weaker** than Bad — they may not have deep knowledge of the film.
+Stronger avoidance than skip, **weaker** than Didn't like it — they may not have deep knowledge of the film.
 
 ### Watchlist → mild positive intent
 
 Saving means “I might watch this,” not “this defines my taste.”  
-Weight **+0.45** so a large watchlist cannot dominate true Favorites.  
+Weight **+0.45** so a large watchlist cannot dominate true Loved-it ratings.  
 While `watchlist`, the title is hidden from For You to reduce duplicate cards.
 
 ### Like / Dislike shortcuts
 
-Home-feed buttons map to `like` / `dislike` for speed. Strength matches Good / ~Bad.  
-Onboarding prefers the explicit 1–4 scale + haven’t seen / not interested.
+Home-feed buttons map to `like` / `dislike` for speed. Strength matches Really liked it / ~Didn't like it.  
+Onboarding uses the four-step scale (`rate_1`, `mid`, `rate_3`, `rate_4`); a card left unrated counts as haven’t seen.
 
-### Future: watched
+### Watched (shipped)
 
-When “mark as watched” ships:
-
-1. Prefer collecting a rating immediately (`rate_*`).
-2. If only “watched” is available, apply weak **+0.20** and exclude from For You.
-3. `watched_liked` / `watched_disliked` are optional one-shot convenience events.
+1. The detail page collects a rating first (`rate_*`).
+2. **Seen it — skip rating** sends `watched`: weak **+0.20**, intent tier, excluded from For You.
+3. `watched_liked` / `watched_disliked` are accepted by the API (`ACTIVE_INTERACTION_EVENT_TYPES` and the request schema) but no screen in the SPA sends them today; they are optional one-shot convenience events.
 
 ---
 
@@ -242,10 +241,8 @@ Source: `FEED_EXCLUDE_STATES` derived from policies where `exclude_from_feed=Tru
 
 | Endpoint | Allowed actions |
 |----------|-----------------|
-| `POST /onboarding/complete` | `haven't_seen`, `not_interested`, `rate_1`…`rate_4` (+ legacy `like`/`dislike` → `rate_3`/`rate_1`) |
-| `POST /titles/{id}/interactions` | Active set: ratings, watchlist, not_interested, skip, view, haven’t_seen, like, dislike |
-
-Future `watched*` types are defined in code; add them to the request schema when the UI ships.
+| `POST /onboarding/complete` | `haven't_seen`, `not_interested`, `mid`, `rate_1`…`rate_4` (+ legacy `like`/`dislike` → `rate_3`/`rate_1`) |
+| `POST /titles/{id}/interactions` | `like`, `dislike`, `watchlist`, `not_interested`, `clear`, `skip`, `view`, `haven't_seen`, `mid`, `rate_1`…`rate_4`, `watched`, `watched_liked`, `watched_disliked` |
 
 ---
 
