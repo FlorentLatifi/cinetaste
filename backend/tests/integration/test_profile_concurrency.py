@@ -14,10 +14,12 @@ import asyncio
 from uuid import uuid4
 
 import pytest
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import app.application.taste_service as taste_service_module
 from app.application.taste_service import TasteService
+from app.application.taste_summary import IMPORT_OVERLAY_KEY
 from app.infrastructure.db.models.interaction import InteractionEvent
 from app.infrastructure.db.models.taste import TasteProfile
 from app.infrastructure.db.models.user import User
@@ -44,6 +46,34 @@ async def _rate(user_id, title_id, event_type: str = "rate_4", weight: float = 1
 
 def _director_of(title) -> str:
     return next(k for k in title.extra["feature_snapshot"] if k.startswith("person:director:"))
+
+
+async def _wait_until_blocked_by(
+    holder_pid: int, waiter: asyncio.Task, timeout: float = 10
+) -> None:
+    """Return once some backend is waiting on a lock that ``holder_pid`` holds.
+
+    Pins the interleaving instead of sleeping and hoping: the caller then
+    knows the other transaction is parked on its uncommitted write.
+    """
+    deadline = asyncio.get_running_loop().time() + timeout
+    async with async_session_factory() as probe:
+        while asyncio.get_running_loop().time() < deadline:
+            if waiter.done():
+                await waiter  # surface its error, if it failed before blocking
+                pytest.fail("the other transaction finished without waiting on the holder")
+            blocked = await probe.scalar(
+                text(
+                    "SELECT count(*) FROM pg_stat_activity "
+                    "WHERE :holder = ANY(pg_blocking_pids(pid))"
+                ),
+                {"holder": holder_pid},
+            )
+            await probe.rollback()  # pg_stat_activity is a per-transaction snapshot
+            if blocked:
+                return
+            await asyncio.sleep(0.01)
+    pytest.fail(f"nothing waited on backend {holder_pid} within {timeout}s")
 
 
 async def test_first_bump_creates_the_profile_at_version_one(db_session: AsyncSession) -> None:
@@ -153,3 +183,103 @@ async def test_overlapping_rebuilds_keep_the_latest_rating(
         assert _director_of(second) in profile.features, "the newest rating was lost"
         assert _director_of(first) in profile.features
         assert profile.version == 2
+
+
+_LIKES = [{"key": "genre:drama", "weight": 1.0}]
+
+
+@pytest.mark.parametrize(
+    ("operation", "expected_version", "has_overlay"),
+    [
+        # The overlay is upserted at the bump's version, then the rebuild bumps it.
+        (lambda taste, uid: taste.merge_taste_snapshot(uid, likes=_LIKES, dislikes=[]), 2, True),
+        (lambda taste, uid: taste.merge_taste_snapshot(uid, likes=[], dislikes=[]), 1, False),
+        (lambda taste, uid: taste.clear_import_overlay(uid), 1, False),
+    ],
+    ids=["import", "empty-import", "clear"],
+)
+async def test_import_racing_a_first_rating_both_commit(
+    db_session: AsyncSession, operation, expected_version: int, has_overlay: bool
+) -> None:
+    """An import or clear must not fail when the user's first rating creates the row.
+
+    The rating request's bump takes no advisory lock, by design. So for a user
+    with no profile yet, import reads "no row", the bump inserts one, and
+    import's own INSERT waits on it. A plain INSERT then fails on the primary
+    key once the rating commits, and the import returns a 500.
+    """
+    user = await _user(db_session)
+
+    async def import_or_clear() -> int:
+        async with async_session_factory() as session:
+            profile = await operation(TasteService(session), user.id)
+            await session.commit()
+            return profile.version
+
+    async with async_session_factory() as rating:
+        assert await TasteService(rating).bump_profile_version(user.id) == 1
+        rating_pid = await rating.scalar(select(func.pg_backend_pid()))
+
+        other = asyncio.create_task(import_or_clear())
+        try:
+            await _wait_until_blocked_by(rating_pid, other)
+        except BaseException:
+            other.cancel()
+            raise
+        await rating.commit()
+
+    assert await asyncio.wait_for(other, timeout=10) == expected_version
+
+    async with async_session_factory() as session:
+        profile = await session.get(TasteProfile, user.id)
+        assert profile.version == expected_version
+        assert (IMPORT_OVERLAY_KEY in profile.features) is has_overlay
+
+
+async def test_two_first_actions_on_one_title_both_commit(db_session: AsyncSession) -> None:
+    """Two tabs act on a title neither has touched before, at the same moment.
+
+    Both used to find no user_title_state row to lock, both inserted one, and
+    the second failed on uq_user_title_state (a 500). Now the second waits for
+    the first, then derives the state from both events.
+    """
+    from app.infrastructure.db.models.interaction import UserTitleState
+
+    user = await _user(db_session)
+    title = (await seed_catalog(db_session, count=6))[0]
+    await db_session.commit()
+
+    async with async_session_factory() as first:
+        await TasteService(first).record_interaction(
+            user_id=user.id, title_id=title.id, event_type="watchlist", recompute=False
+        )
+        holder = await first.scalar(text("SELECT pg_backend_pid()"))
+
+        async def second_tab() -> None:
+            async with async_session_factory() as second:
+                await TasteService(second).record_interaction(
+                    user_id=user.id, title_id=title.id, event_type="rate_4", recompute=False
+                )
+                await second.commit()
+
+        waiter = asyncio.create_task(second_tab())
+        await _wait_until_blocked_by(holder, waiter)
+        await first.commit()
+        await waiter  # raised IntegrityError before the fix
+
+    async with async_session_factory() as check:
+        rows = (
+            await check.scalars(
+                select(UserTitleState).where(
+                    UserTitleState.user_id == user.id, UserTitleState.title_id == title.id
+                )
+            )
+        ).all()
+        events = await check.scalar(
+            select(func.count())
+            .select_from(InteractionEvent)
+            .where(InteractionEvent.user_id == user.id, InteractionEvent.title_id == title.id)
+        )
+    assert len(rows) == 1
+    assert rows[0].state == "like"  # the rating outranks the earlier watchlist
+    assert events == 2

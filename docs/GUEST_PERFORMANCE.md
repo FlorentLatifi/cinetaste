@@ -144,8 +144,18 @@ Cost of the instrumentation: one `ContextVar` read per SQL statement and a few
   10 s, each follower builds the deck itself, i.e. exactly the old behaviour. Per process,
   not across workers. A cold-cache arrival in the instant the leader finishes can cause one
   extra build (benign).
-- **No single-flight for slates.** Two identical requests arriving together both rank
-  (once, then it is cached). Rare in practice; `SingleFlight` can be reused if it is not.
+- **Slates are single-flight too** (same `SingleFlight`, keyed by the slate cache key, so a
+  different limit or different answers never share). 40 simultaneous *identical* cold requests
+  used to take 10 rank slots' worth of the cap and get **30 of them refused with 503**
+  (70 SQL statements); now one request ranks and 39 share its result: 40/40 served, 0 shed,
+  7 statements, one distinct body, ~140 ms wall (local, in-process, median of 3 x 6 rounds).
+  Requests with *different* answers are unaffected and still capped. What is shared is the
+  serialized response, never ORM objects (the leader's session may roll back or close while a
+  follower reads). A rejection (400) or a refusal (503) is never shared: each caller is
+  validated and gated on its own. A follower waits at most 10 s for the leader, then does the
+  work itself. Followers hold no rank slot and no DB connection while waiting. The timing log
+  shows `outcome=shared` and `flight_wait_ms` for them. It also applies when the slate cache
+  is turned off (`GUEST_SLATE_CACHE_TTL_SECONDS=0`): in-flight sharing is not caching.
 - **Slate cache keys keep answer order.** Order is the event order the profile builder
   sees and was not proven irrelevant, so reordered answers are a different entry. Lower hit
   rate, never a wrong answer.

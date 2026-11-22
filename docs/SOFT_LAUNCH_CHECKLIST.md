@@ -39,7 +39,7 @@ rest is already in the code and is listed so it can be checked, not redone.
       keeps the free API from sleeping.
       `SENTRY_DSN` (API) and `VITE_SENTRY_DSN` (SPA) are optional; the CSP
       already allows Sentry.
-- [ ] **TMDb logo** at `frontend/public/tmdb.svg`. The required wording is
+- [x] **TMDb logo** at `frontend/public/tmdb.svg`. The required wording is
       already in the footer; the mark appears once the file exists.
 - [ ] **Own domain (optional).** Add it to `TRUSTED_HOSTS`, `CORS_ORIGINS` and
       `PUBLIC_APP_URL` on the API and to `VITE_SITE_URL` before pointing DNS.

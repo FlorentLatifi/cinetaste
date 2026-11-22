@@ -593,3 +593,185 @@ async def test_a_failing_deck_build_fails_only_the_leader(
     statuses = sorted(r.status_code for r in responses)
     assert statuses == [200] * 5 + [503], "followers do not inherit the leader's error"
     assert len(calls) == 6, "each follower then built the deck itself, as it did before single-flight"
+
+
+# ------------------------------------------------------------ slate single-flight
+
+
+def _tiny_cap_settings():  # noqa: ANN202
+    return get_settings().model_copy(
+        update={"guest_rank_max_concurrent": 1, "guest_rank_max_wait_seconds": 0.05}
+    )
+
+
+def _slow_slate(calls: list[int], *, fail_first: bool = False):  # noqa: ANN202
+    from app.application.recommendation_service import RecommendationService
+    from app.domain.exceptions import AppError
+
+    real = RecommendationService.guest_slate
+
+    async def wrapped(self, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003, ANN202
+        calls.append(len(calls) + 1)
+        await asyncio.sleep(0.25)
+        if fail_first and len(calls) == 1:
+            raise AppError("ranking unavailable", status_code=503, code="rank_down")
+        return await real(self, *args, **kwargs)
+
+    return patch.object(RecommendationService, "guest_slate", wrapped)
+
+
+async def test_identical_cold_requests_are_ranked_once_and_none_are_shed(
+    client: AsyncClient, db_session: AsyncSession, api_prefix: str, caplog
+) -> None:  # noqa: ANN001
+    from app.api.deps import get_settings_dep
+    from app.main import app
+
+    titles = await seed_catalog(db_session)
+    url = f"{api_prefix}/guest/recommendations"
+    body = {"reactions": _reactions(titles), "limit": 8}
+    calls: list[int] = []
+    app.dependency_overrides[get_settings_dep] = _tiny_cap_settings
+    try:
+        with _slow_slate(calls), caplog.at_level(logging.INFO, logger="cinetaste.guest.timing"):
+            responses = await asyncio.gather(*(client.post(url, json=body) for _ in range(12)))
+    finally:
+        app.dependency_overrides.pop(get_settings_dep, None)
+
+    # A cap of one slot and a 50 ms wait would refuse almost all of 12 simultaneous
+    # rankings; identical requests are one ranking, so none of them is refused.
+    assert [r.status_code for r in responses] == [200] * 12
+    assert len(calls) == 1
+    assert len({r.text for r in responses}) == 1
+
+    slate = [line for line in _timing_lines(caplog) if line["event"] == "guest_slate_timing"]
+    assert sorted(line["outcome"] for line in slate) == ["miss"] + ["shared"] * 11
+    follower = next(line for line in slate if line["outcome"] == "shared")
+    assert float(follower["flight_wait_ms"]) > 0
+    assert "rank_ms" not in follower and "gate_wait_ms" not in follower and follower["db_statements"] == "0"
+
+
+async def test_different_answers_are_still_capped_not_coalesced(
+    client: AsyncClient, db_session: AsyncSession, api_prefix: str
+) -> None:
+    """The contrast: single-flight must not turn the cap off for requests that differ."""
+    from app.api.deps import get_settings_dep
+    from app.main import app
+
+    titles = await seed_catalog(db_session)
+    url = f"{api_prefix}/guest/recommendations"
+    bodies = [
+        {
+            "reactions": [
+                {"title_id": str(titles[i].id), "action": "rate_4"},
+                {"title_id": str(titles[i + 1].id), "action": "rate_3"},
+                {"title_id": str(titles[i + 2].id), "action": "rate_2"},
+            ],
+            "limit": 8,
+        }
+        for i in range(8)
+    ]
+    calls: list[int] = []
+    app.dependency_overrides[get_settings_dep] = _tiny_cap_settings
+    try:
+        with _slow_slate(calls):
+            responses = await asyncio.gather(*(client.post(url, json=b) for b in bodies))
+    finally:
+        app.dependency_overrides.pop(get_settings_dep, None)
+    statuses = [r.status_code for r in responses]
+    assert 503 in statuses, "distinct work beyond the cap is still refused"
+    assert 200 in statuses
+    for r in responses:
+        if r.status_code == 503:
+            assert r.json()["code"] == "guest_busy" and int(r.headers["Retry-After"]) >= 1
+
+
+async def test_a_different_limit_is_a_different_flight(
+    client: AsyncClient, db_session: AsyncSession, api_prefix: str
+) -> None:
+    titles = await seed_catalog(db_session)
+    url = f"{api_prefix}/guest/recommendations"
+    calls: list[int] = []
+    with _slow_slate(calls):
+        a, b = await asyncio.gather(
+            client.post(url, json={"reactions": _reactions(titles), "limit": 6}),
+            client.post(url, json={"reactions": _reactions(titles), "limit": 9}),
+        )
+    assert (a.status_code, b.status_code) == (200, 200)
+    assert len(calls) == 2
+    assert len(a.json()["items"]) <= 6 and len(b.json()["items"]) <= 9
+
+
+async def test_a_failing_ranking_fails_only_the_leader(
+    client: AsyncClient, db_session: AsyncSession, api_prefix: str
+) -> None:
+    titles = await seed_catalog(db_session)
+    url = f"{api_prefix}/guest/recommendations"
+    body = {"reactions": _reactions(titles), "limit": 8}
+    calls: list[int] = []
+    with _slow_slate(calls, fail_first=True):
+        responses = await asyncio.gather(*(client.post(url, json=body) for _ in range(6)))
+    assert sorted(r.status_code for r in responses) == [200] * 5 + [503]
+    assert len(calls) == 6, "followers then ranked for themselves, as before single-flight"
+    # And what the survivors got is a real slate, not a half-shared failure.
+    good = [r for r in responses if r.status_code == 200]
+    assert len({r.text for r in good}) == 1 and good[0].json()["items"]
+
+
+async def test_identical_invalid_requests_each_get_their_own_400(
+    client: AsyncClient, db_session: AsyncSession, api_prefix: str
+) -> None:
+    """A rejection is never shared or cached: every caller is validated on its own."""
+    titles = await seed_catalog(db_session)
+    url = f"{api_prefix}/guest/recommendations"
+    body = {"reactions": _reactions(titles)[:2]}  # too few ratings
+    responses = await asyncio.gather(*(client.post(url, json=body) for _ in range(5)))
+    assert {r.status_code for r in responses} == {400}
+    assert {r.json()["code"] for r in responses} == {"guest_insufficient_ratings"}
+    assert (await client.post(url, json=body)).status_code == 400
+
+
+async def test_the_shared_slate_matches_a_request_served_on_its_own(
+    client: AsyncClient, db_session: AsyncSession, api_prefix: str
+) -> None:
+    from app.infrastructure.cache import reset_cache_for_tests
+
+    titles = await seed_catalog(db_session)
+    url = f"{api_prefix}/guest/recommendations"
+    body = {"reactions": _reactions(titles), "limit": 10}
+    calls: list[int] = []
+    with _slow_slate(calls):
+        burst = await asyncio.gather(*(client.post(url, json=body) for _ in range(5)))
+    await reset_cache_for_tests()
+    alone = await client.post(url, json=body)
+    assert {r.text for r in burst} == {alone.text}
+
+
+async def test_guest_slate_is_films_only_while_films_can_fill_it(
+    client: AsyncClient, db_session: AsyncSession, api_prefix: str
+) -> None:
+    """The guest page promises films. Live (Nov 2026) a guest slate held two anime
+    TV series; series now come in only if there are not enough films."""
+    titles = await seed_catalog(db_session)
+    series = titles[12:20]
+    for title in series:
+        title.media_type = "tv"
+        snapshot = dict(title.extra["feature_snapshot"])
+        snapshot.pop("media:movie", None)
+        snapshot["media:tv"] = 0.6
+        title.extra = {**title.extra, "feature_snapshot": snapshot}
+    await db_session.commit()
+
+    reactions = [
+        {"title_id": str(titles[0].id), "action": "rate_4"},
+        {"title_id": str(titles[6].id), "action": "rate_3"},
+        {"title_id": str(titles[1].id), "action": "rate_1"},
+    ]
+    res = await client.post(
+        f"{api_prefix}/guest/recommendations", json={"reactions": reactions, "limit": 8}
+    )
+    assert res.status_code == 200, res.text
+    items = res.json()["items"]
+    assert len(items) == 8
+    assert all(i["title"]["media_type"] == "movie" for i in items), [
+        (i["title"]["name"], i["title"]["media_type"]) for i in items
+    ]

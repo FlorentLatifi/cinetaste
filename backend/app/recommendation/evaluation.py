@@ -38,6 +38,7 @@ import numpy as np
 
 from app.domain.taste_signals import EffectiveSignal, effective_title_signals
 from app.recommendation import metrics as M
+from app.recommendation.mix import snapshot_language, snapshot_media
 from app.recommendation.pipeline import (
     DEFAULT_WEIGHTS,
     CandidateChannels,
@@ -203,6 +204,7 @@ class _UserContext:
         built = build_profile(signals.values(), titles)
         self.vector = built.vector
         self.features = built.features
+        self.mix = built.mix
         self.seen = {event[0] for event in user.train_events}
 
     @cached_property
@@ -287,6 +289,8 @@ class RankingStrategy:
     max_per_genre: int | None = None
     max_per_director: int | None = None
     max_per_collection: int | None = None
+    max_per_language: int | None = None
+    max_tv: int | None = None
     candidate_pool: str = "catalog"
 
     def __call__(self, user: EvalUser, dataset: Dataset, k: int) -> list[RankedItem]:
@@ -306,6 +310,9 @@ class RankingStrategy:
             max_per_genre=self.max_per_genre,
             max_per_director=self.max_per_director,
             max_per_collection=self.max_per_collection,
+            max_per_language=self.max_per_language,
+            max_tv=self.max_tv,
+            taste_mix=ctx.mix,
             with_reasons=True,
         )
 
@@ -330,6 +337,8 @@ def make_ranking_strategy(
     max_per_genre: int | None = None,
     max_per_director: int | None = None,
     max_per_collection: int | None = None,
+    max_per_language: int | None = None,
+    max_tv: int | None = None,
     candidate_pool: str = "catalog",
 ) -> RankingStrategy:
     """The production ranker with a given configuration (caps default to production's)."""
@@ -340,6 +349,8 @@ def make_ranking_strategy(
         max_per_genre=max_per_genre,
         max_per_director=max_per_director,
         max_per_collection=max_per_collection,
+        max_per_language=max_per_language,
+        max_tv=max_tv,
         candidate_pool=candidate_pool,
     )
 
@@ -398,6 +409,8 @@ DEFAULT_STRATEGIES: dict[str, Strategy] = {
         max_per_genre=NO_CAP,
         max_per_director=NO_CAP,
         max_per_collection=NO_CAP,
+        max_per_language=NO_CAP,
+        max_tv=NO_CAP,
     ),
     "sparse_only": make_ranking_strategy(
         weights=RankingWeights(similarity=0.0, sparse_positive=1.0, sparse_negative=0.3),
@@ -405,9 +418,16 @@ DEFAULT_STRATEGIES: dict[str, Strategy] = {
         max_per_genre=NO_CAP,
         max_per_director=NO_CAP,
         max_per_collection=NO_CAP,
+        max_per_language=NO_CAP,
+        max_tv=NO_CAP,
     ),
     "hybrid_no_diversity": make_ranking_strategy(
-        mmr_lambda=1.0, max_per_genre=NO_CAP, max_per_director=NO_CAP, max_per_collection=NO_CAP
+        mmr_lambda=1.0,
+        max_per_genre=NO_CAP,
+        max_per_director=NO_CAP,
+        max_per_collection=NO_CAP,
+        max_per_language=NO_CAP,
+        max_tv=NO_CAP,
     ),
     "hybrid": make_ranking_strategy(mmr_lambda=PROD_MMR_LAMBDA),
     "hybrid_with_exploration": make_ranking_strategy(
@@ -426,15 +446,22 @@ DEFAULT_STRATEGIES: dict[str, Strategy] = {
 }
 
 
-_CAP_OVERRIDES = ("max_per_genre", "max_per_director", "max_per_collection")
+_CAP_OVERRIDES = (
+    "max_per_genre",
+    "max_per_director",
+    "max_per_collection",
+    "max_per_language",
+    "max_tv",
+)
 
 
 def production_variant(**overrides: float) -> RankingStrategy:
     """``production`` with some weights — or slate caps — changed.
 
     Weight names are ``RankingWeights`` fields; ``max_per_genre``,
-    ``max_per_director`` and ``max_per_collection`` override a cap
-    (``max_per_director=999`` turns the director cap off).
+    ``max_per_director``, ``max_per_collection``, ``max_per_language`` and
+    ``max_tv`` override a cap (``max_per_director=999`` turns the director cap
+    off; ``max_per_language=999,max_tv=999`` turn off the taste-mix caps).
     """
     caps = {name: int(overrides.pop(name)) for name in _CAP_OVERRIDES if name in overrides}
     return make_ranking_strategy(
@@ -505,6 +532,18 @@ def _user_row(
     # Franchise repetition: share of slates where one TMDb collection holds 2+ titles.
     collections = Counter(t.collection for t in slate_titles if t.collection is not None)
     row["franchise_repeat"] = 1.0 if max(collections.values(), default=0) > 1 else 0.0
+    # Language concentration and format: the largest share one original
+    # language holds in the slate, and the share of TV.
+    snapshots = [t.extra.get("feature_snapshot") or {} for t in slate_titles]
+    languages = Counter(lang for snap in snapshots if (lang := snapshot_language(snap)))
+    row["language_max_share"] = (
+        max(languages.values()) / len(slate_titles) if languages and slate_titles else None
+    )
+    row["tv_share"] = (
+        sum(1 for snap in snapshots if snapshot_media(snap) == "tv") / len(slate_titles)
+        if slate_titles
+        else None
+    )
 
     # Negative feedback: held-out dislikes should not be recommended, and the
     # score should place them below held-out likes.
@@ -666,6 +705,8 @@ SAFETY_COLUMNS = (
     "director_max",
     "director_over_limit",
     "franchise_repeat",
+    "language_max_share",
+    "tv_share",
     "gem_labels",
     "gem_fame_pct",
     "gem_famous_share",

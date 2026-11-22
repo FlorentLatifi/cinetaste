@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -161,8 +161,17 @@ class TasteService:
         policy = get_policy(event_type)
         event_weight = policy.weight if weight is None else weight
 
-        # Lock the row (when it exists) so two writes for the same title are
-        # serialised: the second one then reads the first one's event below.
+        # Make sure the row exists, then lock it, so two writes for the same
+        # title are serialised: the second one then reads the first one's event
+        # below. Without the insert, two *first* actions on a title (two tabs)
+        # both found no row to lock and both inserted one — the second hit
+        # uq_user_title_state and returned a 500. ON CONFLICT DO NOTHING waits
+        # for the other transaction instead and then leaves its row alone.
+        await self._session.execute(
+            pg_insert(UserTitleState)
+            .values(id=uuid4(), user_id=user_id, title_id=title_id, state="none")
+            .on_conflict_do_nothing(index_elements=["user_id", "title_id"])
+        )
         state = await self._session.scalar(
             select(UserTitleState)
             .where(
@@ -170,6 +179,7 @@ class TasteService:
                 UserTitleState.title_id == title_id,
             )
             .with_for_update()
+            .execution_options(populate_existing=True)
         )
         # The durable state is derived from this title's whole event log, not
         # from the new event alone: "rate_4 → watchlist" must stay a rating.
@@ -257,6 +267,40 @@ class TasteService:
             if isinstance(obj, TasteProfile) and obj.user_id == user_id:
                 self._session.expire(obj)
 
+    async def _upsert_profile(
+        self, user_id: UUID, *, features: dict[str, Any] | None = None
+    ) -> TasteProfile:
+        """Write the profile row whether or not it exists yet, and return it.
+
+        Import and clear hold ``_lock_profile_rebuilds``, but the rating
+        request's ``bump_profile_version`` deliberately does not. So for a user
+        with no profile, a first rating can create the row between this
+        transaction reading "no row" and writing one. A plain INSERT then waits
+        on the rating's row and fails on the primary key once it commits,
+        taking the import or clear down with it. An upsert resolves that in
+        SQL, as the bump does.
+
+        ``features`` replaces the row's features; ``None`` creates an empty
+        row or leaves an existing one untouched. The version is never changed
+        here: a new row starts at 1, and a caller that changes the profile
+        rebuilds it next, which bumps the version.
+        """
+        stmt = pg_insert(TasteProfile).values(
+            user_id=user_id, version=1, features=features or {}, vector=None
+        )
+        if features is None:
+            # A no-op SET rather than DO NOTHING, which would return no row.
+            updates: dict[str, Any] = {"version": TasteProfile.version}
+        else:
+            updates = {"features": stmt.excluded.features, "updated_at": func.now()}
+        stmt = stmt.on_conflict_do_update(
+            index_elements=[TasteProfile.user_id], set_=updates
+        ).returning(TasteProfile)
+        result = await self._session.execute(
+            stmt, execution_options={"populate_existing": True}
+        )
+        return result.scalar_one()
+
     async def recompute_profile(self, user_id: UUID) -> TasteProfile:
         await self._lock_profile_rebuilds(user_id)
         events = (
@@ -335,25 +379,11 @@ class TasteService:
         if not overlay and not likes and not dislikes:
             # Nothing to merge — still return profile
             if profile is None:
-                profile = TasteProfile(
-                    user_id=user_id, version=1, features={}, vector=None
-                )
-                self._session.add(profile)
-                await self._session.flush()
+                profile = await self._upsert_profile(user_id)
             return profile
 
         existing_features[IMPORT_OVERLAY_KEY] = overlay
-        if profile is None:
-            profile = TasteProfile(
-                user_id=user_id,
-                version=1,
-                features=existing_features,
-                vector=None,
-            )
-            self._session.add(profile)
-        else:
-            profile.features = existing_features
-        await self._session.flush()
+        await self._upsert_profile(user_id, features=existing_features)
         return await self.recompute_profile(user_id)
 
     async def clear_import_overlay(self, user_id: UUID) -> TasteProfile:
@@ -361,10 +391,8 @@ class TasteService:
         await self._lock_profile_rebuilds(user_id)  # before the row; see merge_taste_snapshot
         profile = await self._session.get(TasteProfile, user_id, populate_existing=True)
         if profile is None:
-            profile = TasteProfile(user_id=user_id, version=1, features={}, vector=None)
-            self._session.add(profile)
-            await self._session.flush()
-            return profile
+            # No overlay to clear and nothing to rebuild; just make sure the row exists.
+            return await self._upsert_profile(user_id)
 
         features = dict(profile.features or {})
         if IMPORT_OVERLAY_KEY in features:

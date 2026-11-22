@@ -16,6 +16,8 @@ Reading the line (``guest_slate_timing``):
 * A phase's time minus the ``db_ms`` inside it is Python work plus what the driver does
   not report as a cursor execute: pooled-connection checkout and pre-ping, BEGIN and
   ROLLBACK. A large gap there is also a database-link signal.
+* ``flight_wait_ms`` is time a request spent waiting for another request computing the same
+  thing (single-flight); ``outcome=shared`` means it used that result and did no work itself.
 * ``pool`` says whether the shared popularity slice was served from memory or loaded;
   ``pool_load_ms`` (only when loaded) is part of ``candidates_ms``, not on top of it.
 * ``validate`` + ``profile`` + ``candidates`` + ``rank`` + ``serialize`` are the miss path;

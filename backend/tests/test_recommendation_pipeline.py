@@ -412,8 +412,9 @@ def test_low_rating_weight_is_off_by_default_and_demotes_when_on() -> None:
             weights=weights,
         )[0].title_id
 
-    assert top(DEFAULT_WEIGHTS) == poor.id  # tie → input order
-    assert top(RankingWeights(low_rating=0.1)) == good.id
+    # Quality off, so only the low-rating penalty can separate them.
+    assert top(RankingWeights(quality=0.0)) == poor.id  # tie → input order
+    assert top(RankingWeights(quality=0.0, low_rating=0.1)) == good.id
 
 
 def test_quality_percentiles_shrink_thin_ratings_toward_the_mean() -> None:
@@ -426,9 +427,9 @@ def test_quality_percentiles_shrink_thin_ratings_toward_the_mean() -> None:
     assert quality_percentiles(np.array([]), np.array([])).size == 0
 
 
-def test_quality_weight_is_off_by_default_and_promotes_when_on() -> None:
-    """Off by default (a weight change needs the owner); when on, it promotes."""
-    assert DEFAULT_WEIGHTS.quality == 0.0
+def test_quality_weight_is_on_by_default_and_promotes() -> None:
+    """0.05 by default (owner's decision, docs/EVALUATION.md); it promotes."""
+    assert DEFAULT_WEIGHTS.quality == pytest.approx(0.05)
     # Both below the gem threshold (★7.2), so only the quality prior separates them.
     better = FakeTitle(name="Better", genres=["Drama"], keywords=["family"], vote_average=7.1)
     worse = FakeTitle(name="Worse", genres=["Drama"], keywords=["family"], vote_average=6.0)
@@ -446,8 +447,8 @@ def test_quality_weight_is_off_by_default_and_promotes_when_on() -> None:
             weights=weights,
         )[0].title_id
 
-    assert top(DEFAULT_WEIGHTS) == worse.id  # tie → input order
-    assert top(RankingWeights(quality=0.1)) == better.id
+    assert top(RankingWeights(quality=0.0)) == worse.id  # tie → input order
+    assert top(DEFAULT_WEIGHTS) == better.id
 
 
 def test_rank_titles_is_channels_then_blend_then_select(thriller_catalog: list[FakeTitle]) -> None:

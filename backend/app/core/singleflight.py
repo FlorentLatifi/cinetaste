@@ -28,8 +28,11 @@ computation, never a wrong answer.
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import Awaitable, Callable
 from typing import Literal
+
+from app.core.timing import add_phase_seconds
 
 Outcome = Literal["hit", "computed", "shared", "fallback"]
 
@@ -71,10 +74,14 @@ class SingleFlight[T]:
 
         flight = self._flights.get(key)
         if flight is not None:
+            waited_from = time.perf_counter()
             try:
                 await asyncio.wait_for(flight.done.wait(), timeout=wait_seconds)
             except TimeoutError:
                 pass
+            finally:
+                # For the request timing log: how long this caller queued behind the leader.
+                add_phase_seconds("flight_wait", time.perf_counter() - waited_from)
             if flight.result is not None:
                 return flight.result, "shared"
             return await compute(), "fallback"

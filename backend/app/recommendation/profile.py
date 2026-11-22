@@ -22,6 +22,7 @@ from app.domain.taste_signals import (
 )
 from app.recommendation.embeddings import blend_vectors, normalize_feature_families
 from app.recommendation.explanations import build_anchor_from_title, merge_explain_memory
+from app.recommendation.mix import TASTE_MIX_KEY, TasteMix, taste_mix
 
 # Any single sparse feature is clamped to ±FEATURE_CAP before family normalisation.
 FEATURE_CAP = 4.5
@@ -47,10 +48,15 @@ class BuiltProfile:
     features: dict[str, float]
     vector: list[float] | None
     anchors: list[dict[str, Any]]
+    # Share of positive taste per original language and per format; the ranker
+    # sizes its language and TV caps from it (app.recommendation.mix).
+    mix: TasteMix = field(default_factory=TasteMix)
 
     def features_with_memory(self) -> dict[str, Any]:
-        """Scoring features plus the explain-memory block stored on TasteProfile."""
-        return merge_explain_memory(self.features, self.anchors)
+        """Scoring features plus the explain-memory and taste-mix blocks stored on TasteProfile."""
+        out = merge_explain_memory(self.features, self.anchors)
+        out[TASTE_MIX_KEY] = self.mix.as_json()
+        return out
 
 
 def build_profile(
@@ -68,10 +74,13 @@ def build_profile(
       disliked titles makes the vector point "away from everything", which
       retrieves arbitrary titles; dislikes act through the sparse penalty instead.
     * Anchors: strongly liked titles, cited in "Because you liked X" reasons.
+    * Mix: share of positive signal per original language and format, from the
+      effective weights (not the clamped features), for the slate caps.
     """
     accumulated: dict[str, float] = {}
     positives: list[tuple[Sequence[float], float]] = []
     anchors: list[dict[str, Any]] = []
+    weighted_snapshots: list[tuple[Mapping[str, Any], float]] = []
 
     # Most recent first so equally strong anchors are ordered by recency.
     for signal in sorted(signals, key=lambda s: s.created_at, reverse=True):
@@ -89,6 +98,7 @@ def build_profile(
 
         if signal.weight > 0 and title.embedding is not None:
             positives.append((title.embedding, signal.weight))
+        weighted_snapshots.append((title.feature_snapshot, signal.weight))
 
         if (
             signal.event_type in EXPLAIN_ANCHOR_EVENT_TYPES
@@ -118,4 +128,5 @@ def build_profile(
         features=normalize_feature_families(clamped),
         vector=blend_vectors(positives),
         anchors=anchors,
+        mix=taste_mix(weighted_snapshots),
     )
