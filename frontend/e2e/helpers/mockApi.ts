@@ -80,6 +80,8 @@ export type ApiMockHandle = {
   interactionPosts: () => number;
   /** Every interaction in arrival order, with timing (for ordering races). */
   interactionLog: () => InteractionLogEntry[];
+  /** Number of POST /auth/refresh calls so far. */
+  refreshCalls: () => number;
 };
 
 export async function installApiMock(
@@ -261,10 +263,21 @@ export async function installApiMock(
       const body = JSON.parse(req.postData() || "{}");
       if (body.password !== MOCK_SIGNUP_PASSWORD) {
         await route.fulfill(
-          json({ message: "Password is incorrect", code: "invalid_credentials" }, 401),
+          // 403 like the API: a 401 would send the client off to refresh.
+          json({ message: "Password is incorrect", code: "invalid_credentials" }, 403),
         );
         return;
       }
+      await route.fulfill({ status: 204, body: "" });
+      return;
+    }
+
+    if (method === "POST" && path === "/auth/forgot-password") {
+      await route.fulfill(json({ message: "If an account exists…", dev_reset_token: null }));
+      return;
+    }
+
+    if (method === "POST" && path === "/auth/reset-password") {
       await route.fulfill({ status: 204, body: "" });
       return;
     }
@@ -699,5 +712,6 @@ export async function installApiMock(
   return {
     interactionPosts: () => interactionPosts,
     interactionLog: () => interactionLog.map((e) => ({ ...e })),
+    refreshCalls: () => refreshCalls,
   };
 }

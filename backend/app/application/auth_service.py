@@ -18,7 +18,7 @@ from app.core.security import (
     verify_password_async,
 )
 from app.core.throttle import guard_identity, record_attempt
-from app.domain.exceptions import AppError, ConflictError, UnauthorizedError
+from app.domain.exceptions import AppError, ConflictError, ForbiddenError, UnauthorizedError
 from app.infrastructure.db.models.user import (
     EmailVerificationToken,
     PasswordResetToken,
@@ -549,9 +549,22 @@ class AuthService:
         return user
 
     async def delete_account(self, *, user: User, password: str) -> None:
-        """Permanently delete the user and cascaded data (taste, interactions, tokens)."""
+        """Permanently delete the user and cascaded data (taste, interactions, tokens).
+
+        A wrong password is a 403, not a 401. The caller is already
+        authenticated, and the SPA reads every 401 as "access token expired":
+        it refreshed the session and resent the request, so each wrong
+        password was checked twice and rotated the refresh token, and a
+        failed refresh signed the person out for mistyping.
+
+        Guesses are throttled per account: anyone holding a stolen access
+        token could otherwise use this endpoint to brute-force the password.
+        """
+        identity = str(user.id)
+        await guard_identity(identity, scope="delete", settings=self._settings)
         if not await verify_password_async(password, user.password_hash):
-            raise UnauthorizedError("Password is incorrect", code="invalid_credentials")
+            await record_attempt(identity, scope="delete", settings=self._settings)
+            raise ForbiddenError("Password is incorrect", code="invalid_credentials")
 
         await self._session.execute(delete(RefreshToken).where(RefreshToken.user_id == user.id))
         await self._session.execute(

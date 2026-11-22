@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -157,6 +158,29 @@ class RecommendationSlateOut(BaseModel):
         default=None,
         description="Identifies this slate (same id while served from cache)",
     )
+
+
+class ExternalTitleOut(BaseModel):
+    """A TMDb match for a search, which may not be in the catalog yet."""
+
+    tmdb_id: int
+    media_type: Literal["movie", "tv"]
+    name: str
+    year: int | None = None
+    overview: str | None = None
+    poster_url: str | None = None
+    title_id: UUID | None = Field(
+        default=None, description="Set when the title is already in the catalog"
+    )
+
+
+class TitleImportRequest(StrictModel):
+    media_type: Literal["movie", "tv"]
+    tmdb_id: int = Field(ge=1, le=2_000_000_000)
+
+
+class TitleImportOut(BaseModel):
+    id: UUID
 
 
 class InteractionRequest(StrictModel):

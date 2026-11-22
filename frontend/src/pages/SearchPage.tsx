@@ -4,6 +4,7 @@ import { ApiError } from "../api/client";
 import * as titlesApi from "../api/titles";
 import type { Title } from "../api/titles";
 import { CatalogSkeleton } from "../components/CatalogSkeleton";
+import { ExternalSearchResults } from "../components/ExternalSearchResults";
 import { LoadFailed } from "../components/LoadFailed";
 import { PosterCard } from "../components/PosterCard";
 import { useAuth } from "../features/auth/AuthContext";
@@ -142,7 +143,7 @@ export function SearchPage() {
 
       {searched && !loading && !results.length && !error && (
         <div className="callout" role="status">
-          No titles matched “{qParam}”. Try another spelling or a shorter query.
+          No titles in our catalog matched “{qParam}”.
         </div>
       )}
 
@@ -164,6 +165,14 @@ export function SearchPage() {
             </li>
           ))}
         </ul>
+      )}
+
+      {searched && !loading && !error && qParam && accessToken && (
+        <ExternalSearchResults
+          accessToken={accessToken}
+          query={qParam.trim()}
+          auto={results.length === 0}
+        />
       )}
     </section>
   );

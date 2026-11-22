@@ -805,6 +805,53 @@ test("Deleting the account ends on a page that says it worked", async ({ page })
   );
 });
 
+test("A wrong password on delete says so once, without refreshing the session", async ({
+  page,
+}) => {
+  const api = await installApiMock(page, { onboardingComplete: true });
+  await page.goto("/account?tab=danger");
+  await page.getByRole("heading", { name: "Delete account" }).waitFor();
+  const refreshesBefore = api.refreshCalls();
+
+  await page.locator('input[autocomplete="current-password"]').fill("not-my-password");
+  await page.getByLabel("Type DELETE to confirm").fill("DELETE");
+  await page.getByRole("button", { name: "Delete my account" }).click();
+
+  await expect(page.getByRole("alert")).toHaveText("Password is incorrect");
+  await expect(page).toHaveURL(/\/account\?tab=danger$/);
+  expect(api.refreshCalls()).toBe(refreshesBefore);
+});
+
+test("A reset link opened where you are still signed in still resets the password", async ({
+  page,
+}) => {
+  // The usual case: the email is opened in the browser that has an old session.
+  // The page used to redirect signed-in visitors home and lose the token.
+  await installApiMock(page, { onboardingComplete: true });
+  await page.goto("/reset-password?token=one-time-token-from-email");
+
+  await expect(page).toHaveURL(/\/reset-password\?token=/);
+  await expect(page.getByText("signs you out on every device")).toBeVisible();
+  await page.getByLabel("New password").fill("a-brand-new-pass-1");
+  await page.getByLabel("Confirm password").fill("a-brand-new-pass-1");
+  await page.getByRole("button", { name: "Update password" }).click();
+
+  // Every session was revoked server-side, so this one ends here too.
+  await expect(page).toHaveURL(/\/login$/);
+  await expect(page.getByText("Password updated. Sign in with your new password.")).toBeVisible();
+});
+
+test("Signed in, Account offers a password change by email", async ({ page }) => {
+  await installApiMock(page, { onboardingComplete: true });
+  await page.goto("/account");
+  await page.getByRole("link", { name: "Change password" }).click();
+
+  await expect(page).toHaveURL(/\/forgot-password$/);
+  await expect(page.getByLabel("Email")).toHaveValue(/@/);
+  await page.getByRole("button", { name: "Send reset link" }).click();
+  await expect(page.getByRole("link", { name: "Back to your account" })).toBeVisible();
+});
+
 test("Guest deck on a 390px phone: the progress bar never covers the first row's rating buttons", async ({
   page,
 }) => {

@@ -10,7 +10,7 @@ from app.api.deps import _issued_before_password_change
 from app.application.auth_service import AuthService
 from app.core.config import Settings
 from app.core.security import hash_password, hash_token, verify_password
-from app.domain.exceptions import AppError, UnauthorizedError
+from app.domain.exceptions import AppError, ForbiddenError, RateLimitedError
 from app.infrastructure.db.models.user import PasswordResetToken, User
 
 
@@ -161,8 +161,31 @@ async def test_delete_account_wrong_password() -> None:
     session = AsyncMock()
     user = _user("correct-horse")
     auth = AuthService(session, _settings())
-    with pytest.raises(UnauthorizedError):
+    # 403, not 401: the SPA treats 401 as an expired token and refreshes.
+    with pytest.raises(ForbiddenError) as exc:
         await auth.delete_account(user=user, password="wrong")
+    assert exc.value.status_code == 403
+    assert exc.value.code == "invalid_credentials"
+
+
+@pytest.mark.asyncio
+async def test_delete_account_password_guesses_are_capped(monkeypatch) -> None:
+    """A stolen access token must not turn delete into a password oracle."""
+    from app.infrastructure.cache import MemoryStore
+
+    fresh = MemoryStore()
+    monkeypatch.setattr("app.core.throttle.get_rate_limit_store", lambda: fresh)
+    session = AsyncMock()
+    user = _user("correct-horse")
+    auth = AuthService(session, _settings(rate_limit_account_failures=3))
+
+    for _ in range(3):
+        with pytest.raises(ForbiddenError):
+            await auth.delete_account(user=user, password="wrong")
+    # Out of budget: even the right password waits, so guessing stops paying.
+    with pytest.raises(RateLimitedError):
+        await auth.delete_account(user=user, password="correct-horse")
+    session.delete.assert_not_called()
 
 
 @pytest.mark.asyncio

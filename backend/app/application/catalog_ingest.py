@@ -484,6 +484,22 @@ class CatalogIngestService:
         await self._ensure_genres()
         return await self._upsert_from_detail("tv", await self._tmdb.get_tv(tmdb_id))
 
+    async def ingest_one(self, media_type: str, tmdb_id: int) -> str:
+        """Fetch and upsert one title on demand, inside the caller's transaction.
+
+        For a user adding a film the catalog lacks. Unlike ``upsert_movie``
+        it skips the genre-list prefetch, which costs two more TMDb calls and
+        commits: the title's own payload names its genres and
+        ``_write_titles`` creates any that are missing.
+        """
+        if media_type == "movie":
+            payload = await self._tmdb.get_movie(tmdb_id)
+        elif media_type == "tv":
+            payload = await self._tmdb.get_tv(tmdb_id)
+        else:
+            raise ValueError(f"Unsupported media_type: {media_type}")
+        return await self._upsert_from_detail(media_type, payload)
+
     # ------------------------------------------------------------- batch loop
 
     async def _ingest_ids(self, targets: list[tuple[str, int]]) -> dict[str, int]:

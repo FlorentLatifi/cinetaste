@@ -231,3 +231,36 @@ export function getCatalogStatus(accessToken: string) {
     ready_for_onboarding: boolean;
   }>("/catalog/status", {}, accessToken);
 }
+
+/** A TMDb match for a search; `title_id` is set when it's already in the catalog. */
+export type ExternalTitle = {
+  tmdb_id: number;
+  media_type: "movie" | "tv";
+  name: string;
+  year: number | null;
+  overview: string | null;
+  poster_url: string | null;
+  title_id: string | null;
+};
+
+/** Search all of TMDb, for titles the catalog doesn't have yet. */
+export function searchExternalTitles(accessToken: string, q: string) {
+  return apiFetch<ExternalTitle[]>(
+    `/titles/external-search?q=${encodeURIComponent(q)}`,
+    {},
+    accessToken,
+  );
+}
+
+/** Add a TMDb title to the catalog (no-op if present) and get its id to rate it. */
+export function importTitle(
+  accessToken: string,
+  media_type: ExternalTitle["media_type"],
+  tmdb_id: number,
+) {
+  return apiFetch<{ id: string }>(
+    "/titles/import",
+    { method: "POST", body: JSON.stringify({ media_type, tmdb_id }) },
+    accessToken,
+  );
+}

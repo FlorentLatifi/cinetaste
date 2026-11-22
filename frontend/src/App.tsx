@@ -159,22 +159,12 @@ export default function App() {
           </GuestOnly>
         }
       />
-      <Route
-        path="/forgot-password"
-        element={
-          <GuestOnly>
-            <ForgotPasswordPage />
-          </GuestOnly>
-        }
-      />
-      <Route
-        path="/reset-password"
-        element={
-          <GuestOnly>
-            <ResetPasswordPage />
-          </GuestOnly>
-        }
-      />
+      {/* Not GuestOnly: a signed-in browser has to reach these too. The reset
+          link usually opens where an old session is still alive, and the
+          redirect threw the one-time token away, so the person could not
+          reset at all. They are also how a signed-in person changes it. */}
+      <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+      <Route path="/reset-password" element={<ResetPasswordPage />} />
       {/* Try it without an account. Signed-in people already have the real
           thing, so they are sent home. */}
       <Route

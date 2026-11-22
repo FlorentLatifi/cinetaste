@@ -358,6 +358,11 @@ export function AccountPage() {
             <strong>Onboarding</strong> ·{" "}
             {user?.onboarding_completed_at ? "Complete" : "Not finished"}
           </p>
+          <p className="meta-line">
+            <strong>Password</strong> ·{" "}
+            <Link to="/forgot-password">Change password</Link>{" "}
+            <span className="meta-note">· we email you a one-time link</span>
+          </p>
           <div className="account-card-actions">
             <Link className="btn ghost" to="/">
               Back to For You

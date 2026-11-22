@@ -4,11 +4,13 @@ import { ApiError } from "../api/client";
 import * as authApi from "../api/auth";
 import { ContrastToggle } from "../components/ContrastToggle";
 import { PasswordField } from "../components/PasswordField";
+import { useAuth } from "../features/auth/AuthContext";
 
 export function ResetPasswordPage() {
   const [params] = useSearchParams();
   const token = useMemo(() => params.get("token")?.trim() || "", [params]);
   const navigate = useNavigate();
+  const { user, endSession } = useAuth();
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -28,6 +30,10 @@ export function ResetPasswordPage() {
     setSubmitting(true);
     try {
       await authApi.resetPassword(token, password);
+      // The server just revoked every session of that account, this one
+      // included if it is the same person. Drop it here and in other tabs now,
+      // rather than let the next request discover it with a 401.
+      if (user) endSession("signed_out");
       navigate("/login", { replace: true, state: { passwordReset: true } });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not reset password");
@@ -45,6 +51,11 @@ export function ResetPasswordPage() {
       </div>
       <form className="auth-card" onSubmit={onSubmit}>
         <h2>Reset password</h2>
+        {user && token && (
+          <p className="callout" style={{ margin: 0 }}>
+            Saving a new password signs you out on every device, including this one.
+          </p>
+        )}
         {!token && (
           <p className="form-error" role="alert">
             No token in URL. Request a new link from{" "}

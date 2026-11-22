@@ -206,8 +206,10 @@ The threat model and the controls behind these routes are written up in
 | GET/POST | `/onboarding/cards` · `/onboarding/complete` | Cold-start deck and gate |
 | GET | `/recommendations/for-you` | Ranked slate with reasons |
 | GET | `/titles/search` · `/titles/{id}` · `/titles/{id}/similar` | Catalog (fuzzy search via pg_trgm) |
+| GET | `/titles/external-search` | TMDb movies & TV for titles the catalog lacks (needs `TMDB_API_KEY`) |
+| POST | `/titles/import` | Add a TMDb title to the catalog so it can be rated (30 per user per hour) |
 | GET | `/titles/{id}/where-to-watch` | Streaming availability by region |
-| POST | `/titles/{id}/interactions` | Record a rating / save / undo |
+| POST | `/titles/{id}/interactions` | Record a rating / save / undo; six ratings (two positive) also complete onboarding |
 | GET | `/watchlist` · `/catalog/status` | Saved titles; catalog readiness |
 
 Errors share one shape: `{code, message, request_id}` (validation adds `errors[]`).

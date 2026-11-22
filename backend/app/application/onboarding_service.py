@@ -13,8 +13,10 @@ from app.domain.taste_signals import (
     POSITIVE_RATING_EVENT_TYPES,
     RATING_EVENT_TYPES,
     is_supported_event,
+    resolve_title_state,
 )
 from app.infrastructure.db.models.catalog import Title
+from app.infrastructure.db.models.interaction import InteractionEvent
 from app.infrastructure.db.models.user import User
 
 # Minimum explicit 1–4 ratings before we trust the profile enough for For You.
@@ -70,6 +72,10 @@ def count_ratings(normalized: list[tuple[UUID, str]]) -> tuple[int, int]:
     rated = sum(1 for _t, e in normalized if e in RATING_EVENT_TYPES)
     positive = sum(1 for _t, e in normalized if e in POSITIVE_RATING_EVENT_TYPES)
     return rated, positive
+
+
+def onboarding_gates_met(rated: int, positive: int) -> bool:
+    return rated >= MIN_ONBOARDING_RATINGS and positive >= MIN_ONBOARDING_POSITIVE
 
 
 class OnboardingService:
@@ -168,6 +174,39 @@ class OnboardingService:
         await self._session.flush()
         await self._recommendations.invalidate_user(user.id)
         return user
+
+    async def complete_if_earned(self, user: User) -> bool:
+        """Finish onboarding for someone who rated enough titles another way.
+
+        The For You feed waits for onboarding. Ratings given from search or a
+        title page never completed it, so a person who skipped the deck and
+        rated ten films they love still saw "Train your taste" instead of
+        recommendations. The gates are the deck's own, applied to each title's
+        current rating (an undone rating does not count).
+
+        Only reads the log while onboarding is unfinished, so it costs one
+        small query for new accounts and nothing afterwards.
+        """
+        if user.onboarding_completed_at is not None:
+            return False
+        rows = await self._session.execute(
+            select(InteractionEvent.title_id, InteractionEvent.event_type)
+            .where(InteractionEvent.user_id == user.id)
+            .order_by(InteractionEvent.created_at)
+        )
+        events_by_title: dict[UUID, list[str]] = {}
+        for title_id, event_type in rows:
+            events_by_title.setdefault(title_id, []).append(event_type)
+        current = [
+            (title_id, rating)
+            for title_id, events in events_by_title.items()
+            if (rating := resolve_title_state(events).rating) is not None
+        ]
+        if not onboarding_gates_met(*count_ratings(current)):
+            return False
+        user.onboarding_completed_at = datetime.now(UTC)
+        await self._session.flush()
+        return True
 
     async def _known_title_ids(self, title_ids: list[UUID]) -> set[UUID]:
         if not title_ids:

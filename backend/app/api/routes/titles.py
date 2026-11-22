@@ -6,20 +6,26 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import DbSession, VerifiedUser, get_settings_dep
 from app.api.schemas.titles import (
+    ExternalTitleOut,
     InteractionRequest,
     ProviderOfferOut,
     RecommendationItemOut,
     RecommendationSlateOut,
     TitleDetailOut,
+    TitleImportOut,
+    TitleImportRequest,
     TitleSummaryOut,
     WhereToWatchOut,
 )
+from app.application.onboarding_service import OnboardingService
 from app.application.recommendation_service import RecommendationService
 from app.application.taste_recompute import recompute_profile_after_response
 from app.application.taste_service import TasteService
+from app.application.title_import import TitleImportService
 from app.application.watch_providers import WatchProvidersService
 from app.core.config import Settings
 from app.domain.exceptions import NotFoundError
+from app.infrastructure.tmdb.client import TmdbClient
 
 router = APIRouter()
 
@@ -55,6 +61,61 @@ async def search_titles(
     service = _rec_service(session, settings)
     titles = await service.search(q, limit=limit)
     return [TitleSummaryOut.from_title(t) for t in titles]
+
+
+# Declared before /titles/{title_id}: that route would otherwise take
+# "external-search" as an id and answer 422.
+@router.get("/titles/external-search", response_model=list[ExternalTitleOut])
+async def external_search(
+    user: VerifiedUser,
+    session: DbSession,
+    settings: Annotated[Settings, Depends(get_settings_dep)],
+    q: str = Query(min_length=2, max_length=120),
+) -> list[ExternalTitleOut]:
+    """Movies and TV on TMDb matching ``q``, for titles the catalog lacks.
+
+    503 ``tmdb_not_configured`` when there is no TMDb key; the app then just
+    doesn't offer it.
+    """
+    tmdb = TmdbClient(settings)
+    try:
+        rows = await TitleImportService(session, tmdb).search(q.strip())
+    finally:
+        await tmdb.aclose()
+    return [
+        ExternalTitleOut(
+            tmdb_id=r.tmdb_id,
+            media_type=r.media_type,
+            name=r.name,
+            year=r.year,
+            overview=r.overview,
+            poster_url=f"https://image.tmdb.org/t/p/w342{r.poster_path}" if r.poster_path else None,
+            title_id=r.title_id,
+        )
+        for r in rows
+    ]
+
+
+@router.post("/titles/import", response_model=TitleImportOut)
+async def import_title(
+    body: TitleImportRequest,
+    user: VerifiedUser,
+    session: DbSession,
+    settings: Annotated[Settings, Depends(get_settings_dep)],
+) -> TitleImportOut:
+    """Add a TMDb title to the catalog (if needed) so it can be rated.
+
+    Idempotent: a title already in the catalog returns its id without a TMDb
+    call or counting against the hourly import cap.
+    """
+    tmdb = TmdbClient(settings)
+    try:
+        title_id = await TitleImportService(session, tmdb).import_title(
+            user_id=user.id, media_type=body.media_type, tmdb_id=body.tmdb_id
+        )
+    finally:
+        await tmdb.aclose()
+    return TitleImportOut(id=title_id)
 
 
 @router.get("/titles/{title_id}/similar", response_model=list[TitleSummaryOut])
@@ -167,6 +228,8 @@ async def interact(
         # Bump now so the next For You is rebuilt; rebuild the profile behind it.
         await taste.bump_profile_version(user.id)
     await service.invalidate_user(user.id)
+    # Rating titles from search counts toward onboarding as much as the deck.
+    await OnboardingService(session, taste, service).complete_if_earned(user)
 
     if deferred:
         background.add_task(recompute_profile_after_response, user.id, settings)

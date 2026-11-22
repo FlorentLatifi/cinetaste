@@ -252,7 +252,9 @@ async def test_delete_account(client: AsyncClient, api_prefix: str) -> None:
     wrong = await client.request(
         "DELETE", f"{api_prefix}/me", headers=headers, json={"password": "nope", "confirm": "DELETE"}
     )
-    assert wrong.status_code == 401
+    # Not 401: the client would read that as an expired token and refresh.
+    assert wrong.status_code == 403
+    assert wrong.json()["code"] == "invalid_credentials"
     ok = await client.request(
         "DELETE", f"{api_prefix}/me", headers=headers, json={"password": PASSWORD, "confirm": "DELETE"}
     )
@@ -520,3 +522,63 @@ async def test_a_verification_link_works_once_even_when_opened_twice_at_once(
         )
     )
     assert sorted([first.status_code, second.status_code]) == [200, 400]
+
+
+async def test_rating_from_search_completes_onboarding(
+    client: AsyncClient, api_prefix: str, db_session: AsyncSession
+) -> None:
+    """Skipping the deck and rating films from search must still unlock For You.
+
+    The feed waits for onboarding, and only the deck used to complete it: ten
+    ratings given from title pages left the person on "Train your taste".
+    """
+    titles = await seed_catalog(db_session)
+    await db_session.commit()
+    user = await _register(client, api_prefix)
+    headers = _auth(user)
+
+    async def rate(title, event: str) -> None:
+        res = await client.post(
+            f"{api_prefix}/titles/{title.id}/interactions",
+            headers=headers,
+            json={"event_type": event},
+        )
+        assert res.status_code == 204, res.text
+
+    async def onboarded() -> bool:
+        me = await client.get(f"{api_prefix}/me", headers=headers)
+        return me.json()["onboarding_completed_at"] is not None
+
+    # A rating that was undone does not count...
+    await rate(titles[7], "rate_3")
+    await rate(titles[7], "clear")
+    # ...so with five more this is one short of the deck's gate of six.
+    for title in titles[:3]:
+        await rate(title, "rate_4")
+    for title in titles[3:5]:
+        await rate(title, "rate_2")
+    # Saving and passing are not ratings.
+    await rate(titles[5], "watchlist")
+    await rate(titles[6], "not_interested")
+    assert not await onboarded()
+
+    await rate(titles[8], "rate_1")
+    assert await onboarded()
+
+
+async def test_ratings_without_enough_positives_do_not_complete_onboarding(
+    client: AsyncClient, api_prefix: str, db_session: AsyncSession
+) -> None:
+    titles = await seed_catalog(db_session)
+    await db_session.commit()
+    user = await _register(client, api_prefix)
+    headers = _auth(user)
+    for title in titles[:8]:
+        res = await client.post(
+            f"{api_prefix}/titles/{title.id}/interactions",
+            headers=headers,
+            json={"event_type": "rate_1"},
+        )
+        assert res.status_code == 204
+    me = await client.get(f"{api_prefix}/me", headers=headers)
+    assert me.json()["onboarding_completed_at"] is None

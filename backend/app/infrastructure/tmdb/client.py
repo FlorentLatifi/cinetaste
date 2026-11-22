@@ -132,6 +132,20 @@ class TmdbClient:
         data = await self._get(f"/discover/{media_type}", params)
         return data.get("results", [])
 
+    async def search_titles(self, query: str) -> list[dict[str, Any]]:
+        """First page of TMDb's combined movie + TV search, adult titles excluded.
+
+        Results for people are dropped: the caller wants something to watch.
+        """
+        data = await self._get(
+            "/search/multi", {"query": query, "include_adult": "false", "page": 1}
+        )
+        return [
+            item
+            for item in data.get("results", [])
+            if item.get("media_type") in {"movie", "tv"} and item.get("id")
+        ]
+
     async def get_movie(self, tmdb_id: int) -> dict[str, Any]:
         return await self._get(
             f"/movie/{tmdb_id}",

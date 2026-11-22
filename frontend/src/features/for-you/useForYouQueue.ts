@@ -30,7 +30,7 @@ const LEAVE_MS = 180;
  * Keeps HomePage presentational.
  */
 export function useForYouQueue() {
-  const { accessToken, user } = useAuth();
+  const { accessToken, user, refreshUser } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
   const [items, setItems] = useState<RecommendationItem[]>([]);
@@ -50,6 +50,16 @@ export function useForYouQueue() {
   const pending = useRef<Map<string, Promise<boolean>>>(new Map());
 
   const needsOnboarding = !user?.onboarding_completed_at;
+
+  // Rating enough titles from search or a title page finishes onboarding on
+  // the server, but the user object here was loaded at sign-in. Look once
+  // before showing "Train your taste" to someone who already did.
+  const recheckedOnboarding = useRef(false);
+  useEffect(() => {
+    if (!needsOnboarding || !accessToken || recheckedOnboarding.current) return;
+    recheckedOnboarding.current = true;
+    void refreshUser().catch(() => undefined);
+  }, [needsOnboarding, accessToken, refreshUser]);
 
   useEffect(() => {
     const state = (location.state as ForYouWelcome) || null;

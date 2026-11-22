@@ -1,11 +1,18 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { ApiError } from "../api/client";
 import * as authApi from "../api/auth";
 import { ContrastToggle } from "../components/ContrastToggle";
+import { useAuth } from "../features/auth/AuthContext";
 
 export function ForgotPasswordPage() {
-  const [email, setEmail] = useState("");
+  const { user } = useAuth();
+  const [email, setEmail] = useState(user?.email ?? "");
+  // Signed in (the Account page links here to change the password): fill in
+  // the address once the session check knows it, unless they started typing.
+  useEffect(() => {
+    if (user?.email) setEmail((current) => current || user.email);
+  }, [user?.email]);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
   const [devToken, setDevToken] = useState<string | null>(null);
@@ -52,8 +59,8 @@ export function ForgotPasswordPage() {
                 </Link>
               </p>
             )}
-            <Link className="btn primary" to="/login">
-              Back to sign in
+            <Link className="btn primary" to={user ? "/account" : "/login"}>
+              {user ? "Back to your account" : "Back to sign in"}
             </Link>
           </>
         ) : (
@@ -77,7 +84,11 @@ export function ForgotPasswordPage() {
               {submitting ? "Sending…" : "Send reset link"}
             </button>
             <p className="auth-switch">
-              <Link to="/login">Back to sign in</Link>
+              {user ? (
+                <Link to="/account">Back to your account</Link>
+              ) : (
+                <Link to="/login">Back to sign in</Link>
+              )}
             </p>
           </>
         )}

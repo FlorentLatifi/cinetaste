@@ -81,3 +81,33 @@ def test_httpx_request_logs_are_silenced() -> None:
 
     configure_logging(debug=True)
     assert logging.getLogger("httpx").getEffectiveLevel() >= logging.WARNING
+
+
+@pytest.mark.asyncio
+async def test_search_keeps_only_movies_and_tv_and_excludes_adult(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "results": [
+                    {"id": 1, "media_type": "movie", "title": "A"},
+                    {"id": 2, "media_type": "person", "name": "B"},
+                    {"id": 3, "media_type": "tv", "name": "C"},
+                    {"media_type": "movie", "title": "no id"},
+                ]
+            },
+        )
+
+    client = _client(handler, monkeypatch)
+    results = await client.search_titles("harbor")
+    await client.aclose()
+
+    assert [r["id"] for r in results] == [1, 3]
+    assert seen[0].url.path.endswith("/search/multi")
+    assert seen[0].url.params["include_adult"] == "false"
+    assert seen[0].url.params["query"] == "harbor"
