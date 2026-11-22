@@ -13,6 +13,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from app.recommendation.pipeline import primary_genre
+
 _SEED_PATH = Path(__file__).with_name("onboarding_seed_deck.json")
 
 
@@ -153,12 +155,6 @@ def pick_diverse_fallback(
     decade_counts: dict[int, int] = {}
     lang_counts: dict[str, int] = {}
 
-    def _primary_genre(t: Any) -> str:
-        genres = getattr(t, "genres", None) or []
-        if genres:
-            return str(genres[0].name)
-        return "unknown"
-
     def _decade(t: Any) -> int | None:
         rd = getattr(t, "release_date", None)
         if rd is None:
@@ -168,7 +164,9 @@ def pick_diverse_fallback(
     for _, title in scored:
         if len(picked) >= limit:
             break
-        g = _primary_genre(title)
+        # The main genre from the feature snapshot (TMDb's order), not whichever
+        # genre the database happens to list first.
+        g = primary_genre(title)
         d = _decade(title)
         lang = (title.original_language or "xx").lower()
         if genre_counts.get(g, 0) >= max_per_genre:

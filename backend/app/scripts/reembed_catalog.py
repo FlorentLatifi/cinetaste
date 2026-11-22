@@ -28,6 +28,7 @@ from app.recommendation.embeddings import (
     FEATURE_SCHEMA_VERSION,
     PersonSignal,
     build_title_signals,
+    feature_order,
 )
 
 
@@ -92,8 +93,10 @@ async def main(*, limit: int | None, force: bool, percentiles_only: bool = False
             embedding, _features, meta = build_title_signals(
                 name=title.name,
                 overview=title.overview,
-                genres=[g.name for g in title.genres],
-                keywords=[k.name for k in title.keywords],
+                # In the order ingest used (the database lists them by name), so
+                # the same main genre and the same 20 keywords come out.
+                genres=sorted((g.name for g in title.genres), key=feature_order(extra, "genre:")),
+                keywords=sorted((k.name for k in title.keywords), key=feature_order(extra, "kw:")),
                 people=_people_from_title(title),
                 media_type=title.media_type,
                 release_year=year,

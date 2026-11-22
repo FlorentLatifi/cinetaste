@@ -59,11 +59,17 @@ class Title(Base):
     # Relationships never load implicitly: every query states what it needs with
     # selectinload(...). Default eager loading pulled keywords + credits into
     # every Title query, and loading one Genre/Keyword pulled in all its titles.
+    #
+    # Ordered by name so a title reads the same on every request: without an
+    # ORDER BY, Postgres returns join rows in whatever order its plan produces,
+    # and a cached guest slate re-read by a different query listed one film's
+    # genres the other way round. TMDb's order (first genre weighs most) is kept
+    # in the feature snapshot; read the main genre with pipeline.primary_genre.
     genres: Mapped[list[Genre]] = relationship(
-        secondary="title_genres", back_populates="titles", lazy="raise"
+        secondary="title_genres", back_populates="titles", lazy="raise", order_by="Genre.name"
     )
     keywords: Mapped[list[Keyword]] = relationship(
-        secondary="title_keywords", back_populates="titles", lazy="raise"
+        secondary="title_keywords", back_populates="titles", lazy="raise", order_by="Keyword.name"
     )
     credits: Mapped[list[Credit]] = relationship(back_populates="title", lazy="raise")
 

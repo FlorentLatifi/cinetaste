@@ -6,6 +6,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.api.schemas.common import StrictModel
+from app.recommendation.embeddings import feature_order
 
 
 class GenreOut(BaseModel):
@@ -67,6 +68,9 @@ class TitleSummaryOut(TitleSummary):
     @classmethod
     def from_title(cls, title) -> TitleSummaryOut:
         data = TitleSummary.model_validate(title)
+        # Main genre first, the rest by name: cards show the first genre or three.
+        main_first = feature_order(getattr(title, "extra", None), "genre:")
+        data.genres = sorted(data.genres, key=lambda g: main_first(g.name))
         poster = None
         if title.poster_path:
             poster = (

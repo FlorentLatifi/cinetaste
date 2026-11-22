@@ -405,7 +405,7 @@ def primary_genre(title: Any) -> str:
     """Main genre: the highest-weighted genre in the feature snapshot.
 
     The snapshot keeps TMDb's genre order (first genre weighs most); the ORM
-    ``genres`` relationship is unordered, so it is only a fallback.
+    ``genres`` relationship lists genres by name, so it is only a fallback.
     """
     best_key, best_weight = "", 0.0
     for key, weight in _feature_snapshot(getattr(title, "extra", None)).items():

@@ -588,3 +588,45 @@ async def test_a_batch_stores_exactly_what_writing_one_title_at_a_time_did(
     assert dict((row[0], row[1]) for row in batched["people"])[5001] == "Actor 1 as credited in 0"
     keyword_ids = {row[0] for row in batched["keywords"]}
     assert 4000 in keyword_ids and keyword_ids.isdisjoint(range(4001, 4008))
+
+
+async def test_reembed_rebuilds_the_features_ingest_stored(db_session: AsyncSession) -> None:
+    """The database lists genres and keywords by name; ingest used TMDb's order.
+
+    Re-embedding must not promote whichever genre sorts first (Action, here) to
+    the main genre, nor keep the alphabetically first 20 keywords instead of the
+    20 ingest kept.
+    """
+    from app.recommendation.pipeline import primary_genre
+    from app.scripts import reembed_catalog
+
+    class TmdbOrder(FakeTmdb):
+        def _movie(self, tmdb_id: int) -> dict[str, Any]:
+            payload = super()._movie(tmdb_id)
+            payload["genres"] = [{"id": 53, "name": "Thriller"}, {"id": 28, "name": "Action"}]
+            payload["keywords"] = {
+                "keywords": [
+                    {"id": 7_000 + i, "name": f"keyword {i:02d}"} for i in reversed(range(25))
+                ]
+            }
+            return payload
+
+    async def stored() -> Title:
+        db_session.expire_all()
+        title = await db_session.scalar(select(Title).where(Title.external_tmdb_id == 9_700_001))
+        assert title is not None
+        return title
+
+    await CatalogIngestService(db_session, TmdbOrder(), batch_size=10).upsert_movie(9_700_001)  # type: ignore[arg-type]
+    await db_session.commit()
+    ingested = await stored()
+    snapshot = dict(ingested.extra["feature_snapshot"])
+    embedding = [float(x) for x in ingested.embedding]
+    assert primary_genre(ingested) == "thriller"
+    assert "kw:keyword 24" in snapshot and "kw:keyword 00" not in snapshot
+
+    assert await reembed_catalog.main(limit=None, force=True) == 0
+
+    rebuilt = await stored()
+    assert rebuilt.extra["feature_snapshot"] == snapshot
+    assert [float(x) for x in rebuilt.embedding] == pytest.approx(embedding, abs=1e-6)
