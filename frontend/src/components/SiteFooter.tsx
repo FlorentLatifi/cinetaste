@@ -7,8 +7,9 @@ import { ContrastToggle } from "./ContrastToggle";
  * to be present wherever their data is, which is every signed-in page.
  *
  * The logo file is not in the repository — TMDb distribute it themselves and
- * ask that it is not modified. Drop the PNG at `public/tmdb.svg` and it appears
- * here; without it the text attribution still satisfies the requirement.
+ * ask that it is not modified. The official SVG lives, unmodified, at
+ * `public/tmdb.svg`; if the file is ever removed it hides itself and
+ * the text attribution still satisfies the requirement.
  */
 export function SiteFooter() {
   return (
@@ -19,8 +20,8 @@ export function SiteFooter() {
           alt=""
           aria-hidden="true"
           className="tmdb-mark"
-          width={60}
-          height={8}
+          width={36}
+          height={15}
           onError={(e) => {
             e.currentTarget.style.display = "none";
           }}
