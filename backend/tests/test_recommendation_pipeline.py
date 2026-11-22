@@ -393,9 +393,9 @@ def test_low_rating_penalty_needs_enough_votes() -> None:
     assert low_rating_penalty(4.0, vote_count=10) == 0.0  # a handful of votes is noise
 
 
-def test_low_rating_weight_is_off_by_default_and_demotes_when_on() -> None:
-    """Off by default (not shown to be harmless offline); when on, it demotes."""
-    assert DEFAULT_WEIGHTS.low_rating == 0.0
+def test_low_rating_weight_is_on_by_default_and_demotes() -> None:
+    """0.3 by default (docs/EVALUATION.md, 2026-11-22); it demotes poorly rated titles."""
+    assert DEFAULT_WEIGHTS.low_rating == pytest.approx(0.3)
     good = FakeTitle(name="Good", genres=["Drama"], keywords=["family"], vote_average=7.0)
     poor = FakeTitle(name="Poor", genres=["Drama"], keywords=["family"], vote_average=5.6)
     poor.embedding = list(good.embedding)
@@ -413,8 +413,9 @@ def test_low_rating_weight_is_off_by_default_and_demotes_when_on() -> None:
         )[0].title_id
 
     # Quality off, so only the low-rating penalty can separate them.
-    assert top(RankingWeights(quality=0.0)) == poor.id  # tie → input order
-    assert top(RankingWeights(quality=0.0, low_rating=0.1)) == good.id
+    assert top(RankingWeights(quality=0.0, low_rating=0.0)) == poor.id  # tie → input order
+    assert top(RankingWeights(quality=0.0)) == good.id  # the default penalty alone
+    assert top(DEFAULT_WEIGHTS) == good.id
 
 
 def test_quality_percentiles_shrink_thin_ratings_toward_the_mean() -> None:
@@ -447,7 +448,7 @@ def test_quality_weight_is_on_by_default_and_promotes() -> None:
             weights=weights,
         )[0].title_id
 
-    assert top(RankingWeights(quality=0.0)) == worse.id  # tie → input order
+    assert top(RankingWeights(quality=0.0, low_rating=0.0)) == worse.id  # tie → input order
     assert top(DEFAULT_WEIGHTS) == better.id
 
 

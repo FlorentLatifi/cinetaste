@@ -85,7 +85,7 @@ details, 581 users, production-sized 4,500-title catalog, slate of 20):
 | random | 0.003 | 0.053 | 0.508 | 0.918 |
 | most popular on TMDb | 0.035 | 0.275 | 0.003 | 0.013 |
 | most rated by MovieLens users | **0.093** | **0.444** | 0.064 | 0.034 |
-| **production** (quality prior 0.05, language/TV caps) | 0.062 | 0.413 | **0.334** | **0.309** |
+| **production** (quality prior 0.05, low-rating penalty 0.3, language/TV caps) | 0.063 | 0.418 | **0.326** | **0.274** |
 | production before the quality prior (Nov 21) | 0.052 | 0.377 | 0.390 | 0.328 |
 | production + popularity prior (opt-in, off) | 0.077 | 0.482 | 0.100 | 0.211 |
 

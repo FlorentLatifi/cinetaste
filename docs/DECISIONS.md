@@ -4,6 +4,35 @@ Lightweight ADR-style log. Newest first.
 
 ---
 
+## 2026-11-22 — Low-rating penalty on (0.3)
+
+### Decision
+`RankingWeights.low_rating` 0 → **0.3**. `low_rating_penalty` is unchanged: 0
+at ★6.5 and above, rising linearly to 1 at ★5.5, and only for titles with
+enough votes to trust the rating (the hidden-gem vote floor).
+
+### Rationale
+After the quality prior shipped, a Nolan/Villeneuve fan's live slate still
+had *The Matrix Resurrections* (★6.3) second, on director and tone overlap.
+Swept 0.1 / 0.2 / 0.3 / 0.5 on 581 MovieLens users with TMDb metadata, paired
+against the production of the same day (docs/EVALUATION.md, "Weight
+changes"): recall and NDCG unchanged at every weight, like/dislike AUC
++0.048 at 0.2–0.3 (0.705 → 0.753), novelty −0.008. 0.3 rather than 0.2
+because held-out dislikes reach slates no more often than before (+0.0003 vs
++0.0009) and, by its live score, it moves the example to about fifth place
+(an estimate; MMR decides the exact spot).
+
+### Rejected alternatives
+* **0.5** — +0.004 more AUC for more coverage and novelty loss; within noise.
+* **A hard rating floor** — would also drop titles a user's taste strongly
+  fits; a penalty lets strong taste evidence still win.
+
+### Status
+Active. Coverage falls 0.309 → 0.274 offline. Watch `engagement_report`
+together with the quality-prior change.
+
+---
+
 ## 2026-11-22 — Quality prior on (0.05); language and TV caps sized to the person
 
 ### Decision
