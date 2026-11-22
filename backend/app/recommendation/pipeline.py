@@ -86,9 +86,13 @@ class RankingWeights:
     # a further ~70% but dropped novelty to ~0.04 — close to recommending the
     # charts, which defeats a discovery product. Kept as a documented knob.
     warm_popularity: float = 0.0
-    # Soft penalty for titles many people rated poorly (low_rating_penalty).
-    # Off by default: see docs/EVALUATION.md for the measurement.
-    low_rating: float = 0.0
+    # Soft penalty for titles many people rated poorly (low_rating_penalty:
+    # 0 at ★6.5, full at ★5.5, only with enough votes). 0.3 since 2026-11-22:
+    # on real ratings it separates held-out likes from dislikes much better
+    # (AUC +0.048) at no measurable recall cost; the gain levels off past 0.2,
+    # and 0.3 keeps held-out dislikes out of slates as well as 0 did. Live, it
+    # is what stops a ★6.3 sequel leading a fan's slate on director overlap.
+    low_rating: float = 0.3
     # Quality prior: percentile, within the candidate pool, of a vote-count-
     # shrunk rating (quality_percentiles) — "rated well", not "widely known".
     # Until hidden gems moved to catalog percentiles, the gem bonus fired on
@@ -231,7 +235,7 @@ GEM_SOFT_BONUS = 0.04
 MAX_GEM_LABELS = 3
 
 # Soft penalty for titles a large audience rated poorly (★ below 6.5 with
-# enough votes to mean it). Off by default: see RankingWeights.low_rating.
+# enough votes to mean it). Weighted by RankingWeights.low_rating (0.3).
 LOW_RATING_THRESHOLD = 6.5
 LOW_RATING_SPAN = 1.0  # penalty reaches its full weight at ★5.5
 

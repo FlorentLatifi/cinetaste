@@ -312,6 +312,29 @@ rate well is a better prior than ranking films people know.
 
 ### Weight changes
 
+**Shipped 2026-11-22 — low-rating penalty `low_rating` 0 → 0.3.**
+
+Swept on the same 581 users, paired against production with the quality prior
+and language / TV caps already on:
+
+| `low_rating` | Δ recall@20 | Δ ndcg@20 | Δ novelty | Δ dislike_recall@20 | Δ like_dislike_auc | coverage |
+|---|---|---|---|---|---|---|
+| 0 (before) | — | — | — | — | — (0.705) | 0.309 |
+| 0.1 | +0.0007 [−0.0036, +0.0037] | +0.0006 | −0.0061 | +0.0009 [0.0000, +0.0025] | +0.0355 [+0.0235, +0.0470] | 0.286 |
+| 0.2 | +0.0005 [−0.0039, +0.0036] | +0.0006 | −0.0074 | +0.0009 [0.0000, +0.0025] | +0.0484 [+0.0323, +0.0656] | 0.279 |
+| **0.3** | **+0.0005 [−0.0040, +0.0036]** | **+0.0006** | **−0.0080** | **+0.0003 [0.0000, +0.0008]** | **+0.0479 [+0.0284, +0.0672]** | **0.274** |
+| 0.5 | +0.0006 [−0.0038, +0.0038] | +0.0007 | −0.0087 | +0.0003 [0.0000, +0.0008] | +0.0522 [+0.0314, +0.0734] | 0.271 |
+
+Accuracy does not move at any weight; the like/dislike separation rises to
+about +0.048 by 0.2 and then levels off. 0.3 was taken over 0.2 because held-out
+dislikes reach the slate no more often than with the penalty off (+0.0003, vs
++0.0009), and because, estimated from its live score (0.559 − 0.3 × 0.205),
+it moves a well-known ★6.3 sequel (*The Matrix Resurrections*) from second
+place to about fifth for a fan of the original; MMR decides the exact spot. The price is coverage (0.309 → 0.274): the
+titles that stop being recommended are mostly the poorly rated ones. Production
+after this change: recall@20 0.063, ndcg@20 0.054, hit rate 0.418, novelty
+0.326, AUC 0.753.
+
 **Shipped 2026-11-22 — quality prior `quality` 0 → 0.05, and language / TV caps.**
 
 Measured on the same 581 users, 4,500-title catalog and k=20, paired user by
