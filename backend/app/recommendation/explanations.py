@@ -16,7 +16,7 @@ from typing import Any
 from uuid import UUID
 
 from app.domain.taste_signals import EXPLAIN_ANCHOR_MIN_WEIGHT
-from app.recommendation.embeddings import top_feature_overlap
+from app.recommendation.embeddings import feature_order, top_feature_overlap
 
 # Stored inside TasteProfile.features (stripped before scoring).
 EXPLAIN_MEMORY_KEY = "__explain_memory__"
@@ -402,6 +402,8 @@ def build_reasons(
         }
 
     title_features = _feature_snapshot(title_extra)
+    # Main genre first: the database lists genres by name, the snapshot keeps TMDb's order.
+    title_genres = sorted(title_genres, key=feature_order(title_extra, "genre:"))
     anchors: list[dict[str, Any]] = list((explain_memory or {}).get("anchors") or [])
     book = _display_book(title_extra, anchors)
 

@@ -42,7 +42,7 @@ from __future__ import annotations
 import hashlib
 import math
 import re
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -270,6 +270,27 @@ def normalize_person_signals(
                     )
                 )
     return out
+
+
+def feature_order(title_extra: dict[str, Any] | None, prefix: str) -> Callable[[str], float]:
+    """Sort key putting names in the order a title's stored features rank them.
+
+    Ingest builds features from TMDb's order: the first genre weighs most, and
+    only the first 20 usable keywords are kept. The database lists genres and
+    keywords by name, so ``sorted(names, key=feature_order(extra, "genre:"))``
+    restores what matters: the main genre first, kept keywords before dropped
+    ones. The sort is stable, so names of equal weight keep their (name) order.
+    """
+    snapshot = (title_extra or {}).get("feature_snapshot")
+    weights: dict[str, Any] = snapshot if isinstance(snapshot, dict) else {}
+
+    def key(name: str) -> float:
+        try:
+            return -float(weights.get(f"{prefix}{str(name).strip().lower()}", 0.0))
+        except (TypeError, ValueError):
+            return 0.0
+
+    return key
 
 
 def filter_keywords(keywords: Iterable[str], *, limit: int = 20) -> list[str]:

@@ -97,3 +97,29 @@ def test_pick_diverse_fallback_spreads_genre_and_decade() -> None:
     assert len(picked) == 8
     genres = [t.genres[0].name for t in picked]
     assert len(set(genres)) >= 3
+
+
+def test_pick_diverse_fallback_groups_by_tmdbs_main_genre() -> None:
+    """Not by whichever genre the database lists first (alphabetical: Action)."""
+
+    class G:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+    class T:
+        def __init__(self, main: str, rating: float) -> None:
+            self.id = uuid4()
+            self.genres = [G("Action"), G("Thriller")]
+            self.extra = {"feature_snapshot": {f"genre:{main}": 1.0, "genre:action": 0.7}}
+            self.release_date = date(2015, 1, 1)
+            self.original_language = "en"
+            self.vote_count = 20000
+            self.vote_average = rating  # the score order: action_1, action_2, thriller
+            self.popularity = 40.0
+            self.poster_path = "/x.jpg"
+
+    action_1, action_2, thriller = T("action", 8.8), T("action", 8.5), T("thriller", 8.0)
+    picked = pick_diverse_fallback([action_1, action_2, thriller], limit=2, max_per_genre=1)
+    # One per main genre. Grouped by the first listed genre, all three read as
+    # Action, and the backfill topped the slate up with the second action film.
+    assert [t.id for t in picked] == [action_1.id, thriller.id]

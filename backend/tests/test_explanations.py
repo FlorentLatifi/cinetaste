@@ -388,3 +388,15 @@ def test_no_banned_string_across_a_wide_sweep() -> None:
                 for r in _reasons(user, cand, anchors=[anchor], genres=(g,)):
                     for bad in BANNED:
                         assert bad not in r.message, (bad, r.message)
+
+
+def test_the_genre_fallback_names_tmdbs_main_genre_not_the_first_alphabetically() -> None:
+    """The database lists genres by name; the snapshot keeps TMDb's order."""
+    reasons = _reasons(
+        {},
+        {"genre:thriller": 1.0, "genre:action": 0.7},  # TMDb listed Thriller first
+        genres=("Action", "Thriller"),  # as the database returns them
+    )
+    [fallback] = [r for r in reasons if r.code == "genre_fit"]
+    assert fallback.evidence["genres"] == ["Thriller", "Action"]
+    assert "thriller" in fallback.message.lower() and "action" not in fallback.message.lower()
