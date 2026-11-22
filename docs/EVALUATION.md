@@ -312,6 +312,47 @@ rate well is a better prior than ranking films people know.
 
 ### Weight changes
 
+**Shipped 2026-11-22 — quality prior `quality` 0 → 0.05, and language / TV caps.**
+
+Measured on the same 581 users, 4,500-title catalog and k=20, paired user by
+user against the code before the change (`--against`); the baseline reproduced
+the main table above (production recall 0.052).
+
+| production | before | after | paired Δ |
+|---|---|---|---|
+| recall@20 | 0.052 | **0.062** | +0.0109 [+0.0058, +0.0169] |
+| ndcg@20 | 0.045 | 0.053 | +0.0081 [+0.0053, +0.0109] |
+| hit_rate@20 | 0.377 | 0.413 | |
+| novelty | 0.390 | 0.334 | −0.0559 [−0.0595, −0.0524] |
+| coverage | 0.328 | 0.309 | |
+| dislike_recall@20 | 0.008 | 0.007 | −0.0009 [−0.0026, +0.0003] |
+| like_dislike_auc | 0.657 | **0.705** | +0.0476 [+0.0387, +0.0572] |
+| director_over_limit / franchise_repeat / gem_famous_share | 0 / 0 / 0 | 0 / 0 / 0 | unchanged |
+
+Isolated (variants of the new production, same users):
+
+| variant | Δ recall@20 | Δ novelty | Δ like_dislike_auc |
+|---|---|---|---|
+| `quality=0` (prior off) | −0.0094 [−0.0134, −0.0055] | +0.0561 | −0.0476 |
+| `max_per_language=999,max_tv=999` (mix caps off) | −0.0021 [−0.0063, +0.0004] | +0.0009 | 0.0000 |
+
+* **The quality prior** is the halfway point proposed below (0.05 rather than
+  0.1): a fifth more held-out favourites found and a clearly better
+  like/dislike separation, for a sixth of the novelty. The online check is
+  `engagement_report`: positive-action rate should rise, negative-action rate
+  should not. It also stops a well-known but poorly rated sequel (live: *The
+  Matrix Resurrections*, ★6.3) leading a slate on director overlap alone.
+* **The language and TV caps cost nothing measurable here** — MovieLens users
+  rate mostly English films, and the caps leave a user's own language alone
+  (`language_max_share` 0.951 vs 0.975 with them off). They exist for the
+  case the benchmark barely has: a mixed-language rater. Live, four
+  non-English favourites produced a guest slate with 11 of 20 Japanese titles,
+  two of them anime TV series; `tests/test_slate_mix_caps.py` pins that case.
+  MovieLens has no TV, so `tv_share` is 0 on every row.
+
+New columns: `language_max_share` (largest share of a slate one original
+language holds) and `tv_share`.
+
 **Shipped 2026-11-21 — `sparse_negative` 0.12 → 0.5.**
 
 | setting | Δ recall | Δ ndcg | Δ novelty | Δ dislike_recall | Δ like_dislike_auc |
@@ -332,7 +373,7 @@ them lower overall — the penalty reorders the head of the list, and a few
 near-miss dislikes move up as stronger-penalised ones move out. Watch the
 negative-action rate in `engagement_report` after deploy; it should not rise.
 
-**Proposed, not shipped — a quality prior, `quality` 0 → 0.1.** For the
+**Proposed 2026-11-21, shipped at 0.05 on 2026-11-22 (above) — a quality prior, `quality` 0 → 0.1.** For the
 owner to decide: it is the trade the caps and gems exposed. Measured with
 `sparse_negative` 0.12. The knob ranks by a
 vote-count-shrunk rating (`quality_percentiles`, the IMDb top-list formula, as

@@ -85,7 +85,7 @@ any scoring change. That is why Undo is a `clear` event rather than a delete.
    popularity slice; cold start is popularity-ordered.
 5. **Ranking** (`recommendation/pipeline.py`, `rank_titles` =
    `candidate_channels` → `blend_scores` → `select_slate`) —
-   `0.2·cosine + 0.6·overlap − 0.5·penalty + gem + cold prior`, then MMR
+   `0.2·cosine + 0.6·overlap − 0.5·penalty + gem + 0.05·quality + cold prior`, then MMR
    (λ=0.8), a per-genre cap of 40% of the slate, a per-director cap of 10%
    (2 in 20) and a per-collection (franchise) cap of 5% (1 in 20, 2 in 40),
    exploration slots interleaved, and score-ordered backfill under the same
@@ -103,6 +103,21 @@ any scoring change. That is why Undo is a `clear` event rather than a delete.
    scale drifts. Gem bonuses and percentiles are computed in
    `candidate_channels`; the caps are enforced in `select_slate`. Vectorised
    with numpy and run in a worker thread.
+
+   Two more caps follow the person rather than the slate. **Language**: each
+   original language may take the larger of 40% of the slate and its share of
+   the user's positive taste, so an English-only rater keeps an English slate
+   while four non-English favourites no longer collapse into one language.
+   **TV**: at most 20% of the slate, or the user's share of positive TV taste
+   if larger; guest slates pass `max_tv=0` (the page promises films). Both
+   shares are the profile's *taste mix* (`recommendation/mix.py`), computed
+   from effective signal weights when the profile is built and stored under
+   `features["__taste_mix__"]` — not from the stored `lang:` / `media:`
+   features, which are clamped per key and understate a dominant language.
+   No language signal (cold start) means no language cap. When a slate cannot
+   be filled, the language cap relaxes right after genre, and TV last.
+   Reasons rotate themes: once a theme word has been named on three cards,
+   later cards name another real shared theme instead.
 6. **Explanations** (`recommendation/explanations.py`) — templates fed only by
    evidence that exists: shared director, shared keywords, shared tone, cited
    anchor titles.

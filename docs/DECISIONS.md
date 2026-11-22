@@ -4,6 +4,58 @@ Lightweight ADR-style log. Newest first.
 
 ---
 
+## 2026-11-22 — Quality prior on (0.05); language and TV caps sized to the person
+
+### Decision
+* `RankingWeights.quality` 0 → **0.05**: a vote-count-shrunk rating
+  percentile (`quality_percentiles`) joins the score.
+* **Language cap**: each original language may take the larger of 40% of the
+  slate (`language_cap_for`) and its share of the user's positive taste. No
+  language signal (cold start) → no language cap.
+* **TV cap**: at most 20% of a slate (`tv_cap_for`), or the user's share of
+  positive TV taste if larger. Guest slates are films only (`max_tv=0`) unless
+  films cannot fill them.
+* The shares come from the profile's **taste mix** (`recommendation/mix.py`):
+  effective signal weight per language and format, computed in
+  `build_profile` and stored at `TasteProfile.features["__taste_mix__"]`.
+  Profiles built before it fall back to the positive `lang:` / `media:`
+  features until their next rebuild.
+* Both caps join `_SlateQuotas`; backfill relaxes language right after genre
+  and TV last.
+* Reasons rotate themes: a theme word named on 3 cards of a slate is left out
+  of later cards that share another real theme (`THEME_REPEAT_LIMIT`).
+
+### Rationale
+Seen on the live site (2026-11-22): a Nolan/Villeneuve fan's #1 pick was *The
+Matrix Resurrections* (★6.3) on director overlap alone; four non-English
+favourites (one Ghibli film among Korean, French and Brazilian ones) produced
+a guest slate that was 11/20 Japanese, mostly anime, including two TV series
+on a page that promises films; "dystopia" explained 12 of 20 cards.
+
+Offline (581 MovieLens users with TMDb metadata, paired): recall@20 0.052 →
+0.062, like/dislike AUC 0.657 → 0.705, novelty 0.390 → 0.334; all launch
+checks stay at 0. The quality prior is the whole accuracy gain; the language
+and TV caps cost nothing measurable (docs/EVALUATION.md, "Weight changes").
+
+Why the mix is computed rather than read from the `lang:` features: those
+are clamped per key (`FEATURE_CAP` 4.5) before family normalisation, so 30
+English favourites and 3 Korean ones read as 53% English. The mix says 91%.
+
+### Rejected alternatives
+* **A fixed per-language cap for everyone** — would push a monolingual
+  English rater onto 12 non-English cards per slate.
+* **`quality=0.1`** — more recall, but gives back 60% of the novelty the
+  percentile gems bought; 0.05 is the measured halfway point.
+* **Filtering TV out of For You entirely** — someone who rates series should
+  get series; the cap follows their share.
+
+### Status
+Active. Watch `engagement_report` after deploy: positive-action rate up,
+negative-action rate not up. Existing profiles pick up the stored mix on
+their next rating; until then the fallback applies.
+
+---
+
 ## 2026-11-21 — Catalog ingest writes a batch per round trip, not a title
 
 ### Decision
@@ -86,7 +138,8 @@ Active.
   `Title.extra["catalog_percentiles"]`, refreshed by one SQL statement at the
   end of every ingest and re-embed (`reembed_catalog --percentiles-only`
   backfills on its own).
-* A quality prior exists as a knob (`RankingWeights.quality`) and is **off**.
+* A quality prior exists as a knob (`RankingWeights.quality`) and is **off**
+  (turned on at 0.05 on 2026-11-22, see above).
 
 ### Rationale
 Both were soft-launch checks that `master` failed, measured on 581 real

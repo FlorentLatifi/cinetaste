@@ -106,6 +106,89 @@ def _pretty_label(raw: str) -> str:
     return raw.replace("_", " ").strip()
 
 
+# TMDb keywords arrive lowercased ("italy", "nasa", "new york city"). Words and
+# phrases here are proper nouns in any keyword they appear in, so they get
+# their capitals back; everything else stays lowercase, as a theme should.
+_KEYWORD_ACRONYMS = frozenset(
+    "nasa fbi cia nypd lapd kgb mi6 nsa usa uk ussr un nazi ufo ai cgi lgbt wwi wwii ira".split()
+)
+_KEYWORD_PROPER_PHRASES: dict[str, str] = {
+    "new york": "New York",
+    "new york city": "New York City",
+    "los angeles": "Los Angeles",
+    "san francisco": "San Francisco",
+    "las vegas": "Las Vegas",
+    "new orleans": "New Orleans",
+    "hong kong": "Hong Kong",
+    "south korea": "South Korea",
+    "north korea": "North Korea",
+    "south africa": "South Africa",
+    "new zealand": "New Zealand",
+    "soviet union": "Soviet Union",
+    "united states": "United States",
+    "world war i": "World War I",
+    "world war ii": "World War II",
+    "cold war": "Cold War",
+    "vietnam war": "Vietnam War",
+    "civil war": "Civil War",
+    "middle ages": "Middle Ages",
+    "wild west": "Wild West",
+    "great depression": "Great Depression",
+    "roman empire": "Roman Empire",
+}
+_KEYWORD_PROPER_WORDS = frozenset(
+    """
+    italy italian rome venice sicily milan naples florence france french paris marseille
+    germany german berlin munich england english london britain british scotland scottish
+    ireland irish dublin wales welsh spain spanish madrid barcelona portugal lisbon greece
+    greek athens russia russian moscow japan japanese tokyo kyoto osaka china chinese beijing
+    shanghai korea korean seoul india indian mumbai delhi brazil brazilian rio mexico mexican
+    canada canadian toronto australia australian sydney egypt egyptian cairo israel jerusalem
+    iran iraq afghanistan vietnam vietnamese cuba cuban argentina chile peru colombia
+    sweden swedish norway norwegian denmark danish finland iceland poland polish hungary
+    austria vienna switzerland netherlands dutch amsterdam belgium turkey istanbul africa
+    african america american europe european asia asian texas california chicago boston
+    miami detroit alaska hawaii manhattan brooklyn hollywood washington vatican
+    christmas halloween easter thanksgiving hanukkah bible christian christianity jesus
+    god buddhist buddhism islam muslim jewish catholic shakespeare dracula frankenstein
+    sherlock holmes batman superman marvel dc
+    """.split()
+)
+
+
+def _keyword_label(raw: str) -> str:
+    """A keyword as a reader expects it: themes lowercase, proper nouns capitalised."""
+    text = _pretty_label(raw)
+    low = text.lower()
+    if low in _KEYWORD_PROPER_PHRASES:
+        return _KEYWORD_PROPER_PHRASES[low]
+    for phrase, shown in sorted(_KEYWORD_PROPER_PHRASES.items(), key=lambda kv: -len(kv[0])):
+        if f" {phrase} " in f" {low} ":
+            low = f" {low} ".replace(f" {phrase} ", f" {shown} ").strip()
+    words = []
+    for word in low.split(" "):
+        bare = word.strip("'\",.")
+        if bare in _KEYWORD_ACRONYMS:
+            words.append(word.replace(bare, bare.upper()))
+        elif bare in _KEYWORD_PROPER_WORDS:
+            words.append(word.replace(bare, bare.capitalize()))
+        else:
+            words.append(word)
+    return " ".join(words)
+
+
+def _fresh_first(keywords: list[str], overused: frozenset[str]) -> list[str]:
+    """Drop themes the slate has already cited often, unless nothing else is shared.
+
+    The rest keep their order. Every keyword returned is still a real overlap,
+    so the reason stays true; it just stops naming the same word on every card.
+    """
+    if not overused:
+        return keywords
+    fresh = [k for k in keywords if k not in overused]
+    return fresh or keywords
+
+
 # Keywords that are only a decade/year/number carry no theme ("1950s", "21st century").
 _NUMERIC_KEYWORD_RE = re.compile(
     r"^(?:the\s+|year\s+)?(?:'?\d{2,4}'?s?|\d+(?:st|nd|rd|th)\s+century|[\d\W]+)$", re.IGNORECASE
@@ -389,8 +472,15 @@ def build_reasons(
     title_genres: list[str],
     similarity: float,
     max_reasons: int = 3,
+    overused_keywords: frozenset[str] = frozenset(),
 ) -> list[Reason]:
-    """Produce up to ``max_reasons`` specific, human-like explanations."""
+    """Produce up to ``max_reasons`` specific, human-like explanations.
+
+    ``overused_keywords`` are themes earlier cards in the same slate already
+    cited several times; they are named only when nothing else is shared, so
+    one word ("dystopia") does not explain half a slate. Wording only — the
+    evidence is the same overlap either way.
+    """
     scoring_features, _ = strip_explain_memory(user_features)
     # If caller already stripped, scoring_features == user_features
     if not scoring_features and user_features:
@@ -472,13 +562,13 @@ def build_reasons(
                 if director in (overlap.get("directors") or []):
                     shared_kw.extend(overlap.get("keywords") or [])
                     shared_tones.extend(overlap.get("tones") or [])
-            shared_kw = list(dict.fromkeys(shared_kw))[:2]
+            shared_kw = _fresh_first(list(dict.fromkeys(shared_kw)), overused_keywords)[:2]
             shared_tones = list(dict.fromkeys(shared_tones))[:2]
 
             if shared_tones:
                 echo = f"{_tone_phrase(shared_tones)} storytelling"
             elif shared_kw:
-                echo = f"a shared {_pretty_label(shared_kw[0])} theme"
+                echo = f"a shared {_keyword_label(shared_kw[0])} theme"
             else:
                 echo = ""
             cite = _cite(top_anchors, liked_unique)
@@ -486,8 +576,8 @@ def build_reasons(
             # Vary the construction (stable per card) so a slate does not read as a template.
             style = _variant(f"{title_name}|{director}", 3)
             if style == 0:
-                detail = f"same director + {echo}" if echo else "same director"
-                lead = f"Because {cite} ({detail} — {who})"
+                tail = f", and {echo}" if echo else ""
+                lead = f"Because {cite}: same director, {who}{tail}"
             elif style == 1:
                 tail = f", with {echo}" if echo else ""
                 lead = f"{cite[0].upper()}{cite[1:]}, and this is from the same director, {who}{tail}"
@@ -519,9 +609,10 @@ def build_reasons(
             link_bits: list[str] = []
             if best_overlap["tones"]:
                 link_bits.append(_with_article(_tone_phrase(best_overlap["tones"][:2])) + " tone")
-            if best_overlap["keywords"]:
+            cited_kw = _fresh_first(list(best_overlap["keywords"]), overused_keywords)[:2]
+            if cited_kw:
                 link_bits.append(
-                    "themes like " + ", ".join(_pretty_label(k) for k in best_overlap["keywords"][:2])
+                    "themes like " + ", ".join(_keyword_label(k) for k in cited_kw)
                 )
             if best_overlap["cast"]:
                 link_bits.append(f"cast in common ({_who(best_overlap['cast'][0])})")
@@ -542,6 +633,8 @@ def build_reasons(
                     evidence={
                         "liked_titles": liked,
                         "overlap": {k: v for k, v in best_overlap.items() if v},
+                        # The themes the sentence names (a slate rotates them).
+                        "keywords": cited_kw if any("themes like" in b for b in link_bits[:2]) else [],
                     },
                 )
             )
@@ -550,11 +643,14 @@ def build_reasons(
     overlap_feats = top_feature_overlap(scoring_features, title_features, limit=20)
     tone_hits = [k.split(":", 1)[1] for k, s in overlap_feats if s > 0 and k.startswith("tone:")]
     genre_hits = [k.split(":", 1)[1] for k, s in overlap_feats if s > 0 and k.startswith("genre:")]
-    kw_hits = [
-        k.split(":", 1)[1]
-        for k, s in overlap_feats
-        if s > 0 and k.startswith("kw:") and _is_thread_keyword(k.split(":", 1)[1])
-    ]
+    kw_hits = _fresh_first(
+        [
+            k.split(":", 1)[1]
+            for k, s in overlap_feats
+            if s > 0 and k.startswith("kw:") and _is_thread_keyword(k.split(":", 1)[1])
+        ],
+        overused_keywords,
+    )
 
     if tone_hits and genre_hits and len(reasons) < max_reasons and any(
         _TONE_ECHOES_GENRE.get(t) not in set(genre_hits) for t in tone_hits
@@ -584,7 +680,7 @@ def build_reasons(
         ]
         # Only mention a theme that is an actual keyword on both sides.
         if complex_kw:
-            extra = f" with {_pretty_label(complex_kw[0])}"
+            extra = f" with {_keyword_label(complex_kw[0])}"
         msg = f"Strong match on {tone_bit} {genre_bit}{extra}".replace("  ", " ").strip()
         _add(
             Reason(
@@ -677,7 +773,7 @@ def build_reasons(
             if set(a.get("keywords") or []) & set(kw_hits[:4])
             and float(a.get("weight") or 0) >= _ANCHOR_MIN_WEIGHT
         ][:2]
-        themes = ", ".join(_pretty_label(k) for k in kw_hits[:3])
+        themes = ", ".join(_keyword_label(k) for k in kw_hits[:3])
         if theme_titles:
             shared_themes = [
                 k
@@ -689,7 +785,7 @@ def build_reasons(
                     code="similar_themes",
                     message=(
                         f"Shares themes with {_join_names(theme_titles)}: "
-                        + ", ".join(_pretty_label(k) for k in shared_themes)
+                        + ", ".join(_keyword_label(k) for k in shared_themes)
                     ),
                     evidence={"keywords": shared_themes, "liked_titles": theme_titles},
                 )

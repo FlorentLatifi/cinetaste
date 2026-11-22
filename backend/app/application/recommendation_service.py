@@ -44,6 +44,7 @@ from app.infrastructure.db.models.interaction import (
 )
 from app.infrastructure.db.models.taste import TasteProfile
 from app.recommendation.explanations import Reason, strip_explain_memory
+from app.recommendation.mix import read_taste_mix
 from app.recommendation.pipeline import RankedItem, rank_titles
 from app.recommendation.profile import build_profile
 
@@ -233,8 +234,14 @@ class RecommendationService:
         exclude_ids: set[UUID],
         slate_size: int,
         who: str,
+        max_tv: int | None = None,
     ) -> tuple[list[Title], list[RankedItem]]:
-        """Candidates + ranking for one taste profile, stored or not."""
+        """Candidates + ranking for one taste profile, stored or not.
+
+        ``max_tv=0`` keeps TV out of the slate unless films cannot fill it.
+        """
+        # Read before stripping: the language/TV caps follow the stored mix.
+        mix = read_taste_mix(raw_features)
         user_features, explain_memory = strip_explain_memory(raw_features)
 
         with phase("candidates"):
@@ -263,6 +270,8 @@ class RecommendationService:
                     mmr_lambda=self._settings.rec_mmr_lambda,
                     exploration_slots=self._settings.rec_exploration_slots,
                     explain_memory=explain_memory,
+                    taste_mix=mix,
+                    max_tv=max_tv,
                 )
             )
         return titles, ranked
@@ -299,6 +308,8 @@ class RecommendationService:
             exclude_ids={title_id for title_id, _event in reactions},
             slate_size=limit,
             who="guest",
+            # The guest page promises films; series only if films run out.
+            max_tv=0,
         )
         by_id = {t.id: t for t in titles}
         return [(by_id[item.title_id], item) for item in ranked]

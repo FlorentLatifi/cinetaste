@@ -168,6 +168,8 @@ from app.recommendation.explanations import _genre_phrase, _pretty_person  # noq
 BANNED = [
     "mysterys", "science fictions", "crimes", "Dicaprio", "Gordon-levitt", "Mcconaughey",
     "US cinema", "(en)", "language lane", "1950s threads", "action heavy action",
+    # Seen live after the first copy pass (22 Nov 2026).
+    "same director +", "a shared italy theme", "(same director —",
 ]
 
 
@@ -400,3 +402,100 @@ def test_the_genre_fallback_names_tmdbs_main_genre_not_the_first_alphabetically(
     [fallback] = [r for r in reasons if r.code == "genre_fit"]
     assert fallback.evidence["genres"] == ["Thriller", "Action"]
     assert "thriller" in fallback.message.lower() and "action" not in fallback.message.lower()
+
+
+def test_keyword_labels_restore_proper_nouns_only() -> None:
+    from app.recommendation.explanations import _keyword_label
+
+    assert _keyword_label("italy") == "Italy"
+    assert _keyword_label("nasa") == "NASA"
+    assert _keyword_label("new york city") == "New York City"
+    assert _keyword_label("brooklyn, new york city") == "Brooklyn, New York City"
+    assert _keyword_label("ancient rome") == "ancient Rome"
+    assert _keyword_label("world war ii") == "World War II"
+    assert _keyword_label("dystopia") == "dystopia"
+    assert _keyword_label("time travel") == "time travel"
+
+
+def test_director_lead_is_prose_in_every_variant() -> None:
+    anchor = build_anchor_from_title(
+        title_id=uuid4(),
+        name="The Godfather",
+        event_type="rate_3",
+        weight=1.0,
+        feature_snapshot={"person:director:francis ford coppola": 2.2, "kw:italy": 0.9},
+        display_names={"person:director:francis ford coppola": "Francis Ford Coppola"},
+    )
+    for i in range(30):
+        cand = {"person:director:francis ford coppola": 2.2, "kw:italy": 0.9}
+        msg = _reasons(
+            {"person:director:francis ford coppola": 2.0, "kw:italy": 1.0},
+            cand,
+            anchors=[anchor],
+            name=f"Film {i}",
+        )[0].message
+        assert "Francis Ford Coppola" in msg
+        assert " + " not in msg and "(same director" not in msg, msg
+        assert "italy" not in msg, msg  # a place name keeps its capital
+
+
+def test_overused_themes_give_way_to_other_shared_themes() -> None:
+    cand = {"kw:dystopia": 0.9, "kw:artificial intelligence": 0.9, "genre:science fiction": 1.0}
+    user = {"kw:dystopia": 2.0, "kw:artificial intelligence": 1.0}
+    fresh = " ".join(r.message for r in _reasons(user, cand))
+    assert "dystopia" in fresh
+    rotated = build_reasons(
+        user_features=user,
+        explain_memory={"anchors": []},
+        title_name="Candidate",
+        title_extra={"feature_snapshot": cand},
+        title_genres=["Science Fiction"],
+        similarity=0.3,
+        max_reasons=6,
+        overused_keywords=frozenset({"dystopia"}),
+    )
+    themes = next(r for r in rotated if r.code == "similar_themes")
+    # Still true evidence: the other shared theme, without the overused one.
+    assert "artificial intelligence" in themes.message and "dystopia" not in themes.message
+    # When it is the only shared theme, it is still named.
+    only = build_reasons(
+        user_features={"kw:dystopia": 2.0},
+        explain_memory={"anchors": []},
+        title_name="Candidate",
+        title_extra={"feature_snapshot": {"kw:dystopia": 0.9}},
+        title_genres=["Drama"],
+        similarity=0.3,
+        max_reasons=6,
+        overused_keywords=frozenset({"dystopia"}),
+    )
+    assert any("dystopia" in r.message for r in only)
+
+
+def test_a_slate_does_not_explain_everything_with_one_theme() -> None:
+    from app.recommendation.pipeline import THEME_REPEAT_LIMIT, rank_titles
+    from tests.conftest import FakeTitle
+
+    seed_kw = ["heist", "revenge", "spy", "satire", "survival", "time loop", "space", "robot"]
+    titles = [
+        FakeTitle(
+            name=f"Dystopia {i}",
+            genres=["Science Fiction" if i % 2 else "Thriller"],
+            keywords=["dystopia", seed_kw[i % len(seed_kw)]],
+            people=[(f"director {i}", "director")],
+        )
+        for i in range(24)
+    ]
+    user = {"kw:dystopia": 2.0, **{f"kw:{k}": 1.0 for k in seed_kw}}
+    slate = rank_titles(
+        user_vector=list(titles[0].embedding),
+        user_features=user,
+        titles=titles,
+        exclude_ids=set(),
+        slate_size=12,
+        mmr_lambda=0.8,
+        exploration_slots=0,
+    )
+    # Every card shares "dystopia" and one other theme: after a few cards the
+    # other theme is named instead (was 12 of 12 cards).
+    naming = sum(1 for item in slate if any("dystopia" in r.message for r in item.reasons))
+    assert naming <= THEME_REPEAT_LIMIT

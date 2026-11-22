@@ -7,6 +7,7 @@ so the same code runs in the API, in unit tests and in offline evaluation.
 
 from __future__ import annotations
 
+import math
 from collections import Counter
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -21,6 +22,7 @@ from app.recommendation.explanations import (
     build_reasons,
     strip_explain_memory,
 )
+from app.recommendation.mix import TasteMix, read_taste_mix, snapshot_language, snapshot_media
 
 # Re-export for callers/tests that import Reason from pipeline.
 __all__ = [
@@ -40,6 +42,12 @@ __all__ = [
     "fame",
     "genre_cap_for",
     "explain",
+    "language_cap_for",
+    "language_caps_for",
+    "language_of",
+    "media_of",
+    "tv_cap_for",
+    "tv_cap_for_user",
     "gem_boost",
     "low_rating_penalty",
     "mmr_select",
@@ -83,10 +91,12 @@ class RankingWeights:
     low_rating: float = 0.0
     # Quality prior: percentile, within the candidate pool, of a vote-count-
     # shrunk rating (quality_percentiles) — "rated well", not "widely known".
-    # Off by default. Until hidden gems moved to catalog percentiles, the gem
-    # bonus fired on almost every well-rated film and was this prior in
-    # disguise; docs/EVALUATION.md measures what an explicit one recovers.
-    quality: float = 0.0
+    # Until hidden gems moved to catalog percentiles, the gem bonus fired on
+    # almost every well-rated film and was this prior in disguise. 0.05 is the
+    # halfway point measured in docs/EVALUATION.md: it recovers part of the
+    # accuracy the caps cost and stops weak sequels (★6.3) leading a slate,
+    # while keeping most of the novelty. Watch engagement_report after deploy.
+    quality: float = 0.05
 
 
 DEFAULT_WEIGHTS = RankingWeights()
@@ -133,6 +143,55 @@ def collection_cap_for(slate_size: int) -> int:
     """Per-collection cap: 1 for a 20-card slate, 2 for 40, scaled with slate size."""
     return max(MIN_COLLECTION_CAP, round(slate_size * COLLECTION_CAP_RATIO))
 
+
+# Diversity: titles per original language, sized to the person (app.recommendation.mix).
+# A language may take the larger of 40% of the slate and its share of the
+# user's positive taste, so an English-only rater keeps an English slate while
+# one Japanese favourite among Korean, French and Brazilian ones no longer
+# turns into eleven Japanese titles (seen live, November 2026). No language
+# signal at all (cold start) means no language cap.
+LANGUAGE_CAP_RATIO = 0.4
+MIN_LANGUAGE_CAP = 3
+
+
+def language_cap_for(slate_size: int) -> int:
+    """Base per-language cap: 8 for a 20-card slate, scaled with slate size."""
+    return max(MIN_LANGUAGE_CAP, round(slate_size * LANGUAGE_CAP_RATIO))
+
+
+# TV in a slate: at most 20%, or the user's share of positive TV taste if
+# larger. The onboarding deck is films only, so most people have no TV signal
+# and get a films-first slate; someone who rates series gets series.
+TV_CAP_RATIO = 0.2
+
+
+def tv_cap_for(slate_size: int) -> int:
+    """Base TV cap: 4 of 20 cards."""
+    return max(0, round(slate_size * TV_CAP_RATIO))
+
+
+def _share_cap(share: float, slate_size: int) -> int:
+    # The epsilon keeps 0.2 × 20 at 4, not 5, after float error.
+    return math.ceil(share * slate_size - 1e-9)
+
+
+def language_caps_for(
+    mix: TasteMix, slate_size: int, base: int | None = None
+) -> dict[str, int] | None:
+    """Per-language caps for one user, or None when there is no language signal."""
+    if not mix.languages:
+        return None
+    floor = language_cap_for(slate_size) if base is None else base
+    return {lang: max(floor, _share_cap(share, slate_size)) for lang, share in mix.languages.items()}
+
+
+def tv_cap_for_user(mix: TasteMix, slate_size: int) -> int:
+    return max(tv_cap_for(slate_size), _share_cap(mix.media.get("tv", 0.0), slate_size))
+
+
+# How many cards in one slate may name the same shared theme before later
+# cards prefer another one (explanations.build_reasons ``overused_keywords``).
+THEME_REPEAT_LIMIT = 3
 
 # Exploration picks must still be well rated.
 EXPLORATION_MIN_VOTE = 6.8
@@ -401,6 +460,26 @@ def collection_of(title: Any) -> int | None:
         return None
 
 
+def language_of(title: Any) -> str | None:
+    """Original language: the snapshot's ``lang:`` key, else ``original_language``."""
+    snapshot = (getattr(title, "extra", None) or {}).get("feature_snapshot")
+    found = snapshot_language(snapshot)
+    if found:
+        return found
+    raw = getattr(title, "original_language", None)
+    return (str(raw).strip().lower() or None) if raw else None
+
+
+def media_of(title: Any) -> str:
+    """``movie`` or ``tv``: the snapshot's ``media:`` key, else ``media_type``."""
+    snapshot = (getattr(title, "extra", None) or {}).get("feature_snapshot")
+    found = snapshot_media(snapshot)
+    if found:
+        return found
+    raw = getattr(title, "media_type", None)
+    return str(raw).strip().lower() if raw else "movie"
+
+
 def primary_genre(title: Any) -> str:
     """Main genre: the highest-weighted genre in the feature snapshot.
 
@@ -518,23 +597,33 @@ def mmr_select(
 
 
 class _SlateQuotas:
-    """Per-slate caps: titles per primary genre, per director and per collection.
+    """Per-slate caps: primary genre, original language, director, collection, TV.
 
     Shared by core MMR, exploration and backfill, so no stage can undo
     another's diversity. A co-directed film counts for each director; a title
-    outside any collection is never held back by the collection cap.
+    outside any collection, or with no known language, is never held back by
+    that cap. Language caps are per language (sized to the user's taste mix);
+    ``language_caps=None`` switches the language cap off.
     """
 
     __slots__ = (
         "genres",
+        "languages",
         "directors",
         "collections",
+        "media",
         "genre_cap",
+        "language_caps",
+        "language_floor",
+        "language_slack",
         "director_cap",
         "collection_cap",
+        "tv_cap",
         "genre_counts",
+        "language_counts",
         "director_counts",
         "collection_counts",
+        "tv_count",
     )
 
     def __init__(
@@ -546,19 +635,47 @@ class _SlateQuotas:
         genre_cap: int,
         director_cap: int,
         collection_cap: int,
+        languages: list[str | None] | None = None,
+        media: list[str] | None = None,
+        language_caps: dict[str, int] | None = None,
+        language_floor: int = 0,
+        tv_cap: int | None = None,
     ) -> None:
+        n = len(genres)
         self.genres = genres
+        self.languages = languages if languages is not None else [None] * n
         self.directors = directors
         self.collections = collections
+        self.media = media if media is not None else ["movie"] * n
         self.genre_cap = genre_cap
+        self.language_caps = language_caps
+        self.language_floor = language_floor
+        self.language_slack = 0
         self.director_cap = director_cap
         self.collection_cap = collection_cap
+        # None: no TV cap at all.
+        self.tv_cap = tv_cap
         self.genre_counts: Counter[str] = Counter()
+        self.language_counts: Counter[str] = Counter()
         self.director_counts: Counter[str] = Counter()
         self.collection_counts: Counter[int] = Counter()
+        self.tv_count = 0
+
+    def _language_cap(self, language: str) -> int:
+        assert self.language_caps is not None
+        return self.language_caps.get(language, self.language_floor) + self.language_slack
 
     def allows(self, i: int) -> bool:
         if self.genre_counts[self.genres[i]] >= self.genre_cap:
+            return False
+        language = self.languages[i]
+        if (
+            self.language_caps is not None
+            and language is not None
+            and self.language_counts[language] >= self._language_cap(language)
+        ):
+            return False
+        if self.tv_cap is not None and self.media[i] == "tv" and self.tv_count >= self.tv_cap:
             return False
         collection = self.collections[i]
         if collection is not None and self.collection_counts[collection] >= self.collection_cap:
@@ -567,6 +684,11 @@ class _SlateQuotas:
 
     def add(self, i: int) -> None:
         self.genre_counts[self.genres[i]] += 1
+        language = self.languages[i]
+        if language is not None:
+            self.language_counts[language] += 1
+        if self.media[i] == "tv":
+            self.tv_count += 1
         for director in self.directors[i]:
             self.director_counts[director] += 1
         collection = self.collections[i]
@@ -577,16 +699,25 @@ class _SlateQuotas:
         """Raise one cap by one step, in the order the slate can best afford.
 
         Genre first (one more of a genre is the mildest repetition), then
-        director, then collection (another sequel is the most repetitive card
-        there is). A cap at ``slate_size`` can no longer bind, so the next one
-        is only raised once the earlier ones are out of the way.
+        language, then director, then collection (another sequel is the most
+        repetitive card there is), and TV last: a films-first slate only takes
+        more series when nothing else can fill it. A cap at ``slate_size`` can
+        no longer bind, so the next one is only raised once the earlier ones
+        are out of the way.
         """
         if self.genre_cap < slate_size:
             self.genre_cap += 1
+        elif (
+            self.language_caps is not None
+            and self.language_floor + self.language_slack < slate_size
+        ):
+            self.language_slack += 1
         elif self.director_cap < slate_size:
             self.director_cap += 1
-        else:
+        elif self.collection_cap < slate_size or self.tv_cap is None:
             self.collection_cap += 1
+        else:
+            self.tv_cap += 1
 
 
 def _interleave(main: list[int], extra: list[int]) -> list[int]:
@@ -623,6 +754,8 @@ class CandidateChannels:
     genres: list[str]  # primary genre per candidate
     directors: list[tuple[str, ...]]  # per candidate, for the director cap
     collections: list[int | None]  # TMDb collection per candidate, for the franchise cap
+    languages: list[str | None]  # original language per candidate, for the language cap
+    media: list[str]  # "movie" / "tv" per candidate, for the TV cap
     cold: bool  # thin profile: the cold-start popularity prior applies
 
     def subset(self, indices: Sequence[int]) -> CandidateChannels:
@@ -647,6 +780,8 @@ class CandidateChannels:
             genres=[self.genres[i] for i in idx],
             directors=[self.directors[i] for i in idx],
             collections=[self.collections[i] for i in idx],
+            languages=[self.languages[i] for i in idx],
+            media=[self.media[i] for i in idx],
             cold=self.cold,
         )
 
@@ -740,6 +875,8 @@ def candidate_channels(
         genres=[primary_genre(t) for t in pool],
         directors=[directors_of(t) for t in pool],
         collections=[collection_of(t) for t in pool],
+        languages=[language_of(t) for t in pool],
+        media=[media_of(t) for t in pool],
         cold=cold,
     )
 
@@ -787,6 +924,9 @@ def rank_titles(
     max_per_genre: int | None = None,
     max_per_director: int | None = None,
     max_per_collection: int | None = None,
+    max_per_language: int | None = None,
+    max_tv: int | None = None,
+    taste_mix: TasteMix | None = None,
     with_reasons: bool = True,
 ) -> list[RankedItem]:
     """Rank candidate titles for one user.
@@ -794,8 +934,9 @@ def rank_titles(
     1. Score (``candidate_channels`` → ``blend_scores``) = weighted dense
        similarity + sparse overlap − sparse penalty + hidden-gem bonus
        (catalog percentiles) + popularity prior (cold start only).
-    2. MMR over the top of the list, with per-primary-genre, per-director and
-       per-collection (franchise) caps.
+    2. MMR over the top of the list, with per-primary-genre, per-language,
+       per-director, per-collection (franchise) and TV caps. Language and TV
+       caps follow ``taste_mix`` (read from ``user_features`` when not given).
     3. Exploration: well-rated, moderately relevant titles from genres the slate
        doesn't cover yet, spread through the slate, under the same caps.
     4. Backfill by score, still honouring every cap; if the catalog can't fill
@@ -826,6 +967,9 @@ def rank_titles(
         max_per_genre=max_per_genre,
         max_per_director=max_per_director,
         max_per_collection=max_per_collection,
+        max_per_language=max_per_language,
+        max_tv=max_tv,
+        taste_mix=taste_mix,
         with_reasons=with_reasons,
     )
 
@@ -842,9 +986,16 @@ def select_slate(
     max_per_genre: int | None = None,
     max_per_director: int | None = None,
     max_per_collection: int | None = None,
+    max_per_language: int | None = None,
+    max_tv: int | None = None,
+    taste_mix: TasteMix | None = None,
     with_reasons: bool = True,
 ) -> list[RankedItem]:
     """Steps 2–4 of ``rank_titles`` over already-scored candidates.
+
+    ``max_per_language`` overrides the base language cap (each language still
+    gets its taste-mix share if larger); ``max_tv`` replaces the TV cap
+    outright (0 = films only unless nothing else can fill the slate).
 
     Every stage (MMR, exploration, backfill) draws from one set of per-slate
     quotas — genre, director, collection — so no stage can undo another's
@@ -858,6 +1009,7 @@ def select_slate(
         max_per_director = director_cap_for(slate_size)
     if max_per_collection is None:
         max_per_collection = collection_cap_for(slate_size)
+    mix = taste_mix if taste_mix is not None else read_taste_mix(user_features)
     scoring_features, memory_from_features = strip_explain_memory(user_features)
     memory = explain_memory if explain_memory is not None else memory_from_features
 
@@ -869,6 +1021,7 @@ def select_slate(
     genres = channels.genres
     order = [int(i) for i in np.argsort(-scores, kind="stable")]
 
+    language_floor = language_cap_for(slate_size) if max_per_language is None else max_per_language
     quotas = _SlateQuotas(
         genres,
         channels.directors,
@@ -876,6 +1029,11 @@ def select_slate(
         genre_cap=max_per_genre,
         director_cap=max_per_director,
         collection_cap=max_per_collection,
+        languages=channels.languages,
+        media=channels.media,
+        language_caps=language_caps_for(mix, slate_size, base=language_floor),
+        language_floor=language_floor,
+        tv_cap=tv_cap_for_user(mix, slate_size) if max_tv is None else max_tv,
     )
 
     slots = min(max(int(exploration_slots), 0), max(slate_size - 1, 0))
@@ -954,12 +1112,17 @@ def select_slate(
     )
 
     results: list[RankedItem] = []
+    # Themes already named on earlier cards: after a few, later cards name a
+    # different shared theme where they have one (wording only, not scores).
+    cited_themes: Counter[str] = Counter()
     for i in final:
         title = pool[i]
         reasons: list[Reason] = []
         if with_reasons:
             title_name = getattr(title, "name", None)
+            overused = frozenset(k for k, c in cited_themes.items() if c >= THEME_REPEAT_LIMIT)
             reasons = build_reasons(
+                overused_keywords=overused,
                 user_features=scoring_features,
                 explain_memory=memory,
                 title_name=title_name,
@@ -975,6 +1138,9 @@ def select_slate(
                 popularity=float(title.popularity),
                 title_name=title_name,
             )
+            for reason in reasons:
+                if reason.code in {"because_you_liked", "similar_themes"}:
+                    cited_themes.update(reason.evidence.get("keywords") or [])
         results.append(
             RankedItem(
                 title_id=title.id,

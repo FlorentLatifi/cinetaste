@@ -744,3 +744,34 @@ async def test_the_shared_slate_matches_a_request_served_on_its_own(
     await reset_cache_for_tests()
     alone = await client.post(url, json=body)
     assert {r.text for r in burst} == {alone.text}
+
+
+async def test_guest_slate_is_films_only_while_films_can_fill_it(
+    client: AsyncClient, db_session: AsyncSession, api_prefix: str
+) -> None:
+    """The guest page promises films. Live (Nov 2026) a guest slate held two anime
+    TV series; series now come in only if there are not enough films."""
+    titles = await seed_catalog(db_session)
+    series = titles[12:20]
+    for title in series:
+        title.media_type = "tv"
+        snapshot = dict(title.extra["feature_snapshot"])
+        snapshot.pop("media:movie", None)
+        snapshot["media:tv"] = 0.6
+        title.extra = {**title.extra, "feature_snapshot": snapshot}
+    await db_session.commit()
+
+    reactions = [
+        {"title_id": str(titles[0].id), "action": "rate_4"},
+        {"title_id": str(titles[6].id), "action": "rate_3"},
+        {"title_id": str(titles[1].id), "action": "rate_1"},
+    ]
+    res = await client.post(
+        f"{api_prefix}/guest/recommendations", json={"reactions": reactions, "limit": 8}
+    )
+    assert res.status_code == 200, res.text
+    items = res.json()["items"]
+    assert len(items) == 8
+    assert all(i["title"]["media_type"] == "movie" for i in items), [
+        (i["title"]["name"], i["title"]["media_type"]) for i in items
+    ]
