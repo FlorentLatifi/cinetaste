@@ -61,6 +61,26 @@ export function setEmailUnverifiedHandler(handler: EmailUnverifiedHandler | null
  */
 let refreshInFlight: Promise<authApi.TokenResponse | null> | null = null;
 
+/**
+ * Did the server actually refuse this refresh token, as opposed to failing to
+ * answer? Only a refusal means the session is over. A 429, a 5xx, a timeout or
+ * a dropped connection says nothing about the session, and treating them as a
+ * sign-out logged people out mid-task: rating a dozen titles in a minute was
+ * enough to hit the refresh rate limit and land on /login.
+ */
+function refreshWasRefused(err: unknown): boolean {
+  if (!(err instanceof ApiError)) return false;
+  return err.status >= 400 && err.status < 500 && err.status !== 408 && err.status !== 429;
+}
+
+/**
+ * Exchange the refresh cookie for a new access token.
+ *
+ * Resolves to the new tokens, or null when the server refused the refresh
+ * (no session). Rejects when the server could not be asked — network, timeout,
+ * rate limit, 5xx — and leaves the current session alone, because nothing is
+ * known about it yet.
+ */
 export async function tryRefreshSession(): Promise<authApi.TokenResponse | null> {
   if (refreshInFlight) return refreshInFlight;
 
@@ -71,7 +91,8 @@ export async function tryRefreshSession(): Promise<authApi.TokenResponse | null>
       const tokens = await authApi.refresh();
       setAccessToken(tokens.access_token);
       return tokens;
-    } catch {
+    } catch (err) {
+      if (!refreshWasRefused(err)) throw err;
       // A sign-in that finished while this was in flight holds a newer token;
       // only a token this refresh was meant to replace is cleared.
       if (getAccessToken() === before) setAccessToken(null);
@@ -98,7 +119,12 @@ export async function apiFetch<T>(
   if (!headers.has("Content-Type") && options.body) {
     headers.set("Content-Type", "application/json");
   }
-  const token = accessToken ?? getAccessToken();
+  // The store holds the newest token: a silent refresh updates it, but not the
+  // copy pages got from AuthContext at sign-in. Preferring the caller's copy
+  // sent an expired token on every request once it was 15 minutes old, so each
+  // call became 401 → refresh → retry, and the refreshes alone ran into the
+  // auth rate limit. The argument is only a fallback for before the store is set.
+  const token = getAccessToken() ?? accessToken;
   if (token) {
     headers.set("Authorization", `Bearer ${token}`);
   }

@@ -147,9 +147,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           forgetSession();
         }
       } catch {
-        // tryRefreshSession swallows its own errors, so reaching here means
-        // something unexpected. Treat it as "could not tell" rather than
-        // "signed out", because the difference matters to what we show.
+        // tryRefreshSession rejects when the server could not be asked (timeout,
+        // network, rate limit, 5xx). That is "could not tell", not "signed
+        // out", and the difference matters to what we show.
         if (!cancelled) setBootstrapFailed(true);
       } finally {
         if (!cancelled) {
