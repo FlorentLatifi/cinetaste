@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -161,8 +161,17 @@ class TasteService:
         policy = get_policy(event_type)
         event_weight = policy.weight if weight is None else weight
 
-        # Lock the row (when it exists) so two writes for the same title are
-        # serialised: the second one then reads the first one's event below.
+        # Make sure the row exists, then lock it, so two writes for the same
+        # title are serialised: the second one then reads the first one's event
+        # below. Without the insert, two *first* actions on a title (two tabs)
+        # both found no row to lock and both inserted one — the second hit
+        # uq_user_title_state and returned a 500. ON CONFLICT DO NOTHING waits
+        # for the other transaction instead and then leaves its row alone.
+        await self._session.execute(
+            pg_insert(UserTitleState)
+            .values(id=uuid4(), user_id=user_id, title_id=title_id, state="none")
+            .on_conflict_do_nothing(index_elements=["user_id", "title_id"])
+        )
         state = await self._session.scalar(
             select(UserTitleState)
             .where(
@@ -170,6 +179,7 @@ class TasteService:
                 UserTitleState.title_id == title_id,
             )
             .with_for_update()
+            .execution_options(populate_existing=True)
         )
         # The durable state is derived from this title's whole event log, not
         # from the new event alone: "rate_4 → watchlist" must stay a rating.

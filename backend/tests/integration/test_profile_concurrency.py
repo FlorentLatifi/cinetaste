@@ -234,3 +234,52 @@ async def test_import_racing_a_first_rating_both_commit(
         profile = await session.get(TasteProfile, user.id)
         assert profile.version == expected_version
         assert (IMPORT_OVERLAY_KEY in profile.features) is has_overlay
+
+
+async def test_two_first_actions_on_one_title_both_commit(db_session: AsyncSession) -> None:
+    """Two tabs act on a title neither has touched before, at the same moment.
+
+    Both used to find no user_title_state row to lock, both inserted one, and
+    the second failed on uq_user_title_state (a 500). Now the second waits for
+    the first, then derives the state from both events.
+    """
+    from app.infrastructure.db.models.interaction import UserTitleState
+
+    user = await _user(db_session)
+    title = (await seed_catalog(db_session, count=6))[0]
+    await db_session.commit()
+
+    async with async_session_factory() as first:
+        await TasteService(first).record_interaction(
+            user_id=user.id, title_id=title.id, event_type="watchlist", recompute=False
+        )
+        holder = await first.scalar(text("SELECT pg_backend_pid()"))
+
+        async def second_tab() -> None:
+            async with async_session_factory() as second:
+                await TasteService(second).record_interaction(
+                    user_id=user.id, title_id=title.id, event_type="rate_4", recompute=False
+                )
+                await second.commit()
+
+        waiter = asyncio.create_task(second_tab())
+        await _wait_until_blocked_by(holder, waiter)
+        await first.commit()
+        await waiter  # raised IntegrityError before the fix
+
+    async with async_session_factory() as check:
+        rows = (
+            await check.scalars(
+                select(UserTitleState).where(
+                    UserTitleState.user_id == user.id, UserTitleState.title_id == title.id
+                )
+            )
+        ).all()
+        events = await check.scalar(
+            select(func.count())
+            .select_from(InteractionEvent)
+            .where(InteractionEvent.user_id == user.id, InteractionEvent.title_id == title.id)
+        )
+    assert len(rows) == 1
+    assert rows[0].state == "like"  # the rating outranks the earlier watchlist
+    assert events == 2
