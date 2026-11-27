@@ -1,10 +1,10 @@
 # Web
-fastapi==0.163.1
+fastapi==0.165.0
 uvicorn[standard]==0.54.0
 python-multipart==0.0.34
 
 # Settings & validation
-pydantic==2.14.3
+pydantic==2.14.4
 pydantic-settings==2.16.3
 email-validator==2.4.0
 
@@ -16,7 +16,7 @@ pgvector==0.5.1
 numpy==2.5.5
 
 # Cache
-redis==8.1.0
+redis==8.2.0
 
 # Security
 bcrypt==5.0.0
